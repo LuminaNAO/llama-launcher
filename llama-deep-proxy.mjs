@@ -481,8 +481,10 @@ const server = createServer(async (clientReq, clientRes) => {
 
   const isMessages = clientReq.method === "POST" && clientReq.url.startsWith("/v1/messages");
 
-  // ── Buffered path: /v1/messages with slot mgmt ──────────────────────────
-  if (isMessages && slotCacheDir) {
+  // ── Buffered path: /v1/messages ─────────────────────────────────────────
+  // Always buffer messages so request size/session summaries are visible.
+  // Slot save/restore still only runs when --slot-cache-dir is enabled.
+  if (isMessages) {
     inFlightRequests++;
     let counted = true;
     const finalize = () => { if (counted) { counted = false; inFlightRequests--; } };
@@ -510,7 +512,7 @@ const server = createServer(async (clientReq, clientRes) => {
         `REQUEST ${tag} body_bytes=${bodyBuf.length} (${formatBytes(bodyBuf.length)}) content_length=${clientReq.headers["content-length"] ?? "chunked"} session=${sessionId ?? "none"}\n`,
       );
       try {
-        if (sessionId) await ensureSlotLoaded(sessionId);
+        if (sessionId && slotCacheDir) await ensureSlotLoaded(sessionId);
       } catch (e) {
         log.write(`\n!!! SLOT mgmt error ${tag}: ${e.message}\n`);
       }
