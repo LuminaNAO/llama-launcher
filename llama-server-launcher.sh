@@ -1,9 +1,14 @@
 #!/bin/bash
 
 # Llama Server Model Launcher
-# Lists models in /usr/local/share/llama.cpp/models/ and lets you select one
+# Lists models in $LLAMACPP_MODELS_DIR and lets you select one
+# Override paths via environment variables if needed:
+#   export LLAMACPP_MODELS_DIR=/path/to/models
+#   export LLAMACPP_SERVER_PATH=/path/to/llama-server
 
-MODELS_DIR="/usr/local/share/llama.cpp/models"
+# Default paths (can be overridden via environment variables)
+MODELS_DIR="${LLAMACPP_MODELS_DIR:-/usr/local/share/llama.cpp/models}"
+LLAMACPP_SERVER_PATH="${LLAMACPP_SERVER_PATH:-$(dirname "$(readlink -f "$0")")/../../llama.cpp/build/bin/llama-server}"
 
 echo "🔍 Scanning models in $MODELS_DIR..."
 echo ""
@@ -44,7 +49,7 @@ echo "🚀 Starting llama-server with model: $selected_model"
 echo ""
 
 # Run llama-server with the selected model
-HSA_XNACK=1 /path/to/llama.cpp/build/bin/llama-server \
+HSA_XNACK=1 "$LLAMACPP_SERVER_PATH" \
   -m "$model_path" \
   -ngl 99 \
   -c 122144 \
@@ -61,4 +66,4 @@ HSA_XNACK=1 /path/to/llama.cpp/build/bin/llama-server \
   --n-gpu-layers 99 \
   --api-key ollama-local \
   --swa-full \
-  --no-context-shift >> llama.log
+  --no-context-shift &> $HOME/llama.log
