@@ -1,0 +1,11 @@
+[1;33mPregenerating 3 payloads...[0m
+  65000: 183K
+  80000: 226K
+  95000: 268K
+[1;33mPayloads ready. Firing tests...[0m
+
+[1;33m~65K:     [0m [1;33mPARTIAL[0m 1/3 tools [get_weather] pt=31593 ct=90 76787ms
+[1;33m~80K:     [0m [1;33mPARTIAL[0m 1/3 tools [get_weather] pt=38793 ct=86 123189ms
+[1;33m~95K:     [0m [1;33mPARTIAL[0m 1/3 tools [get_weather] pt=45993 ct=76 136784ms
+
+[1;33mDone. Failures: 0[0m

@@ -1,0 +1,21 @@
+[1;33mCode-Editing Quality Test[0m
+[1;33mServer: http://localhost:40801[0m
+
+  T1: Fix null bug in getUser: 2K payload
+  T2: Add getByEmail method: 2K payload
+  T3: Refactor callbacks to async/await: 2K payload
+  T4: Rename usr to userRecords: 1K payload
+  T5: Add TypeScript types: 2K payload
+  T6: Fix null bug (20K ctx): 40K payload
+  T7: Refactor async/await (20K ctx): 40K payload
+  T8: Add TypeScript types (20K ctx): 40K payload
+  T9: Fix null bug (50K ctx): 98K payload
+  T10: Refactor async/await (50K ctx): 98K payload
+  T11: Rename variables (50K ctx): 98K payload
+  T12: Fix null bug (80K ctx): 156K payload
+  T13: Add method (80K ctx): 156K payload
+  T14: Add TypeScript types (80K ctx): 156K payload
+TOTAL_TESTS=14
+
+[1;33m=== Baseline (no context padding) ===[0m
+[0;36mT1: Fix null bug in getUser                  [0m 

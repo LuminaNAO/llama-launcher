@@ -1,0 +1,15 @@
+[1;33mPregenerating 6 payloads...[0m
+  0: 1K
+  2000: 6K
+  8000: 23K
+  20000: 57K
+  40000: 113K
+  55000: 155K
+[1;33mPayloads ready. Firing tests...[0m
+
+[1;33m~baseline:[0m [1;33mPARTIAL[0m 1/3 tools [get_weather] pt=393 ct=86 13833ms
+[1;33m~2K:      [0m [1;33mPARTIAL[0m 1/3 tools [get_weather] pt=1353 ct=82 11060ms
+[1;33m~8K:      [0m [1;33mPARTIAL[0m 1/3 tools [get_weather] pt=4233 ct=92 27139ms
+[1;33m~20K:     [0m [1;33mPARTIAL[0m 1/3 tools [get_weather] pt=9993 ct=93 54440ms
+[1;33m~40K:     [0m [1;33mPARTIAL[0m 1/3 tools [get_weather] pt=19593 ct=92 108207ms
+[1;33m~55K:     [0m 

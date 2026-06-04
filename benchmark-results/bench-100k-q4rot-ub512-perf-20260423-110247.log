@@ -1,0 +1,7 @@
+=== Benchmark: 100k-q4rot-ub512-perf ===
+Results: /path/to/code/llama-launcher/benchmark-results/bench-100k-q4rot-ub512-perf-20260423-110247.jsonl
+
+Model: MiniMax-M2.7-UD-IQ4_XS-00001-of-00004.gguf
+
+── Short context (prompt < 100 tokens) ──
+  short-gen50...            

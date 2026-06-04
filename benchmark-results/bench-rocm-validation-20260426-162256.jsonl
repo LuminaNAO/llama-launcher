@@ -1,0 +1,2 @@
+{"type": "header", "label": "rocm-validation", "model": "MiniMax-M2.7-UD-IQ4_XS-00001-of-00004.gguf", "timestamp": "2026-04-26T16:22:56+08:00"}
+{"test": "short-gen50", "target_ctx": 0, "actual_prompt_tokens": 51, "gen_tokens": 50, "prompt_tok_s": 67.59, "gen_tok_s": 24.59, "prompt_ms": 755, "gen_ms": 2033}
