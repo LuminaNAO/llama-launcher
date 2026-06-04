@@ -5,7 +5,9 @@
 // cross-session KV persistence (single-slot only — assumes parallel=1).
 //
 // Usage:
-//   node llama-deep-proxy.mjs <listen-port> <backend-port> [log-file] [--slot-cache-dir <dir>] [--api-key <key>]
+//   node llama-deep-proxy.mjs <listen-port> <backend-port> [log-file]
+//      [--slot-cache-dir <dir>] [--api-key <key>]
+//      [--min-free-gb N] [--max-total-slots-gb N]
 //
 // Behavior:
 //   - All traffic forwarded to backend; bodies tee'd to log-file.
@@ -13,6 +15,11 @@
 //     sha256(system + first-user-msg)[0:16] = sessionId, calls
 //     /slots/0?action=save then /slots/0?action=restore on the backend
 //     when sessionId differs from the currently-loaded slot.
+//   - Before each slot save, prunes the slot cache to keep (a) free disk
+//     space above --min-free-gb (default 100) and (b) total bytes across
+//     all sibling model slot dirs below --max-total-slots-gb (default 200).
+//     Oldest .bin (with its .bin.ckpt sidecar) is evicted first; the
+//     session about to be saved is excluded from candidates.
 //   - Concurrent /v1/messages are serialized through a Promise mutex on the
 //     slot-mgmt critical section. The actual request forwarding is not
 //     serialized — backend handles that via its own slot scheduling.
@@ -23,7 +30,8 @@
 //     client doesn't crash the proxy.
 
 import { createServer, request as httpRequest } from "node:http";
-import { createWriteStream, mkdirSync, existsSync } from "node:fs";
+import { createWriteStream, mkdirSync, existsSync, statSync, statfsSync, unlinkSync, readdirSync } from "node:fs";
+import { dirname, basename, join } from "node:path";
 import { createHash } from "node:crypto";
 
 // Defensive: re-create slot cache dir if it was wiped at runtime.
@@ -45,13 +53,17 @@ const logFile = args[2] && !args[2].startsWith("--") ? args[2] : `${process.env.
 
 let slotCacheDir = null;
 let apiKey = null;
+let minFreeGB = 100;
+let maxTotalSlotsGB = 200;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--slot-cache-dir") slotCacheDir = args[i + 1];
   if (args[i] === "--api-key") apiKey = args[i + 1];
+  if (args[i] === "--min-free-gb") minFreeGB = Number(args[i + 1]);
+  if (args[i] === "--max-total-slots-gb") maxTotalSlotsGB = Number(args[i + 1]);
 }
 
 if (!listenPort || !backendPort) {
-  console.error("Usage: llama-deep-proxy.mjs <listen-port> <backend-port> [log-file] [--slot-cache-dir <dir>] [--api-key <key>]");
+  console.error("Usage: llama-deep-proxy.mjs <listen-port> <backend-port> [log-file] [--slot-cache-dir <dir>] [--api-key <key>] [--min-free-gb N] [--max-total-slots-gb N]");
   process.exit(1);
 }
 
@@ -67,6 +79,14 @@ const SEP = "\n========================================\n";
 let currentSession = null;        // sha256[:16] of (system + first user msg), or null
 let slotMutex = Promise.resolve(); // Promise chain — await prior op before starting next
 let inFlightRequests = 0;          // for graceful shutdown drain
+// Tracks whether the slot is believed to hold real KV content. Set true after
+// a successful restore (n_restored > 0) or a 200 response from /v1/messages
+// (PP filled the slot). Set false after a failed restore — llama-server's
+// SLOT_RESTORE clears slot->prompt.tokens on nread==0/4xx (see
+// server-context.cpp ~L2181), so saving in that state writes a zero-token
+// file that overwrites a previously-good cache. The save gate below uses
+// this to refuse such self-destructive saves.
+let slotHasContent = false;
 
 // Slot ops to BOTH the deep log (for grep/audit) AND console (so the
 // launcher's stdout shows them even when --no-deep-log routes the deep log
@@ -83,6 +103,95 @@ function slotLog(line, color = null) {
   log.write(line);
   const colored = color ? `${color}${line.replace(/\n$/, "")}${C_RESET}\n` : line;
   process.stdout.write(colored.startsWith("\n") ? colored : "\n" + colored);
+}
+
+// ── Slot cache disk-quota enforcement ──────────────────────────────────────
+// Called immediately before every slot save. Scope is "one dir up" from the
+// model-specific slotCacheDir, so sibling model dirs share the budget.
+// Enforces two limits — evicts oldest .bin (with its .ckpt sidecar) one at a
+// time until BOTH pass:
+//   1. free disk space on the slot filesystem >= minFreeGB
+//   2. total bytes across all sibling slot dirs <= maxTotalSlotsGB
+// The session about to be saved is excluded from eviction candidates so the
+// proxy can't kill its own destination right before writing.
+function diskFreeGB(p) {
+  try {
+    const s = statfsSync(p);
+    return Number(s.bavail) * Number(s.bsize) / (1024 ** 3);
+  } catch {
+    return Infinity;  // can't measure → conservatively skip the free-disk gate
+  }
+}
+
+function totalSlotsBytes(rootDir) {
+  let total = 0;
+  let entries;
+  try { entries = readdirSync(rootDir, { withFileTypes: true }); } catch { return 0; }
+  for (const sub of entries) {
+    if (!sub.isDirectory()) continue;
+    const subPath = join(rootDir, sub.name);
+    let files;
+    try { files = readdirSync(subPath); } catch { continue; }
+    for (const f of files) {
+      try { total += statSync(join(subPath, f)).size; } catch {}
+    }
+  }
+  return total;
+}
+
+function findOldestBin(rootDir, excludeBasename) {
+  let oldest = null;
+  let entries;
+  try { entries = readdirSync(rootDir, { withFileTypes: true }); } catch { return null; }
+  for (const sub of entries) {
+    if (!sub.isDirectory()) continue;
+    const subPath = join(rootDir, sub.name);
+    let files;
+    try { files = readdirSync(subPath); } catch { continue; }
+    for (const f of files) {
+      if (!f.endsWith(".bin")) continue;
+      if (f === excludeBasename) continue;
+      const full = join(subPath, f);
+      let m;
+      try { m = statSync(full).mtimeMs; } catch { continue; }
+      if (!oldest || m < oldest.mtime) oldest = { path: full, mtime: m };
+    }
+  }
+  return oldest;
+}
+
+function pruneSlotCacheIfNeeded(currentSlotFilename) {
+  if (!slotCacheDir) return;
+  const slotRoot = dirname(slotCacheDir.replace(/\/$/, ""));
+  const excludeBasename = basename(currentSlotFilename);
+  let evicted = 0;
+  const maxIters = 1000;  // safety: never loop forever
+  for (let iter = 0; iter < maxIters; iter++) {
+    const free = diskFreeGB(slotRoot);
+    const totalGB = totalSlotsBytes(slotRoot) / (1024 ** 3);
+    const lowFree = free < minFreeGB;
+    const highTotal = totalGB > maxTotalSlotsGB;
+    if (!lowFree && !highTotal) break;
+    const victim = findOldestBin(slotRoot, excludeBasename);
+    if (!victim) {
+      slotLog(`pruneSlotCache: out of candidates (free=${free.toFixed(1)} GB, total=${totalGB.toFixed(1)} GB; want free>=${minFreeGB}, total<=${maxTotalSlotsGB})\n`, C_YELLOW);
+      break;
+    }
+    const ckpt = victim.path + ".ckpt";
+    let bytesFreed = 0;
+    try { bytesFreed += statSync(victim.path).size; } catch {}
+    try { bytesFreed += statSync(ckpt).size; } catch {}
+    try { unlinkSync(victim.path); } catch {}
+    try { unlinkSync(ckpt); } catch {}
+    evicted++;
+    const reason = lowFree ? `free<${minFreeGB} GB` : `total>${maxTotalSlotsGB} GB`;
+    slotLog(`pruneSlotCache: evicted ${victim.path} (+ .ckpt) — ${(bytesFreed / (1024 ** 3)).toFixed(2)} GB freed (reason: ${reason})\n`, C_YELLOW);
+  }
+  if (evicted > 0) {
+    const free = diskFreeGB(slotRoot);
+    const totalGB = totalSlotsBytes(slotRoot) / (1024 ** 3);
+    slotLog(`pruneSlotCache: ${evicted} file(s) evicted, free=${free.toFixed(1)} GB total=${totalGB.toFixed(1)} GB\n`, C_DIM);
+  }
 }
 
 // Color a slot-action status line based on the parsed status code.
@@ -183,14 +292,22 @@ async function ensureSlotLoaded(newSessionId) {
   try {
     if (newSessionId === currentSession) return;
     if (currentSession) {
-      ensureSlotCacheDir();
-      slotLog(`\n--- SLOT save: ${currentSession}.bin\n`, C_DIM);
-      const r = await callSlotAction("save", `${currentSession}.bin`);
-      const save = slotSaveSucceeded(r);
-      slotLog(
-        `--- SLOT save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten}\n`,
-        save.ok ? C_CYAN : C_RED,
-      );
+      if (!slotHasContent) {
+        // Skip: slot is known-empty (previous restore failed, no /v1/messages
+        // has populated it since). Saving here would overwrite the on-disk
+        // file with a zero-token payload, locking in the corruption.
+        slotLog(`\n--- SLOT save SKIPPED (slot empty): ${currentSession}.bin\n`, C_YELLOW);
+      } else {
+        ensureSlotCacheDir();
+        pruneSlotCacheIfNeeded(`${currentSession}.bin`);
+        slotLog(`\n--- SLOT save: ${currentSession}.bin\n`, C_DIM);
+        const r = await callSlotAction("save", `${currentSession}.bin`);
+        const save = slotSaveSucceeded(r);
+        slotLog(
+          `--- SLOT save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten}\n`,
+          save.ok ? C_CYAN : C_RED,
+        );
+      }
     }
     slotLog(`\n--- SLOT restore: ${newSessionId}.bin\n`, C_DIM);
     const r = await callSlotAction("restore", `${newSessionId}.bin`);
@@ -200,6 +317,11 @@ async function ensureSlotLoaded(newSessionId) {
       restore.ok ? C_GREEN : colorForStatus("restore", r.status),
     );
     // Restore returning 4xx/5xx (e.g., file not found) is normal for new sessions.
+    // A 200 with n_restored=0 means the file exists but has 0 stored tokens
+    // (previously corrupted) — server-side this clears slot->prompt.tokens.
+    // Either way, the slot is now empty; gate future saves until a request
+    // refills it.
+    slotHasContent = restore.ok;
     currentSession = newSessionId;
   } finally {
     release();
@@ -214,7 +336,12 @@ async function saveCurrentSlot(reason, timeoutMs = 0) {
   slotMutex = new Promise((r) => { release = r; });
   await prev;
   try {
+    if (!slotHasContent) {
+      slotLog(`\n--- SLOT save (${reason}) SKIPPED (slot empty): ${currentSession}.bin\n`, C_YELLOW);
+      return;
+    }
     ensureSlotCacheDir();
+    pruneSlotCacheIfNeeded(`${currentSession}.bin`);
     slotLog(`\n--- SLOT save (${reason}): ${currentSession}.bin\n`, C_DIM);
     const r = await callSlotAction("save", `${currentSession}.bin`, timeoutMs);
     const save = slotSaveSucceeded(r);
@@ -357,6 +484,14 @@ const server = createServer(async (clientReq, clientRes) => {
         method: clientReq.method,
         headers: fwdHeaders,
       }, (proxyRes) => {
+        // A 200 from /v1/messages means the backend got at least to prompt
+        // processing — slot is now populated with this session's tokens, so
+        // future saves on a session switch can persist real content. This
+        // also recovers from a stuck "known-empty" state caused by an earlier
+        // failed/zero-token restore.
+        if (proxyRes.statusCode === 200) {
+          slotHasContent = true;
+        }
         pipeResponse(tag, proxyRes, clientRes, finalize);
       });
 
