@@ -1,0 +1,15 @@
+# Logs
+llama.log
+
+# Cache
+.cache/
+temp/
+
+# Build artifacts
+build/
+*.o
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db
