@@ -5,6 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 TARGET="$SCRIPT_DIR/llama-server-launcher.sh"
 CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
 DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
+AUTHOR_BEST_PICKS_FILE="$SCRIPT_DIR/model-configs/author-best-picks.sh"
+
+if [[ -f "$AUTHOR_BEST_PICKS_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$AUTHOR_BEST_PICKS_FILE"
+fi
 
 if [[ ! -x "$TARGET" ]]; then
     echo "ERROR: Launcher not found or not executable: $TARGET"
@@ -298,6 +304,41 @@ setup_environment() {
     echo ""
 }
 
+model_file_exists_under() {
+    local models_dir="$1"
+    local filename="$2"
+    [[ -d "$models_dir" ]] || return 1
+    find "$models_dir" -maxdepth 3 -type f -name "$filename" -print -quit 2>/dev/null | grep -q .
+}
+
+offer_author_best_pick() {
+    local models_dir="${LLAMACPP_MODELS_DIR:-}"
+    [[ -n "$models_dir" ]] || return 0
+
+    echo "Author best pick:"
+    echo "  $AUTHOR_BEST_PICK_NAME"
+    echo "  Model: $AUTHOR_BEST_PICK_GGUF"
+    echo "  Tune:  model-configs/$AUTHOR_BEST_PICK_TUNE"
+    echo ""
+
+    if model_file_exists_under "$models_dir" "$AUTHOR_BEST_PICK_GGUF"; then
+        echo "Best-pick model already exists under:"
+        echo "  $models_dir"
+        echo ""
+        return 0
+    fi
+
+    echo "The best-pick GGUF was not found under:"
+    echo "  $models_dir"
+    if prompt_yes_no "Download it now with download-model.sh?" y; then
+        "$SCRIPT_DIR/download-model.sh" --filename "$AUTHOR_BEST_PICK_GGUF" "$AUTHOR_BEST_PICK_REPO"
+    else
+        echo "Skipping model download. You can run later:"
+        echo "  $SCRIPT_DIR/download-model.sh --filename $AUTHOR_BEST_PICK_GGUF $AUTHOR_BEST_PICK_REPO"
+    fi
+    echo ""
+}
+
 detect_shell_name() {
     local shell_name=""
     if [[ -n "${SHELL:-}" ]]; then
@@ -379,6 +420,7 @@ install_shell_binding() {
 }
 
 setup_environment
+offer_author_best_pick
 
 if [[ "$(id -u)" -eq 0 ]]; then
     LINK_DIR="/usr/local/bin"

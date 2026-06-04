@@ -3,10 +3,12 @@
 #
 # Usage:
 #   ./download-model.sh <huggingface-url-or-repo>
+#   ./download-model.sh --filename <gguf-name> <huggingface-url-or-repo>
 #
 # Examples:
 #   ./download-model.sh https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF
 #   ./download-model.sh unsloth/gemma-4-26B-A4B-it-GGUF
+#   ./download-model.sh --filename Qwen3.6-27B-UD-Q4_K_XL.gguf unsloth/Qwen3.6-27B-MTP-GGUF
 #
 # Features:
 #   - Lists available quants with sizes
@@ -56,13 +58,48 @@ config_set() {
 }
 
 # ── Parse input ──────────────────────────────────────────────────────────────
+REQUESTED_FILENAME=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --filename|--file)
+            REQUESTED_FILENAME="${2:-}"
+            if [[ -z "$REQUESTED_FILENAME" ]]; then
+                echo "ERROR: --filename requires a GGUF filename"
+                exit 1
+            fi
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: download-model.sh [--filename <gguf-name>] <huggingface-url-or-repo>"
+            echo ""
+            echo "Examples:"
+            echo "  ./download-model.sh https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF"
+            echo "  ./download-model.sh --filename Qwen3.6-27B-UD-Q4_K_XL.gguf unsloth/Qwen3.6-27B-MTP-GGUF"
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            echo "ERROR: Unknown option: $1"
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
 REPO_INPUT="${1:-}"
 if [ -z "$REPO_INPUT" ]; then
-    echo "Usage: download-model.sh <huggingface-url-or-repo>"
+    echo "Usage: download-model.sh [--filename <gguf-name>] <huggingface-url-or-repo>"
     echo ""
     echo "Examples:"
     echo "  ./download-model.sh https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF"
     echo "  ./download-model.sh unsloth/gemma-4-26B-A4B-it-GGUF"
+    echo "  ./download-model.sh --filename Qwen3.6-27B-UD-Q4_K_XL.gguf unsloth/Qwen3.6-27B-MTP-GGUF"
     exit 1
 fi
 
@@ -303,7 +340,26 @@ fi
 echo ""
 
 # ── Select quant(s) ─────────────────────────────────────────────────────────
-read -rp "Select quant(s) [1-${ITEM_COUNT}, or comma-separated]: " selection
+selection=""
+if [[ -n "$REQUESTED_FILENAME" ]]; then
+    selection="$(python3 -c "
+import json, sys
+d = json.load(open('$PARSE_FILE'))
+want = sys.argv[1]
+for i, item in enumerate(d['items']):
+    labels = [item['label']] + [f['path'].split('/')[-1] for f in item['files']]
+    if want in labels:
+        print(i + 1)
+        break
+" "$REQUESTED_FILENAME")"
+    if [[ -z "$selection" ]]; then
+        echo "ERROR: Requested GGUF not found in repo: $REQUESTED_FILENAME"
+        exit 1
+    fi
+    echo "Selected requested GGUF: $REQUESTED_FILENAME"
+else
+    read -rp "Select quant(s) [1-${ITEM_COUNT}, or comma-separated]: " selection
+fi
 
 selected_indices=()
 IFS=',' read -ra sel_parts <<< "$selection"

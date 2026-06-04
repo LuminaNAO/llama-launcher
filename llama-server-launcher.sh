@@ -136,6 +136,12 @@ CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
 LLAMA_LAUNCHER_DIR="$SCRIPT_DIR"
 LAUNCH_HISTORY="$SCRIPT_DIR/.launch-history"
 DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
+AUTHOR_BEST_PICKS_FILE="$SCRIPT_DIR/model-configs/author-best-picks.sh"
+
+if [[ -f "$AUTHOR_BEST_PICKS_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$AUTHOR_BEST_PICKS_FILE"
+fi
 
 # Load installer defaults early so non-interactive launches also see them.
 # Explicit environment variables still win over the repo-local config.
@@ -650,14 +656,30 @@ else
     while true; do
         # Auto-suggest: pick the tune whose name contains the closest RAM tier
         tune_suggested=-1
-        for i in "${!tune_names[@]}"; do
-            name="${tune_names[$i]}"
-            if [ "$TOTAL_RAM_GB_DETECT" -ge 112 ] && [[ "$name" == *128gb* ]]; then
-                tune_suggested=$i
-            elif [ "$TOTAL_RAM_GB_DETECT" -ge 48 ] && [ "$TOTAL_RAM_GB_DETECT" -lt 112 ] && [[ "$name" == *64gb* ]]; then
-                tune_suggested=$i
+        if [ "$show_all_tunes" -eq 0 ] && [ -n "${AUTHOR_BEST_PICK_TUNE:-}" ]; then
+            for i in "${!tune_configs[@]}"; do
+                if [ "$(basename "${tune_configs[$i]}")" = "$AUTHOR_BEST_PICK_TUNE" ]; then
+                    tune_suggested=$i
+                    break
+                fi
+            done
+        fi
+        if [ "$tune_suggested" -lt 0 ]; then
+            for i in "${!tune_names[@]}"; do
+                name="${tune_names[$i]}"
+                if [ "$TOTAL_RAM_GB_DETECT" -ge 112 ] && [[ "$name" == *128gb* ]]; then
+                    tune_suggested=$i
+                elif [ "$TOTAL_RAM_GB_DETECT" -ge 48 ] && [ "$TOTAL_RAM_GB_DETECT" -lt 112 ] && [[ "$name" == *64gb* ]]; then
+                    tune_suggested=$i
+                fi
+            done
+        fi
+        suggested_reason="suggested for ${TOTAL_RAM_GB_DETECT}GB system"
+        if [ "$tune_suggested" -ge 0 ] && [ -n "${AUTHOR_BEST_PICK_TUNE:-}" ]; then
+            if [ "$(basename "${tune_configs[$tune_suggested]}")" = "$AUTHOR_BEST_PICK_TUNE" ]; then
+                suggested_reason="author best pick"
             fi
-        done
+        fi
 
         echo ""
         if [ "$show_all_tunes" -eq 1 ]; then
@@ -672,7 +694,7 @@ else
             fi
             local_suggested=""
             if [ "$i" -eq "$tune_suggested" ]; then
-                local_suggested=" ← suggested for ${TOTAL_RAM_GB_DETECT}GB system"
+                local_suggested=" ← $suggested_reason"
             fi
             # Show key params from config
             tune_ctx=$(grep -m1 '^CONTEXT=' "${tune_configs[$i]}" | cut -d= -f2)
