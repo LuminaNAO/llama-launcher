@@ -6,9 +6,10 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$UTIL_DIR")"
 MODEL="${1:-/mnt/storage/models/google_gemma-4-31B-it/google_gemma-4-31B-it-Q6_K_L.gguf}"
-RESULTS_DIR="$SCRIPT_DIR/benchmark-results"
+RESULTS_DIR="$UTIL_DIR/benchmark-results"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 RESULTS_FILE="$RESULTS_DIR/bench-$TIMESTAMP.txt"
 
@@ -49,7 +50,7 @@ echo "" | tee -a "$RESULTS_FILE"
 for entry in "${BACKENDS[@]}"; do
     IFS='|' read -r build_dir label env_vars <<< "$entry"
 
-    BENCH_BIN="$SCRIPT_DIR/builds/$build_dir/bin/llama-bench"
+    BENCH_BIN="$ROOT_DIR/builds/$build_dir/bin/llama-bench"
     if [ ! -f "$BENCH_BIN" ]; then
         echo "SKIP: $label — $BENCH_BIN not found" | tee -a "$RESULTS_FILE"
         echo "" | tee -a "$RESULTS_FILE"
@@ -60,9 +61,9 @@ for entry in "${BACKENDS[@]}"; do
 
     # Set backend-specific env vars
     if [ "$build_dir" = "vulkan" ]; then
-        export LD_LIBRARY_PATH="$SCRIPT_DIR/builds/$build_dir/bin:$SCRIPT_DIR/builds/$build_dir/lib"
+        export LD_LIBRARY_PATH="$ROOT_DIR/builds/$build_dir/bin:$ROOT_DIR/builds/$build_dir/lib"
     else
-        export LD_LIBRARY_PATH="$SCRIPT_DIR/builds/$build_dir/bin:$SCRIPT_DIR/builds/$build_dir/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        export LD_LIBRARY_PATH="$ROOT_DIR/builds/$build_dir/bin:$ROOT_DIR/builds/$build_dir/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         for var in $env_vars; do
             export "$var"
         done

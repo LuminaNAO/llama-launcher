@@ -186,7 +186,7 @@ Pathways to get there:
 
 ### Steps
 
-1. Run `benchmark.sh` against current tune (`-ub 256 -b 1024`, 64k ctx) — baseline.
+1. Run `utils/benchmark.sh` against current tune (`-ub 256 -b 1024`, 64k ctx) — baseline.
 2. Variant B: `-ub 512 -b 2048` at 48k ctx (known-safe memory envelope).
 3. Variant C: `-ub 512 -b 2048` at 100k ctx with KV q4_0 (reboot with TTM bump first).
 4. Measure PP tok/s at 2k, 8k, 16k, 32k, 64k prompt lengths.

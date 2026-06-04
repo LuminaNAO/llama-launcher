@@ -6,7 +6,9 @@ set -euo pipefail
 
 API_KEY="ollama-local"
 BASE_URL="http://localhost:40801"
-RESULTS_DIR="$(dirname "$0")/benchmark-results"
+UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$UTIL_DIR")"
+RESULTS_DIR="$UTIL_DIR/benchmark-results"
 TMPDIR_LOAD=$(mktemp -d)
 trap "rm -rf $TMPDIR_LOAD" EXIT
 

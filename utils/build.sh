@@ -5,20 +5,20 @@
 # <build-type> is <backend>[-<tag>], where <backend> ∈ {rocm,vulkan,cuda}.
 # The optional -tag suffix selects a parallel output directory under builds/
 # so experimental variants of the same backend can coexist.
-#   ./build.sh rocm           # → builds/rocm (default mainline source)
-#   ./build.sh rocm-test      # → builds/rocm-test
+#   ./utils/build.sh rocm           # → builds/rocm (default mainline source)
+#   ./utils/build.sh rocm-test      # → builds/rocm-test
 #
 # To build from a non-default llama.cpp source tree,
 # set LLAMACPP_SRC:
-#   LLAMACPP_SRC=/path/to/llama.cpp ./build.sh rocm-test
+#   LLAMACPP_SRC=/path/to/llama.cpp ./utils/build.sh rocm-test
 #
 # GPU arch is auto-detected for ROCm builds but can be overridden:
-#   ./build.sh rocm gfx1100    # Force RX 7900 series target
-#   ./build.sh rocm gfx1151    # Force Strix Halo target
+#   ./utils/build.sh rocm gfx1100    # Force RX 7900 series target
+#   ./utils/build.sh rocm gfx1151    # Force Strix Halo target
 #
 # For CUDA builds, compute capability is auto-detected but can be overridden:
-#   ./build.sh cuda             # Auto-detect NVIDIA GPU
-#   ./build.sh cuda 89          # Force Ada Lovelace (RTX 4090)
+#   ./utils/build.sh cuda             # Auto-detect NVIDIA GPU
+#   ./utils/build.sh cuda 89          # Force Ada Lovelace (RTX 4090)
 #
 # Supported AMD GPU targets:
 #   gfx1100  — RDNA 3   (RX 7900 XTX/XT/GRE)
@@ -30,8 +30,9 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_LLAMACPP_DIR="$(dirname "$SCRIPT_DIR")/llama.cpp"
+UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$UTIL_DIR")"
+DEFAULT_LLAMACPP_DIR="$(dirname "$ROOT_DIR")/llama.cpp"
 
 # ── Build type argument (required) ──────────────────────────────────────────
 BUILD_TYPE="${1:-}"
@@ -42,17 +43,17 @@ if [ -z "$BUILD_TYPE" ]; then
     echo "Usage: build.sh <rocm|vulkan|cuda>[-tag] [gpu-arch]"
     echo ""
     echo "Examples:"
-    echo "  ./build.sh vulkan          # Vulkan backend (any GPU)"
-    echo "  ./build.sh rocm            # ROCm/HIP backend (auto-detect GPU)"
-    echo "  ./build.sh rocm gfx1100    # ROCm for RX 7900 series"
-    echo "  ./build.sh rocm gfx1151    # ROCm for Strix Halo"
-    echo "  ./build.sh cuda            # CUDA backend (auto-detect NVIDIA GPU)"
-    echo "  ./build.sh cuda 89         # CUDA for Ada Lovelace (RTX 4090)"
-    echo "  ./build.sh rocm-test       # Tagged ROCm build"
+    echo "  ./utils/build.sh vulkan          # Vulkan backend (any GPU)"
+    echo "  ./utils/build.sh rocm            # ROCm/HIP backend (auto-detect GPU)"
+    echo "  ./utils/build.sh rocm gfx1100    # ROCm for RX 7900 series"
+    echo "  ./utils/build.sh rocm gfx1151    # ROCm for Strix Halo"
+    echo "  ./utils/build.sh cuda            # CUDA backend (auto-detect NVIDIA GPU)"
+    echo "  ./utils/build.sh cuda 89         # CUDA for Ada Lovelace (RTX 4090)"
+    echo "  ./utils/build.sh rocm-test       # Tagged ROCm build"
     exit 1
 fi
 
-BUILD_DIR="$SCRIPT_DIR/builds/$BUILD_TYPE"
+BUILD_DIR="$ROOT_DIR/builds/$BUILD_TYPE"
 # Backend = prefix before the first dash, so e.g. "rocm-test" uses the rocm
 # toolchain/cmake flags but lands in a separate output dir.
 BACKEND="${BUILD_TYPE%%-*}"
@@ -77,7 +78,7 @@ else
     #   ~/code/llama.cpp-*          (suffix style, e.g. llama.cpp-v4flash)
     #   ~/code/llama*/llama.cpp     (nested style, e.g. llama-mtp/llama.cpp)
     #   ~/code/llama*               (flat style, e.g. llama-mtp/ with CMakeLists at root)
-    parent_dir="$(dirname "$SCRIPT_DIR")"
+    parent_dir="$(dirname "$ROOT_DIR")"
     candidates=()
     for c in "$parent_dir"/llama.cpp "$parent_dir"/llama.cpp-* "$parent_dir"/llama*/llama.cpp "$parent_dir"/llama*; do
         [ -f "$c/CMakeLists.txt" ] || continue
@@ -226,10 +227,10 @@ case "$BACKEND" in
         echo "Usage: build.sh <rocm|vulkan|cuda>[-tag]"
         echo ""
         echo "Examples:"
-        echo "  ./build.sh vulkan    # Recommended for Strix Halo / RDNA 3.5"
-        echo "  ./build.sh rocm      # ROCm/HIP backend"
-        echo "  ./build.sh cuda      # NVIDIA CUDA backend"
-        echo "  LLAMACPP_SRC=/path/to/llama.cpp ./build.sh rocm-test         # alternate source"
+        echo "  ./utils/build.sh vulkan    # Recommended for Strix Halo / RDNA 3.5"
+        echo "  ./utils/build.sh rocm      # ROCm/HIP backend"
+        echo "  ./utils/build.sh cuda      # NVIDIA CUDA backend"
+        echo "  LLAMACPP_SRC=/path/to/llama.cpp ./utils/build.sh rocm-test         # alternate source"
         exit 1
         ;;
 esac

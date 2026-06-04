@@ -4,14 +4,15 @@
 # Installs a system service that starts llama-server at boot.
 #
 # Usage:
-#   sudo ./install-service.sh [--seed <N>] [--uninstall]
+#   sudo ./utils/install-service.sh [--seed <N>] [--uninstall]
 #
 # Must be run with sudo. The service will run as the user who invoked sudo.
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
+UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$UTIL_DIR")"
+CONFIG_FILE="$ROOT_DIR/.llama-launcher-config"
 SERVICE_NAME="llama-server"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
@@ -180,7 +181,7 @@ MODEL_PATH="$MODEL_FOLDER/$selected_model"
 
 # ── Resolve build ─────────────────────────────────────────────────────────────
 BUILD_TYPE="${LLAMACPP_BUILD_TYPE:-rocm}"
-BUILD_DIR="$SCRIPT_DIR/builds/$BUILD_TYPE"
+BUILD_DIR="$ROOT_DIR/builds/$BUILD_TYPE"
 SERVER_BIN="$BUILD_DIR/bin/llama-server"
 
 if [ ! -f "$SERVER_BIN" ]; then
@@ -190,7 +191,7 @@ if [ ! -f "$SERVER_BIN" ]; then
 fi
 
 # ── Load per-model config ────────────────────────────────────────────────────
-MODEL_CONFIG_DIR="$SCRIPT_DIR/model-configs"
+MODEL_CONFIG_DIR="$ROOT_DIR/model-configs"
 selected_folder_name="$(basename "$MODEL_FOLDER")"
 JINJA=1  # default: enable jinja
 
@@ -295,7 +296,7 @@ Wants=multi-user.target
 [Service]
 Type=simple
 User=$INSTALL_USER
-WorkingDirectory=$SCRIPT_DIR
+WorkingDirectory=$ROOT_DIR
 ${ENV_BLOCK}
 ExecStart=$EXEC_CMD
 StandardOutput=append:$INSTALL_HOME/llama.log

@@ -217,7 +217,7 @@ else
 
     if [ ${#available_builds[@]} -eq 0 ]; then
         echo "❌ No builds found in $LLAMA_LAUNCHER_DIR/builds/"
-        echo "   Run build.sh first: bash build.sh [rocm|vulkan]"
+        echo "   Run build first: bash utils/build.sh [rocm|vulkan]"
         exit 1
     elif [ ${#available_builds[@]} -eq 1 ]; then
         BUILD_TYPE="${available_builds[0]}"
@@ -242,7 +242,7 @@ LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
 
 if [ ! -f "$LLAMACPP_SERVER_PATH" ]; then
     echo "❌ llama-server not found at $LLAMACPP_SERVER_PATH"
-    echo "   Run: bash build.sh $BUILD_TYPE"
+    echo "   Run: bash utils/build.sh $BUILD_TYPE"
     exit 1
 fi
 
