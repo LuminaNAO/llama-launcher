@@ -61,9 +61,47 @@ MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
 MODELS_DIR="${MODELS_DIR%/}"
 
 if [ ! -d "$MODELS_DIR" ]; then
-    echo "ERROR: Models directory not found: $MODELS_DIR"
-    echo "Set LLAMACPP_MODELS_DIR in $CONFIG_FILE"
-    exit 1
+    echo "Models directory not found: $MODELS_DIR"
+    echo ""
+    echo "Where should models be stored?"
+    echo ""
+    echo "  1) /usr/local/share/llama.cpp/models  (system-wide, needs sudo)"
+    echo "  2) $HOME/.local/share/llama.cpp/models (user-local)"
+    echo "  3) $SCRIPT_DIR/models                  (project-local)"
+    echo "  4) Enter custom path"
+    echo ""
+    printf "Choice [1-4]: "
+    read -r dir_choice
+    case "$dir_choice" in
+        1) MODELS_DIR="/usr/local/share/llama.cpp/models" ;;
+        2) MODELS_DIR="$HOME/.local/share/llama.cpp/models" ;;
+        3) MODELS_DIR="$SCRIPT_DIR/models" ;;
+        4)
+            printf "Enter path: "
+            read -r custom_dir
+            custom_dir="${custom_dir/#\~/$HOME}"
+            MODELS_DIR="$custom_dir"
+            ;;
+        *)
+            echo "ERROR: Invalid choice: $dir_choice"
+            exit 1
+            ;;
+    esac
+    MODELS_DIR="${MODELS_DIR%/}"
+
+    # Create the directory (with sudo for system paths)
+    if [[ "$MODELS_DIR" == /usr/local/* ]]; then
+        echo ""
+        echo "Creating $MODELS_DIR (requires sudo)..."
+        sudo mkdir -p "$MODELS_DIR" || { echo "ERROR: Failed to create $MODELS_DIR"; exit 1; }
+    else
+        mkdir -p "$MODELS_DIR" || { echo "ERROR: Failed to create $MODELS_DIR"; exit 1; }
+    fi
+
+    # Save to config so we don't ask again
+    echo "LLAMACPP_MODELS_DIR=\"$MODELS_DIR\"" > "$CONFIG_FILE"
+    echo "Saved to $CONFIG_FILE"
+    echo ""
 fi
 
 # ── HuggingFace auth (optional, for gated models) ───────────────────────────
