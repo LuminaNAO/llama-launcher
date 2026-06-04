@@ -1,94 +1,55 @@
 #!/bin/bash
 
 # Llama Server Model Launcher
-# Lists models in $LLAMACPP_MODELS_DIR and lets you select one
-# Override paths via environment variables if needed:
-#   export LLAMACPP_MODELS_DIR=/path/to/models
-#   export LLAMACPP_SERVER_PATH=/path/to/llama-server
-#   export LLAMACPP_BUILD_TYPE=rocm|vulkan|debug|release
+# Interactive launcher for llama.cpp server with per-model configs.
+#
+# Usage:
+#   llama-server-launcher.sh                          # fully interactive
+#   llama-server-launcher.sh --build rocm             # skip build selection
+#   llama-server-launcher.sh --model /path/to/model   # skip model selection
+#   llama-server-launcher.sh --build rocm --model /path/to/model  # non-interactive
 #
 # Options:
-#   --seed <N>   Override the random seed (default: 42)
+#   --build <type>   Build type (rocm, vulkan, etc.) — skips build selection
+#   --model <path>   Full path to .gguf model file — skips model selection
+#   --seed <N>       Override the random seed (default: 42)
+#   --context <N>    Override context size
+#   --parallel <N>   Override number of parallel slots
+#   --save           Save effective launch settings as a per-model config
+#
+# Per-model configs are stored in model-configs/<model-name>.conf and
+# automatically loaded when that model is selected. CLI flags override
+# saved configs. Use --save to persist tuned settings.
 
 SEED=42
+CONTEXT_OVERRIDE=""
+PARALLEL_OVERRIDE=""
+SAVE_CONFIG=0
+ARG_BUILD_TYPE=""
+ARG_MODEL_PATH=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --seed) SEED="$2"; shift 2 ;;
+        --context) CONTEXT_OVERRIDE="$2"; shift 2 ;;
+        --parallel) PARALLEL_OVERRIDE="$2"; shift 2 ;;
+        --save) SAVE_CONFIG=1; shift ;;
+        --build) ARG_BUILD_TYPE="$2"; shift 2 ;;
+        --model) ARG_MODEL_PATH="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
 
-# Config file lives in the repo dir so it stays with the project
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
-
-# Default path
-DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
-
-# Load config from previous session if it exists
-if [ -f "$CONFIG_FILE" ]; then
-    eval "$(cat "$CONFIG_FILE")"
-    export LLAMACPP_MODELS_DIR
-    MODELS_DIR="$LLAMACPP_MODELS_DIR"
-    echo "📝 Using saved path: $MODELS_DIR"
-    echo ""
-else
-    MODELS_DIR="$DEFAULT_MODELS_DIR"
-    echo "📝 No saved path, using default: $MODELS_DIR"
-    echo ""
-fi
-
-# Force re-evaluation of MODELS_DIR from environment
-MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
-
-# Check if we have models at the current path, if not prompt for new path
-scan_models() {
-    local dir="$1"
-    models=()
-    while IFS= read -r -d '' file; do
-        name="$(basename "$file")"
-        # Skip non-first split files (e.g. -00002-of-00006.gguf)
-        if [[ "$name" =~ -[0-9]+-of-[0-9]+\.gguf$ ]] && ! [[ "$name" =~ -00001-of-[0-9]+\.gguf$ ]]; then
-            continue
-        fi
-        models+=("$name")
-    done < <(find "$dir" -maxdepth 1 -name "*.gguf" -print0 2>/dev/null)
-}
-
-scan_models "$MODELS_DIR"
-
-if [ ${#models[@]} -eq 0 ]; then
-    echo "❌ No .gguf models found at $MODELS_DIR"
-    echo ""
-    read -rp "Enter path to models directory: " new_path
-    # Save to config for next time
-    echo "LLAMACPP_MODELS_DIR=$new_path" > "$CONFIG_FILE"
-    echo "✅ Path saved to $CONFIG_FILE for next launch"
-    echo ""
-    # Update MODELS_DIR for current session
-    MODELS_DIR="$new_path"
-    scan_models "$MODELS_DIR"
-fi
-
-# Force re-evaluation of MODELS_DIR from environment
-MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
-
-# Discover llama.cpp builds dynamically
 LLAMA_LAUNCHER_DIR="$SCRIPT_DIR"
-LLAMACPP_DIR="$LLAMA_LAUNCHER_DIR/llama.cpp"
 
-# Determine build type (rocm, vulkan, or default)
-BUILD_TYPE="${LLAMACPP_BUILD_TYPE:-rocm}"
-BUILD_DIR="$LLAMA_LAUNCHER_DIR/builds/$BUILD_TYPE"
+# ── Build type selection ─────────────────────────────────────────────────────
 
-LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
-
-# Verify server exists, prompt interactively if not
-if [ ! -f "$LLAMACPP_SERVER_PATH" ]; then
-    echo "⚠️  llama-server not found at $LLAMACPP_SERVER_PATH"
-    echo ""
-
-    # Collect available builds
+if [ -n "$ARG_BUILD_TYPE" ]; then
+    # Build type passed via CLI
+    BUILD_TYPE="$ARG_BUILD_TYPE"
+else
+    # Interactive: list available builds and let user pick
     available_builds=()
     if [ -d "$LLAMA_LAUNCHER_DIR/builds" ]; then
         for dir in "$LLAMA_LAUNCHER_DIR"/builds/*/; do
@@ -98,7 +59,14 @@ if [ ! -f "$LLAMACPP_SERVER_PATH" ]; then
         done
     fi
 
-    if [ ${#available_builds[@]} -gt 0 ]; then
+    if [ ${#available_builds[@]} -eq 0 ]; then
+        echo "❌ No builds found in $LLAMA_LAUNCHER_DIR/builds/"
+        echo "   Run build.sh first: bash build.sh [rocm|vulkan]"
+        exit 1
+    elif [ ${#available_builds[@]} -eq 1 ]; then
+        BUILD_TYPE="${available_builds[0]}"
+        echo "🔧 Using only available build: $BUILD_TYPE"
+    else
         echo "Available builds:"
         for i in "${!available_builds[@]}"; do
             printf "  %d) %s\n" $((i+1)) "${available_builds[$i]}"
@@ -107,67 +75,131 @@ if [ ! -f "$LLAMACPP_SERVER_PATH" ]; then
         read -rp "Select build [1-${#available_builds[@]}]: " build_sel
         if [[ "$build_sel" =~ ^[0-9]+$ ]] && [ "$build_sel" -ge 1 ] && [ "$build_sel" -le ${#available_builds[@]} ]; then
             BUILD_TYPE="${available_builds[$((build_sel-1))]}"
-            BUILD_DIR="$LLAMA_LAUNCHER_DIR/builds/$BUILD_TYPE"
-            LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
         else
             echo "❌ Invalid selection"; exit 1
         fi
-    else
-        echo "No builds found in $LLAMA_LAUNCHER_DIR/builds/"
+    fi
+fi
+
+BUILD_DIR="$LLAMA_LAUNCHER_DIR/builds/$BUILD_TYPE"
+LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
+
+if [ ! -f "$LLAMACPP_SERVER_PATH" ]; then
+    echo "❌ llama-server not found at $LLAMACPP_SERVER_PATH"
+    echo "   Run: bash build.sh $BUILD_TYPE"
+    exit 1
+fi
+
+echo "🔧 Build: $BUILD_TYPE ($LLAMACPP_SERVER_PATH)"
+echo ""
+
+# ── Model selection ──────────────────────────────────────────────────────────
+
+if [ -n "$ARG_MODEL_PATH" ]; then
+    # Model passed via CLI — resolve to absolute path
+    if [ ! -f "$ARG_MODEL_PATH" ]; then
+        echo "❌ Model not found: $ARG_MODEL_PATH"
+        exit 1
+    fi
+    model_path="$(realpath "$ARG_MODEL_PATH")"
+    selected_model="$(basename "$model_path")"
+    MODELS_DIR="$(dirname "$model_path")"
+else
+    # Interactive: scan for models and let user pick
+    DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
+
+    # Load saved models dir from config
+    if [ -f "$CONFIG_FILE" ]; then
+        eval "$(cat "$CONFIG_FILE")"
+        export LLAMACPP_MODELS_DIR
+    fi
+    MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
+
+    scan_models() {
+        local dir="$1"
+        models=()
+        while IFS= read -r -d '' file; do
+            name="$(basename "$file")"
+            # Skip non-first split files (e.g. -00002-of-00006.gguf)
+            if [[ "$name" =~ -[0-9]+-of-[0-9]+\.gguf$ ]] && ! [[ "$name" =~ -00001-of-[0-9]+\.gguf$ ]]; then
+                continue
+            fi
+            # Skip mmproj files — they're vision projectors, not main models
+            if [[ "$name" == *mmproj* ]]; then
+                continue
+            fi
+            models+=("$name")
+        done < <(find "$dir" -maxdepth 1 -name "*.gguf" -print0 2>/dev/null)
+    }
+
+    scan_models "$MODELS_DIR"
+
+    # If no models found, prompt for a new path
+    if [ ${#models[@]} -eq 0 ]; then
+        echo "❌ No .gguf models found at $MODELS_DIR"
         echo ""
-        read -rp "Enter path to llama-server binary (or 'q' to quit): " server_path
-        if [ "$server_path" = "q" ]; then exit 0; fi
-        if [ -f "$server_path" ]; then
-            LLAMACPP_SERVER_PATH="$server_path"
-            BUILD_DIR="$(dirname "$(dirname "$server_path")")"
-            BUILD_TYPE="custom"
-        else
-            echo "❌ File not found: $server_path"; exit 1
-        fi
+        read -rp "Enter path to models directory: " new_path
+        echo "LLAMACPP_MODELS_DIR=$new_path" > "$CONFIG_FILE"
+        echo "✅ Path saved to $CONFIG_FILE for next launch"
+        echo ""
+        MODELS_DIR="$new_path"
+        scan_models "$MODELS_DIR"
     fi
 
-    # Save selection for next time
-    echo "LLAMACPP_BUILD_TYPE=$BUILD_TYPE" >> "$CONFIG_FILE"
-    echo "✅ Build type '$BUILD_TYPE' saved to $CONFIG_FILE"
+    if [ ${#models[@]} -eq 0 ]; then
+        echo "❌ No .gguf models found in $MODELS_DIR"
+        exit 1
+    fi
+
+    echo "📂 Models in $MODELS_DIR:"
     echo ""
-fi
+    for i in "${!models[@]}"; do
+        name="${models[$i]}"
+        if [[ "$name" =~ -00001-of-([0-9]+)\.gguf$ ]]; then
+            total="${BASH_REMATCH[1]}"
+            printf "  %d) %s  [split: %d parts]\n" $((i+1)) "$name" "$((10#$total))"
+        else
+            printf "  %d) %s\n" $((i+1)) "$name"
+        fi
+    done
+    echo ""
 
-echo "🔍 Scanning models in $MODELS_DIR..."
-echo ""
+    read -rp "Select model [1-${#models[@]}]: " selection
 
-if [ ${#models[@]} -eq 0 ]; then
-    echo "❌ No .gguf models found in $MODELS_DIR"
-    echo "   Please run the launcher again to set the correct path"
-    exit 1
-fi
-
-echo "Found ${#models[@]} model(s):"
-echo ""
-for i in "${!models[@]}"; do
-    name="${models[$i]}"
-    if [[ "$name" =~ -00001-of-([0-9]+)\.gguf$ ]]; then
-        total="${BASH_REMATCH[1]}"
-        printf "%d) %s  [split: %d parts]\n" $((i+1)) "$name" "$((10#$total))"
-    else
-        printf "%d) %s\n" $((i+1)) "$name"
+    if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt ${#models[@]} ]; then
+        echo "❌ Invalid selection"
+        exit 1
     fi
-done
-echo ""
 
-# Ask user to select
-read -rp "Select model [1-${#models[@]}]: " selection
-
-# Validate selection
-if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt ${#models[@]} ]; then
-    echo "❌ Invalid selection"
-    exit 1
+    selected_model="${models[$((selection-1))]}"
+    model_path="${MODELS_DIR}/${selected_model}"
 fi
 
-# Get selected model
-selected_model="${models[$((selection-1))]}"
-model_path="${MODELS_DIR}/${selected_model}"
+echo "📦 Model: $selected_model"
 
-# ── Auto-detect vision projector ──────────────────────────────────────────────
+# ── Load per-model config ────────────────────────────────────────────────────
+MODEL_CONFIG_DIR="$SCRIPT_DIR/model-configs"
+MODEL_CONFIG_FILE="$MODEL_CONFIG_DIR/${selected_model%.gguf}.conf"
+# Also check split models without the part suffix
+MODEL_CONFIG_FILE_ALT="$MODEL_CONFIG_DIR/$(echo "${selected_model%.gguf}" | sed 's/-00001-of-[0-9]*//' ).conf"
+
+HAS_MODEL_CONFIG=0
+if [ -f "$MODEL_CONFIG_FILE" ]; then
+    echo "📋 Config: $(basename "$MODEL_CONFIG_FILE")"
+    source "$MODEL_CONFIG_FILE"
+    HAS_MODEL_CONFIG=1
+elif [ -f "$MODEL_CONFIG_FILE_ALT" ] && [ "$MODEL_CONFIG_FILE_ALT" != "$MODEL_CONFIG_FILE" ]; then
+    MODEL_CONFIG_FILE="$MODEL_CONFIG_FILE_ALT"
+    echo "📋 Config: $(basename "$MODEL_CONFIG_FILE")"
+    source "$MODEL_CONFIG_FILE"
+    HAS_MODEL_CONFIG=1
+else
+    echo "📋 Config: none (using system profile)"
+    echo "   Save one with: $(basename "$0") --save"
+fi
+
+# ── Auto-detect vision projector ─────────────────────────────────────────────
+# Searches the same directory as the selected model
 MMPROJ=""
 model_prefix=$(echo "$selected_model" | cut -d'-' -f1-3)
 mmproj_matches=()
@@ -178,7 +210,9 @@ done < <(find "$MODELS_DIR" -maxdepth 1 -name "*mmproj*.gguf" -print0 2>/dev/nul
 
 if [ ${#mmproj_matches[@]} -eq 1 ]; then
     MMPROJ="${mmproj_matches[0]}"
+    echo "👁️  Vision: $(basename "$MMPROJ")"
 elif [ ${#mmproj_matches[@]} -gt 1 ]; then
+    echo ""
     echo "Multiple vision projector files found:"
     for i in "${!mmproj_matches[@]}"; do
         printf "  %d) %s\n" $((i+1)) "$(basename "${mmproj_matches[$i]}")"
@@ -188,23 +222,17 @@ elif [ ${#mmproj_matches[@]} -gt 1 ]; then
     read -rp "Select mmproj [0-${#mmproj_matches[@]}]: " mmproj_sel
     if [[ "$mmproj_sel" =~ ^[1-9][0-9]*$ ]] && [ "$mmproj_sel" -le ${#mmproj_matches[@]} ]; then
         MMPROJ="${mmproj_matches[$((mmproj_sel-1))]}"
+        echo "👁️  Vision: $(basename "$MMPROJ")"
+    else
+        echo "👁️  Vision: none"
     fi
-fi
-
-echo ""
-echo "🚀 Starting llama-server"
-echo "   Backend: $BUILD_TYPE"
-echo "   Build dir: $BUILD_DIR"
-echo "   Model: $selected_model"
-echo "   Server: $LLAMACPP_SERVER_PATH"
-if [ -n "$MMPROJ" ]; then
-    echo "   Vision: $(basename "$MMPROJ")"
 else
-    echo "   Vision: none"
+    echo "👁️  Vision: none"
 fi
+
 echo ""
 
-# Run llama-server with the selected model
+# ── Backend environment ──────────────────────────────────────────────────────
 case "$BUILD_TYPE" in
     rocm)
         export ROCBLAS_USE_HIPBLASLT=1
@@ -212,45 +240,46 @@ case "$BUILD_TYPE" in
         export LD_LIBRARY_PATH="$BUILD_DIR/bin:$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         ;;
     vulkan)
-        # Vulkan-specific environment variables if needed
-        export VK_ICD_FILENAMES=""
+        # Force llama.cpp to use only the Vulkan backend libs, not system ROCm.
+        # Without this, the binary auto-detects ROCm and ignores Vulkan.
+        export LD_LIBRARY_PATH="$BUILD_DIR/bin:$BUILD_DIR/lib"
         ;;
     *)
         echo "⚠️  No special environment variables set for $BUILD_TYPE"
         ;;
 esac
 
-# ── Detect system RAM and select profile ──────────────────────────────────
+# ── Detect system RAM and select profile ─────────────────────────────────────
 TOTAL_RAM_MB=$(free -m | awk '/^Mem:/{print $2}')
 TOTAL_RAM_GB=$((TOTAL_RAM_MB / 1024))
 
-# Reserve 20 GB for system
 RESERVE_GB=20
 
-echo ""
 echo "🖥️  System RAM: ${TOTAL_RAM_GB} GB (reserving ${RESERVE_GB} GB for system)"
 
-if [ "$TOTAL_RAM_GB" -ge 112 ]; then
-    # ── 128 GB profile ────────────────────────────────────────────────────
-    # Tuned for Qwen3.5-35B-A3B-BF16 on 128GB systems
-    # Model weights: ~67 GB. KV cache (q8_0, 488k): ~5 GB. Leaves ~36 GB free.
-    # q8_0 KV: negligible quality loss, halves cache memory vs f16
-    # 488k unified context: two slots share pool, each can use up to full 488k
-    # 40 GB cache ceiling: holds many sessions warm, only allocated on demand
-    # Fine checkpoints: 4096-token intervals for precise cache restore
-    PROFILE="128gb"
+if [ "$HAS_MODEL_CONFIG" -eq 1 ]; then
+    # Model config already set CONTEXT, PARALLEL, etc. — use those as base.
+    # Fill in any values the config didn't set with sensible defaults.
+    CONTEXT="${CONTEXT:-32768}"
+    PARALLEL="${PARALLEL:-1}"
+    CACHE_RAM="${CACHE_RAM:-8192}"
+    CACHE_TYPE_K="${CACHE_TYPE_K:-q8_0}"
+    CACHE_TYPE_V="${CACHE_TYPE_V:-q8_0}"
+    CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-4096}"
+    CHECKPOINT_MAX="${CHECKPOINT_MAX:-32}"
+    SWA_FULL="${SWA_FULL:-1}"
+    echo "📋 Profile: per-model (${CONTEXT} ctx, ${CACHE_TYPE_K} KV, ${CACHE_RAM} MB cache, ${PARALLEL} slots)"
+elif [ "$TOTAL_RAM_GB" -ge 112 ]; then
     CONTEXT=488576
     PARALLEL=2
-    CACHE_RAM=40960
+    CACHE_RAM=30720
     CACHE_TYPE_K="q8_0"
     CACHE_TYPE_V="q8_0"
     CHECKPOINT_INTERVAL=4096
     CHECKPOINT_MAX=64
-    echo "📋 Profile: 128 GB (488k context, q8_0 KV, 40 GB cache, 2 slots)"
+    SWA_FULL=1
+    echo "📋 Profile: 128 GB (488k context, q8_0 KV, 30 GB cache, 2 slots)"
 elif [ "$TOTAL_RAM_GB" -ge 48 ]; then
-    # ── 64 GB profile ─────────────────────────────────────────────────────
-    # Placeholder — requires a smaller model. Will be tuned separately.
-    PROFILE="64gb"
     CONTEXT=122144
     PARALLEL=2
     CACHE_RAM=8192
@@ -258,11 +287,10 @@ elif [ "$TOTAL_RAM_GB" -ge 48 ]; then
     CACHE_TYPE_V="q8_0"
     CHECKPOINT_INTERVAL=8192
     CHECKPOINT_MAX=32
+    SWA_FULL=1
     echo "📋 Profile: 64 GB (122k context, q8_0 KV, 8 GB cache, 2 slots)"
     echo "⚠️  64 GB profile not yet tuned — using conservative defaults"
 else
-    # ── Fallback ──────────────────────────────────────────────────────────
-    PROFILE="minimal"
     CONTEXT=61072
     PARALLEL=1
     CACHE_RAM=4096
@@ -270,10 +298,63 @@ else
     CACHE_TYPE_V="q8_0"
     CHECKPOINT_INTERVAL=8192
     CHECKPOINT_MAX=16
+    SWA_FULL=1
     echo "📋 Profile: minimal (61k context, q8_0 KV, 4 GB cache, 1 slot)"
     echo "⚠️  Low RAM — using minimal settings"
 fi
 
+# ── Apply CLI overrides ──────────────────────────────────────────────────────
+if [ -n "$CONTEXT_OVERRIDE" ]; then
+    echo "⚙️  Context override: $CONTEXT → $CONTEXT_OVERRIDE"
+    CONTEXT="$CONTEXT_OVERRIDE"
+fi
+if [ -n "$PARALLEL_OVERRIDE" ]; then
+    echo "⚙️  Parallel override: $PARALLEL → $PARALLEL_OVERRIDE"
+    PARALLEL="$PARALLEL_OVERRIDE"
+fi
+
+# ── Check mlock capability ───────────────────────────────────────────────────
+MEMLOCK_KB=$(ulimit -l 2>/dev/null || echo 0)
+if [ "$MEMLOCK_KB" = "unlimited" ]; then
+    MLOCK_FLAG="--mlock"
+    echo "🔒 mlock: enabled (memlock=unlimited) — pages pinned, swap-safe"
+else
+    MLOCK_FLAG=""
+    MEMLOCK_MB=$((MEMLOCK_KB / 1024))
+    echo "⚠️  mlock: DISABLED (memlock=${MEMLOCK_MB} MB)"
+    echo "   Without mlock, the kernel can swap llama-server pages to disk,"
+    echo "   causing catastrophic performance drops (< 1 tok/s observed)."
+    echo "   Fix: add to /etc/security/limits.conf and re-login:"
+    echo "     $(whoami)  hard  memlock  unlimited"
+    echo "     $(whoami)  soft  memlock  unlimited"
+fi
+
+# ── Save per-model config if requested ───────────────────────────────────────
+if [ "$SAVE_CONFIG" -eq 1 ]; then
+    mkdir -p "$MODEL_CONFIG_DIR"
+    cat > "$MODEL_CONFIG_FILE" <<CONF
+# Per-model launch config for: $selected_model
+# Generated: $(date -Iseconds)
+# Edit these values and they'll be loaded automatically on next launch.
+# CLI flags (--context, --parallel) override these settings.
+
+CONTEXT=$CONTEXT
+PARALLEL=$PARALLEL
+CACHE_RAM=$CACHE_RAM
+CACHE_TYPE_K=$CACHE_TYPE_K
+CACHE_TYPE_V=$CACHE_TYPE_V
+CHECKPOINT_INTERVAL=$CHECKPOINT_INTERVAL
+CHECKPOINT_MAX=$CHECKPOINT_MAX
+SWA_FULL=$SWA_FULL
+
+# Uncomment to override additional server flags:
+# EXTRA_ARGS="--flag value"
+CONF
+    echo "💾 Saved model config: $MODEL_CONFIG_FILE"
+fi
+
+echo ""
+echo "🚀 Launching llama-server..."
 echo ""
 
 "$LLAMACPP_SERVER_PATH" \
@@ -299,5 +380,7 @@ echo ""
   --checkpoint-every-n-tokens "$CHECKPOINT_INTERVAL" \
   --ctx-checkpoints "$CHECKPOINT_MAX" \
   --seed "$SEED" \
+  ${MLOCK_FLAG:+$MLOCK_FLAG} \
   ${MMPROJ:+--mmproj "$MMPROJ"} \
-  --swa-full 2>&1 | tee -a $HOME/llama.log
+  ${EXTRA_ARGS:+$EXTRA_ARGS} \
+  ${SWA_FULL:+--swa-full} 2>&1 | tee -a $HOME/llama.log
