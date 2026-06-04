@@ -98,6 +98,16 @@ const BRANCH_PREFIX_BYTES = 256 * 1024;
 // this to refuse such self-destructive saves.
 let slotHasContent = false;
 
+function sessionBase(sessionId) {
+  const dash = typeof sessionId === "string" ? sessionId.indexOf("-") : -1;
+  return dash > 0 ? sessionId.slice(0, dash) : null;
+}
+
+function sameSessionBase(a, b) {
+  const baseA = sessionBase(a);
+  return !!baseA && baseA === sessionBase(b);
+}
+
 function enqueueMessage(fn) {
   const prev = messageQueue.catch(() => {});
   const run = prev.then(fn);
@@ -339,9 +349,9 @@ function sessionIdFromBody(jsonStr) {
 
 function findLatestSameBaseSlot(sessionId) {
   if (!slotCacheDir) return null;
-  const dash = sessionId.indexOf("-");
-  if (dash < 0) return null;
-  const prefix = `${sessionId.slice(0, dash)}-`;
+  const base = sessionBase(sessionId);
+  if (!base) return null;
+  const prefix = `${base}-`;
   const exact = `${sessionId}.bin`;
   let latest = null;
   let files;
@@ -350,11 +360,27 @@ function findLatestSameBaseSlot(sessionId) {
     if (!f.endsWith(".bin")) continue;
     if (!f.startsWith(prefix)) continue;
     if (f === exact) continue;
+    const full = join(slotCacheDir, f);
     let mtime;
-    try { mtime = statSync(join(slotCacheDir, f)).mtimeMs; } catch { continue; }
+    let size;
+    try {
+      const st = statSync(full);
+      mtime = st.mtimeMs;
+      size = st.size;
+    } catch { continue; }
+    if (size <= 0) continue;
     if (!latest || mtime > latest.mtime) latest = { filename: f, mtime };
   }
   return latest?.filename ?? null;
+}
+
+function selectRestoreFilename(sessionId) {
+  const exact = `${sessionId}.bin`;
+  if (existsSync(join(slotCacheDir, exact))) {
+    return { filename: exact, isFallback: false };
+  }
+  const fallback = findLatestSameBaseSlot(sessionId);
+  return fallback ? { filename: fallback, isFallback: true } : null;
 }
 
 // Serialize slot save+restore through a Promise mutex. Concurrent callers
@@ -368,17 +394,11 @@ async function ensureSlotLoaded(newSessionId) {
   slotMutex = new Promise((r) => { release = r; });
   await prev;
   try {
-    if (newSessionId === currentSession) return;
+    if (newSessionId === currentSession && slotHasContent) return;
     ensureSlotCacheDir();
-    let restoreFilename = `${newSessionId}.bin`;
-    let restoreIsFallback = false;
-    if (!existsSync(join(slotCacheDir, restoreFilename))) {
-      const fallbackFilename = findLatestSameBaseSlot(newSessionId);
-      if (fallbackFilename) {
-        restoreFilename = fallbackFilename;
-        restoreIsFallback = true;
-      }
-    }
+    const exactRestoreFilename = `${newSessionId}.bin`;
+    const preSaveRestore = selectRestoreFilename(newSessionId);
+    const protectIncomingFilename = preSaveRestore?.filename ?? exactRestoreFilename;
     if (currentSession) {
       if (!slotHasContent) {
         // Skip: slot is known-empty (previous restore failed, no /v1/messages
@@ -390,7 +410,7 @@ async function ensureSlotLoaded(newSessionId) {
         // Pass both: don't evict the slot we're saving (currentSession) OR
         // the one we're about to restore next. Otherwise the
         // LRU prune can wipe our restore target before we read it.
-        pruneSlotCacheIfNeeded(`${currentSession}.bin`, restoreFilename);
+        pruneSlotCacheIfNeeded(`${currentSession}.bin`, protectIncomingFilename);
         hddBanner("save", `${currentSession}.bin`, "(writes .bin + .bin.ckpt)");
         const r = await callSlotAction("save", `${currentSession}.bin`);
         const save = slotSaveSucceeded(r);
@@ -400,23 +420,38 @@ async function ensureSlotLoaded(newSessionId) {
         );
       }
     }
-    if (!existsSync(join(slotCacheDir, restoreFilename))) {
+
+    // If the incoming request is a new branch of the same base conversation,
+    // the live slot is already the best prefix. Saving above persisted the
+    // old branch; restoring an older disk fallback here would throw away the
+    // freshest in-RAM checkpoints and cause avoidable replay.
+    if (!existsSync(join(slotCacheDir, exactRestoreFilename)) && sameSessionBase(currentSession, newSessionId) && slotHasContent) {
+      slotLog(
+        `\n=== HDD CACHE restore SKIPPED: ${newSessionId}.bin (same-base live slot is already loaded)\n`,
+        C_CYAN,
+      );
+      currentSession = newSessionId;
+      return;
+    }
+
+    const restoreTarget = selectRestoreFilename(newSessionId);
+    if (!restoreTarget) {
       slotLog(`\n=== HDD CACHE restore MISS: ${newSessionId}.bin (no saved slot yet; no same-base fallback)\n`, C_YELLOW);
       slotHasContent = false;
       currentSession = newSessionId;
       return;
     }
-    if (restoreIsFallback) {
+    if (restoreTarget.isFallback) {
       slotLog(
-        `\n=== HDD CACHE restore FALLBACK: ${newSessionId}.bin -> ${restoreFilename} (latest same-base slot)\n`,
+        `\n=== HDD CACHE restore FALLBACK: ${newSessionId}.bin -> ${restoreTarget.filename} (latest same-base slot)\n`,
         C_YELLOW,
       );
     }
-    hddBanner(restoreIsFallback ? "restore fallback" : "restore", restoreFilename, "(reads .bin + .bin.ckpt)");
-    const r = await callSlotAction("restore", restoreFilename);
+    hddBanner(restoreTarget.isFallback ? "restore fallback" : "restore", restoreTarget.filename, "(reads .bin + .bin.ckpt)");
+    const r = await callSlotAction("restore", restoreTarget.filename);
     const restore = slotRestoreSucceeded(r);
     slotLog(
-      `HDD CACHE restore status=${r.status} n_restored=${restore.nRestored} n_read=${restore.nRead} checkpoint_sidecar=${restoreFilename}.ckpt ${r.body.slice(0, 200)}\n`,
+      `HDD CACHE restore status=${r.status} n_restored=${restore.nRestored} n_read=${restore.nRead} checkpoint_sidecar=${restoreTarget.filename}.ckpt ${r.body.slice(0, 200)}\n`,
       restore.ok ? C_GREEN : colorForStatus("restore", r.status),
     );
     // Restore returning 4xx/5xx (e.g., file not found) is normal for new sessions.
@@ -567,6 +602,19 @@ async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessio
     if (sessionId && slotCacheDir) await ensureSlotLoaded(sessionId);
   } catch (e) {
     log.write(`\n!!! SLOT mgmt error ${tag}: ${e.message}\n`);
+    if (sessionId && slotCacheDir) {
+      currentSession = sessionId;
+      slotHasContent = false;
+    }
+  }
+
+  // From this point until a complete 200 response, the slot is volatile:
+  // prompt processing or generation may mutate KV/checkpoints, and aborts can
+  // leave a partial state. Fail closed so the next switch does not persist an
+  // uncertain slot under a branch id.
+  if (sessionId && slotCacheDir) {
+    currentSession = sessionId;
+    slotHasContent = false;
   }
 
   // Re-send the buffered request. Strip hop-by-hop and length-related
@@ -597,6 +645,8 @@ async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessio
         // arrive while prompt processing/generation is still mutating the slot.
         if (result.ended && result.statusCode === 200) {
           slotHasContent = true;
+        } else if (sessionId && slotCacheDir) {
+          slotHasContent = false;
         }
         finalize();
         resolve();
