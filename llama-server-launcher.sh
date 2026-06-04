@@ -79,6 +79,8 @@ ARG_TUNE=""
 NO_PROXY=1
 NO_LOG=1
 NO_DEEP_LOG=1
+LOG_FLAGS_TOUCHED=0  # tracks whether any of --proxy/--log/--deep-log was passed on CLI;
+                     # used to decide whether to show the interactive logging-mode prompt
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --seed) SEED="$2"; shift 2 ;;
@@ -88,9 +90,9 @@ while [[ $# -gt 0 ]]; do
         --build) ARG_BUILD_TYPE="$2"; shift 2 ;;
         --model) ARG_MODEL_PATH="$2"; shift 2 ;;
         --tune) ARG_TUNE="$2"; shift 2 ;;
-        --proxy) NO_PROXY=0; shift ;;
-        --log) NO_LOG=0; shift ;;
-        --deep-log) NO_DEEP_LOG=0; shift ;;
+        --proxy) NO_PROXY=0; LOG_FLAGS_TOUCHED=1; shift ;;
+        --log) NO_LOG=0; LOG_FLAGS_TOUCHED=1; shift ;;
+        --deep-log) NO_DEEP_LOG=0; LOG_FLAGS_TOUCHED=1; shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -141,6 +143,7 @@ if [[ -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && -z "$ARG_TUNE" && -f "$LAU
             [[ -n "${recent_tune[$idx]}" ]] && ARG_TUNE="${recent_tune[$idx]}"
             # Apply saved flag state (only explicit opt-ins)
             extras="${recent_extras[$idx]}"
+            if [[ -n "$extras" ]]; then LOG_FLAGS_TOUCHED=1; fi
             [[ " $extras " == *" --log "* ]] && NO_LOG=0
             [[ " $extras " == *" --proxy "* ]] && NO_PROXY=0
             [[ " $extras " == *" --deep-log "* ]] && NO_DEEP_LOG=0
@@ -779,9 +782,32 @@ INTERNAL_PORT="${INTERNAL_PORT:-40802}"
 DEEP_LOG="$HOME/llama-deep.log"
 PROXY_SCRIPT="$SCRIPT_DIR/llama-deep-proxy.mjs"
 
+# ── Interactive logging-mode prompt ─────────────────────────────────────────
+# Only fires when no logging flag was passed on CLI / re-applied from history.
+# Default = preset 3 (proxy + log) since it's the right answer for almost any
+# real use; presets 1/2/4 cover quiet/log-only/full-diagnostic.
+if [ "$LOG_FLAGS_TOUCHED" -eq 0 ]; then
+    echo ""
+    echo "🚩 Logging mode (or pass --proxy / --log / --deep-log on CLI to skip):"
+    echo "   1) None             quiet, no proxy, no log"
+    echo "   2) Log only         server stdout to ~/llama.log"
+    echo "   3) Proxy + log      ← default; needed for slot save/restore"
+    echo "   4) Full diagnostic  proxy + log + body capture (~/llama-deep.log)"
+    read -rp "Choice [1-4, default=3]: " _log_mode
+    _log_mode="${_log_mode:-3}"
+    case "$_log_mode" in
+        1) NO_PROXY=1; NO_LOG=1; NO_DEEP_LOG=1 ;;
+        2) NO_PROXY=1; NO_LOG=0; NO_DEEP_LOG=1 ;;
+        3) NO_PROXY=0; NO_LOG=0; NO_DEEP_LOG=1 ;;
+        4) NO_PROXY=0; NO_LOG=0; NO_DEEP_LOG=0 ;;
+        *) echo "   ⚠️  invalid choice '$_log_mode' — defaulting to preset 3"
+           NO_PROXY=0; NO_LOG=0; NO_DEEP_LOG=1 ;;
+    esac
+fi
+
 # Slot-save persistence is implemented via the proxy. If a tune sets
-# SLOT_SAVE_PATH, force-enable the proxy regardless of CLI flags — otherwise
-# the feature would silently no-op.
+# SLOT_SAVE_PATH, force-enable the proxy regardless of CLI flags or interactive
+# choice — otherwise the feature would silently no-op.
 if [ -n "${SLOT_SAVE_PATH:-}" ] && [ "$NO_PROXY" -eq 1 ]; then
     echo "ℹ️  Tune sets SLOT_SAVE_PATH=$SLOT_SAVE_PATH — auto-enabling proxy (slot save/restore needs it)"
     NO_PROXY=0
