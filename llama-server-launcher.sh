@@ -24,7 +24,7 @@
 # automatically loaded when that model is selected. CLI flags override
 # saved configs. Use --save to persist tuned settings.
 
-SEED=42
+SEED=1320
 CONTEXT_OVERRIDE=""
 PARALLEL_OVERRIDE=""
 SAVE_CONFIG=0
@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
 LLAMA_LAUNCHER_DIR="$SCRIPT_DIR"
 LAUNCH_HISTORY="$SCRIPT_DIR/.launch-history"
