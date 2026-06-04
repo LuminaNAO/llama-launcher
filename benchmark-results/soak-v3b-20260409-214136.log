@@ -1,0 +1,56 @@
+════════════════════════════════════════════════════════════════
+  Soak Test: v3b (parallel=2, checkpoints=30)
+  Model: unsloth_gemma-4-26B-A4B-it-Q8_0.gguf
+  Idle GTT: 30767MB
+  Duration: 3600s (60 min)
+  GTT trace: /path/to/code/llama-launcher/benchmark-results/soak-v3b-gtt-trace-20260409-214136.csv
+  Start: 2026-04-09T21:41:36+08:00
+════════════════════════════════════════════════════════════════
+
+── Wave 1 (0s elapsed, 3600s left) | ctx=1000 | GTT=30767MB peak=30767MB ──
+
+── Wave 2 (10s elapsed, 3590s left) | ctx=4000 | GTT=30768MB peak=30768MB ──
+
+── Wave 3 (35s elapsed, 3565s left) | ctx=16000 | GTT=30770MB peak=30770MB ──
+
+── Wave 4 (89s elapsed, 3511s left) | ctx=64000 | GTT=30770MB peak=30770MB ──
+
+── Wave 5 (346s elapsed, 3254s left) | ctx=128000 | GTT=30770MB peak=30770MB ──
+
+── Wave 6 (1065s elapsed, 2535s left) | ctx=200000 | GTT=30770MB peak=30770MB ──
+  [w6s0] FAILED (no response, 661s) | GTT=30770MB peak=30770MB
+  [w6s1] FAILED (no response, 661s) | GTT=30770MB peak=30770MB
+
+── Wave 7 (1728s elapsed, 1872s left) | ctx=250000 | GTT=30770MB peak=30770MB ──
+  [w7s0] FAILED (no response, 900s) | GTT=30772MB peak=30772MB
+  [w7s1] FAILED (no response, 900s) | GTT=30772MB peak=30772MB
+
+── Wave 8 (2630s elapsed, 970s left) | ctx=1000 | GTT=30772MB peak=30772MB ──
+
+── Wave 9 (2647s elapsed, 953s left) | ctx=4000 | GTT=30772MB peak=30772MB ──
+
+── Wave 10 (2672s elapsed, 928s left) | ctx=16000 | GTT=30772MB peak=30772MB ──
+
+── Wave 11 (2726s elapsed, 874s left) | ctx=64000 | GTT=30772MB peak=30772MB ──
+
+── Wave 12 (2971s elapsed, 629s left) | ctx=128000 | GTT=30772MB peak=30772MB ──
+
+════════════════════════════════════════════════════════════════
+  SOAK TEST RESULTS
+════════════════════════════════════════════════════════════════
+  Tune:             v3b (parallel=2, checkpoints=30)
+  Duration:         3600s
+  Waves:            12
+  Total requests:   24
+  Failures:         4
+
+  Idle GTT:         30767 MB (30 GB)
+  Final GTT:        30772 MB (30 GB)
+  Peak GTT:         30772 MB (30 GB)
+  GTT delta:        5 MB from idle
+
+  ✅ VERDICT: PASS — peak 30772MB within 50GB limit
+════════════════════════════════════════════════════════════════
+
+Results: /path/to/code/llama-launcher/benchmark-results/soak-v3b-20260409-214136.log
+GTT trace: /path/to/code/llama-launcher/benchmark-results/soak-v3b-gtt-trace-20260409-214136.csv
