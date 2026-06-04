@@ -130,6 +130,7 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
+LEGACY_CONFIG_FILE="$SCRIPT_DIR/.llamacpp-helper-config"
 LLAMA_LAUNCHER_DIR="$SCRIPT_DIR"
 LAUNCH_HISTORY="$SCRIPT_DIR/.launch-history"
 
@@ -267,8 +268,10 @@ else
     # Load saved models dir from config
     if [ -f "$CONFIG_FILE" ]; then
         eval "$(cat "$CONFIG_FILE")"
-        export LLAMACPP_MODELS_DIR
+    elif [ -f "$LEGACY_CONFIG_FILE" ]; then
+        eval "$(cat "$LEGACY_CONFIG_FILE")"
     fi
+    export LLAMACPP_MODELS_DIR
     MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
 
     # Scan for model folders (each folder = one model family)

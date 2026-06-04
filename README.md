@@ -64,7 +64,7 @@ llama-launcher stop      # SIGINT llama-server and deep proxy; SIGTERM after 10s
 
 **Per-model configs:** `model-configs/<model>.conf`. CLI flags override saved values; use `--save` to persist.
 
-**Models directory:** scanned from `LLAMACPP_MODELS_DIR` or `/usr/local/share/llama.cpp/models`. Path is saved to `.llama-launcher-config` on first run.
+**Models directory:** scanned from `LLAMACPP_MODELS_DIR` or `/usr/local/share/llama.cpp/models`. Path is saved to `.llama-launcher-config` on first run. Existing `.llamacpp-helper-config` files are still read as a fallback.
 
 ### `llama-deep-proxy.mjs <listen-port> <backend-port> [log-file]`
 

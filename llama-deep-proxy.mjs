@@ -12,8 +12,8 @@
 //
 // Behavior:
 //   - All traffic forwarded to backend; bodies tee'd to log-file.
-//   - For POST /v1/messages, when --slot-cache-dir is set: hashes
-//     sha256(system + first-user-msg)[0:16] = sessionId, calls
+//   - For POST /v1/messages, when --slot-cache-dir is set: hashes a stable
+//     conversation anchor plus an early-prompt branch prefix, calls
 //     /slots/0?action=save then /slots/0?action=restore on the backend
 //     when sessionId differs from the currently-loaded slot.
 //   - Before each slot save, prunes the slot cache to keep (a) free disk
@@ -84,10 +84,11 @@ const llamaLog = llamaLogFile && !stdoutIsLlamaLog
 const SEP = "\n========================================\n";
 
 // ── Slot management state (parallel=1: single slot, but proxy serializes) ─
-let currentSession = null;        // sha256[:16] of (system + first user msg), or null
+let currentSession = null;        // prompt branch cache id, or null
 let slotMutex = Promise.resolve(); // Promise chain — await prior op before starting next
 let messageQueue = Promise.resolve(); // End-to-end /v1/messages queue when HDD cache is active
 let inFlightRequests = 0;          // for graceful shutdown drain
+const BRANCH_PREFIX_BYTES = 256 * 1024;
 // Tracks whether the slot is believed to hold real KV content. Set true after
 // a successful restore (n_restored > 0) or a 200 response from /v1/messages
 // (PP filled the slot). Set false after a failed restore — llama-server's
@@ -317,16 +318,20 @@ function callSlotAction(action, filename, timeoutMs = 0) {
 function sessionIdFromBody(jsonStr) {
   try {
     const obj = JSON.parse(jsonStr);
-    let key = "";
+    let anchor = "";
     if (obj.system) {
-      key += typeof obj.system === "string" ? obj.system : JSON.stringify(obj.system);
+      anchor += typeof obj.system === "string" ? obj.system : JSON.stringify(obj.system);
     }
     if (Array.isArray(obj.messages) && obj.messages.length > 0) {
       const m0 = obj.messages[0];
-      key += "\n" + (typeof m0.content === "string" ? m0.content : JSON.stringify(m0.content));
+      anchor += "\n" + (typeof m0.content === "string" ? m0.content : JSON.stringify(m0.content));
     }
-    if (!key) return null;
-    return createHash("sha256").update(key).digest("hex").slice(0, 16);
+    if (!anchor) return null;
+
+    const baseId = createHash("sha256").update(anchor).digest("hex").slice(0, 12);
+    const branchPrefix = jsonStr.slice(0, BRANCH_PREFIX_BYTES);
+    const branchId = createHash("sha256").update(branchPrefix).digest("hex").slice(0, 12);
+    return `${baseId}-${branchId}`;
   } catch {
     return null;
   }
