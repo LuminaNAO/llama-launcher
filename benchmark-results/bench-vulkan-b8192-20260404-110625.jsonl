@@ -1,0 +1,13 @@
+{"type": "header", "label": "vulkan-b8192", "model": "Qwen3.5-35B-A3B-H-v2-Q8_0.gguf", "timestamp": "2026-04-04T11:06:25+08:00"}
+{"test": "short-gen50", "target_ctx": 0, "actual_prompt_tokens": 25, "gen_tokens": 50, "prompt_tok_s": 178.46, "gen_tok_s": 53.04, "prompt_ms": 140, "gen_ms": 943}
+{"test": "short-gen200", "target_ctx": 0, "actual_prompt_tokens": 25, "gen_tokens": 200, "prompt_tok_s": 200.23, "gen_tok_s": 52.24, "prompt_ms": 125, "gen_ms": 3829}
+{"test": "short-gen500", "target_ctx": 0, "actual_prompt_tokens": 25, "gen_tokens": 500, "prompt_tok_s": 200.97, "gen_tok_s": 52.2, "prompt_ms": 124, "gen_ms": 9579}
+{"test": "med4k-gen200", "target_ctx": 4000, "actual_prompt_tokens": 3261, "gen_tokens": 200, "prompt_tok_s": 971.46, "gen_tok_s": 51.54, "prompt_ms": 3357, "gen_ms": 3881}
+{"test": "med4k-gen500", "target_ctx": 4000, "actual_prompt_tokens": 4, "gen_tokens": 500, "prompt_tok_s": 94.6, "gen_tok_s": 51.33, "prompt_ms": 42, "gen_ms": 9740}
+{"test": "large16k-gen200", "target_ctx": 16000, "actual_prompt_tokens": 10202, "gen_tokens": 200, "prompt_tok_s": 863.43, "gen_tok_s": 49.8, "prompt_ms": 11816, "gen_ms": 4016}
+{"test": "large16k-gen500", "target_ctx": 16000, "actual_prompt_tokens": 4, "gen_tokens": 500, "prompt_tok_s": 89.76, "gen_tok_s": 49.61, "prompt_ms": 45, "gen_ms": 10079}
+{"test": "xl64k-gen200", "target_ctx": 64000, "actual_prompt_tokens": 39254, "gen_tokens": 200, "prompt_tok_s": 559.07, "gen_tok_s": 44.29, "prompt_ms": 70214, "gen_ms": 4516}
+{"test": "xl64k-gen500", "target_ctx": 64000, "actual_prompt_tokens": 4, "gen_tokens": 500, "prompt_tok_s": 71.77, "gen_tok_s": 44.18, "prompt_ms": 56, "gen_ms": 11317}
+{"test": "xxl128k-gen500", "target_ctx": 128000, "actual_prompt_tokens": 52168, "gen_tokens": 500, "prompt_tok_s": 337.16, "gen_tok_s": 38.77, "prompt_ms": 154730, "gen_ms": 12897}
+{"test": "xxxl192k-gen500", "target_ctx": 192000, "actual_prompt_tokens": 52168, "gen_tokens": 500, "prompt_tok_s": 232.16, "gen_tok_s": 34.51, "prompt_ms": 224706, "gen_ms": 14490}
+{"test": "max256k-gen500", "target_ctx": 256000, "actual_prompt_tokens": 52168, "gen_tokens": 500, "prompt_tok_s": 176.66, "gen_tok_s": 29.82, "prompt_ms": 295308, "gen_ms": 16769}

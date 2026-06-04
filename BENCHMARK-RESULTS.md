@@ -127,6 +127,38 @@ Final decision: **keep only `-dio`**, revert threads and ubatch to defaults.
 Context scaling: 53→20 tok/s from short to 256k = **62% degradation** at max context.
 Usable up to ~128k (34 tok/s). 256k works but is noticeably slow at 20 tok/s.
 
+### Batch Size (`-b`) Benchmark
+
+Tested `-b` values: 512, 1024, 2048 (default), 4096, 8192. Server restarted
+between each test. Memory (GTT) logged before and after.
+
+**Generation (TG tok/s):**
+
+| Context | b=512 | b=1024 | b=2048 | b=4096 | b=8192 |
+|---------|-------|--------|--------|--------|--------|
+| Short | 52.8 | 53.1 | 53.1 | 52.9 | 53.0 |
+| 3k | 51.4 | 51.7 | 51.6 | 51.4 | 51.5 |
+| 10k | 49.6 | 49.8 | 49.7 | 49.7 | 49.8 |
+| 39k | 44.2 | 44.2 | 44.4 | 44.3 | 44.3 |
+| 52k | 38.7 | 38.8 | 38.8 | 38.8 | 38.8 |
+| ~128k | 34.5 | 34.5 | 34.6 | 34.6 | 34.5 |
+| ~256k | 30.0 | 30.9 | 30.9 | 31.1 | 29.8 |
+
+**Prompt Processing (PP tok/s):**
+
+| Context | b=512 | b=1024 | b=2048 | b=4096 | b=8192 |
+|---------|-------|--------|--------|--------|--------|
+| 3k | 975 | 976 | 971 | 972 | 972 |
+| 10k | 866 | 866 | 864 | 861 | 863 |
+| 39k | 561 | 561 | 560 | 558 | 559 |
+| 52k | 337 | 337 | 337 | 337 | 337 |
+
+**Memory:** Idle GTT = 43,930 MB across all batch sizes. Post-benchmark delta = 0 MB.
+
+**Conclusion:** Batch size has **zero measurable impact** on this hardware/model.
+The Vulkan backend handles batching internally, making `-b` irrelevant.
+Leave at default (2048).
+
 ## Raw Data
 
 Benchmark results are in `benchmark-results/` as JSONL files.
