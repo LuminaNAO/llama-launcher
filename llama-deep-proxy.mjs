@@ -92,11 +92,12 @@ let slotHasContent = false;
 // launcher's stdout shows them even when --no-deep-log routes the deep log
 // to /dev/null). Console output gets ANSI color so HDD hits stand out from
 // the firehose of regular server logs; the deep log gets plain text.
-const C_GREEN  = "\x1b[1;32m";  // bright green — restore HIT (HDD cache served)
-const C_YELLOW = "\x1b[33m";    // yellow      — restore MISS (cold session, no file yet)
-const C_CYAN   = "\x1b[36m";    // cyan        — save persisted
-const C_RED    = "\x1b[31m";    // red         — errors / non-200 save
-const C_DIM    = "\x1b[2m";     // dim         — boilerplate "save:" / "restore:" intent lines
+const C_GREEN   = "\x1b[1;32m";  // bright green — restore HIT (served from HDD)
+const C_YELLOW  = "\x1b[33m";    // yellow      — checkpoint/miss/prune warnings
+const C_CYAN    = "\x1b[36m";    // cyan        — save persisted
+const C_MAGENTA = "\x1b[1;35m";  // bright purple — HDD cache operation banners
+const C_RED     = "\x1b[31m";    // red         — errors / non-200 save
+const C_DIM     = "\x1b[2m";     // dim         — low-priority detail
 const C_RESET  = "\x1b[0m";
 
 function slotLog(line, color = null) {
@@ -207,12 +208,17 @@ function pruneSlotCacheIfNeeded(currentSlotFilename, incomingSlotFilename = null
 // Color a slot-action status line based on the parsed status code.
 function colorForStatus(action, status) {
   if (action === "restore") {
-    return status === 200 ? C_GREEN : C_YELLOW;   // HIT vs cold
+    return status === 200 ? C_GREEN : C_YELLOW;   // HDD hit vs cold/miss
   }
   if (action === "save") {
     return status === 200 ? C_CYAN : C_RED;
   }
   return null;
+}
+
+function hddBanner(action, filename, detail = "") {
+  const suffix = detail ? ` ${detail}` : "";
+  slotLog(`\n=== HDD CACHE ${action}: ${filename}${suffix}\n`, C_MAGENTA);
 }
 
 function parseSlotActionBody(r) {
@@ -306,27 +312,27 @@ async function ensureSlotLoaded(newSessionId) {
         // Skip: slot is known-empty (previous restore failed, no /v1/messages
         // has populated it since). Saving here would overwrite the on-disk
         // file with a zero-token payload, locking in the corruption.
-        slotLog(`\n--- SLOT save SKIPPED (slot empty): ${currentSession}.bin\n`, C_YELLOW);
+        slotLog(`\n=== HDD CACHE save SKIPPED: ${currentSession}.bin (slot empty; not overwriting cache)\n`, C_YELLOW);
       } else {
         ensureSlotCacheDir();
         // Pass both: don't evict the slot we're saving (currentSession) OR
         // the one we're about to restore next (newSessionId). Otherwise the
         // LRU prune can wipe our restore target before we read it.
         pruneSlotCacheIfNeeded(`${currentSession}.bin`, `${newSessionId}.bin`);
-        slotLog(`\n--- SLOT save: ${currentSession}.bin\n`, C_DIM);
+        hddBanner("save", `${currentSession}.bin`, "(writes .bin + .bin.ckpt)");
         const r = await callSlotAction("save", `${currentSession}.bin`);
         const save = slotSaveSucceeded(r);
         slotLog(
-          `--- SLOT save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten}\n`,
+          `HDD CACHE save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten} checkpoint_sidecar=${currentSession}.bin.ckpt\n`,
           save.ok ? C_CYAN : C_RED,
         );
       }
     }
-    slotLog(`\n--- SLOT restore: ${newSessionId}.bin\n`, C_DIM);
+    hddBanner("restore", `${newSessionId}.bin`, "(reads .bin + .bin.ckpt)");
     const r = await callSlotAction("restore", `${newSessionId}.bin`);
     const restore = slotRestoreSucceeded(r);
     slotLog(
-      `--- SLOT restore status=${r.status} n_restored=${restore.nRestored} n_read=${restore.nRead} ${r.body.slice(0, 200)}\n`,
+      `HDD CACHE restore status=${r.status} n_restored=${restore.nRestored} n_read=${restore.nRead} checkpoint_sidecar=${newSessionId}.bin.ckpt ${r.body.slice(0, 200)}\n`,
       restore.ok ? C_GREEN : colorForStatus("restore", r.status),
     );
     // Restore returning 4xx/5xx (e.g., file not found) is normal for new sessions.
@@ -350,16 +356,16 @@ async function saveCurrentSlot(reason, timeoutMs = 0) {
   await prev;
   try {
     if (!slotHasContent) {
-      slotLog(`\n--- SLOT save (${reason}) SKIPPED (slot empty): ${currentSession}.bin\n`, C_YELLOW);
+      slotLog(`\n=== HDD CACHE save (${reason}) SKIPPED: ${currentSession}.bin (slot empty; not overwriting cache)\n`, C_YELLOW);
       return;
     }
     ensureSlotCacheDir();
     pruneSlotCacheIfNeeded(`${currentSession}.bin`);
-    slotLog(`\n--- SLOT save (${reason}): ${currentSession}.bin\n`, C_DIM);
+    hddBanner(`save (${reason})`, `${currentSession}.bin`, "(writes .bin + .bin.ckpt)");
     const r = await callSlotAction("save", `${currentSession}.bin`, timeoutMs);
     const save = slotSaveSucceeded(r);
     slotLog(
-      `--- SLOT save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten}\n`,
+      `HDD CACHE save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten} checkpoint_sidecar=${currentSession}.bin.ckpt\n`,
       save.ok ? C_CYAN : C_RED,
     );
   } finally {
