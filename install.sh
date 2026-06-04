@@ -441,6 +441,7 @@ else
     mkdir -p "$LINK_DIR"
 fi
 LINK="$LINK_DIR/llama-launcher"
+LOG_LINK="$LINK_DIR/llama-launcher-log"
 
 if [[ -e "$LINK" || -L "$LINK" ]]; then
     if [[ -L "$LINK" && "$(readlink -f "$LINK")" == "$TARGET" ]]; then
@@ -455,6 +456,23 @@ if [[ -e "$LINK" || -L "$LINK" ]]; then
 else
     ln -s "$TARGET" "$LINK"
     echo "Installed: $LINK -> $TARGET"
+fi
+
+# Install llama-launcher-log alongside (symlink to same script; the script
+# dispatches on basename "$0" or first arg "log" to do `tail -f llama.log`).
+if [[ -e "$LOG_LINK" || -L "$LOG_LINK" ]]; then
+    if [[ -L "$LOG_LINK" && "$(readlink -f "$LOG_LINK")" == "$TARGET" ]]; then
+        echo "Already installed: $LOG_LINK -> $TARGET"
+    else
+        echo "WARNING: $LOG_LINK exists and points elsewhere, or is a regular file."
+        read -rp "Overwrite? [y/N] " ans
+        [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 1; }
+        ln -sfn "$TARGET" "$LOG_LINK"
+        echo "Updated: $LOG_LINK -> $TARGET"
+    fi
+else
+    ln -s "$TARGET" "$LOG_LINK"
+    echo "Installed: $LOG_LINK -> $TARGET"
 fi
 
 SHELL_NAME="$(detect_shell_name)"
@@ -480,3 +498,4 @@ esac
 echo ""
 echo "Run:  llama-launcher        # interactive"
 echo "      llama-launcher stop   # graceful shutdown"
+echo "      llama-launcher-log    # tail -f the repo-local llama.log"
