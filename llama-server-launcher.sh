@@ -568,7 +568,7 @@ if [ "$HAS_MODEL_CONFIG" -eq 1 ]; then
     SLOT_SAVE_PATH="${SLOT_SAVE_PATH:-}"
 
     echo "📋 Profile: per-model (${CONTEXT} ctx, ${CACHE_TYPE_K} KV, ${CACHE_RAM} MiB cache ceiling, ${PARALLEL} slots)"
-    [ -n "$SLOT_SAVE_PATH" ] && echo "💾 Slot save dir: $SLOT_SAVE_PATH"
+    # Note: actual slot dir is namespaced per-quant inside the proxy block.
 # CACHE_RAM semantics (see docs/CACHE-RAM.md): host-memory heap ceiling in MiB.
 # Not disk, not pre-allocated — self-shrinks on bad_alloc. Under RAM pressure,
 # cache pages spill to swap via the kernel VM subsystem (~200× faster than cold
@@ -844,8 +844,22 @@ if [ "$NO_PROXY" -eq 0 ]; then
     fi
     PROXY_ARGS=("$PORT" "$INTERNAL_PORT" "$EFFECTIVE_DEEP_LOG")
     if [ -n "${SLOT_SAVE_PATH:-}" ]; then
-        mkdir -p "$SLOT_SAVE_PATH"
-        PROXY_ARGS+=(--slot-cache-dir "$SLOT_SAVE_PATH" --api-key "$API_KEY")
+        # Per-quant namespacing: each .gguf file gets its own slot pool.
+        # Slot files are KV cache bytes computed against specific model weights;
+        # different quants of the same model produce incompatible bytes (returns
+        # 400 on restore). Per-quant dirs prevent cross-quant 400 noise and let
+        # each quant accumulate warm state independently.
+        _model_basename="$(basename "$model_path" .gguf)"
+        EFFECTIVE_SLOT_SAVE_PATH="$SLOT_SAVE_PATH/$_model_basename"
+        mkdir -p "$EFFECTIVE_SLOT_SAVE_PATH"
+        echo "💾 Slot save namespace: $EFFECTIVE_SLOT_SAVE_PATH"
+        # One-time warning for stale flat-layout files from before namespacing
+        if compgen -G "$SLOT_SAVE_PATH/*.bin" >/dev/null 2>&1; then
+            _stale_count=$(ls "$SLOT_SAVE_PATH"/*.bin 2>/dev/null | wc -l)
+            echo "ℹ️  Found $_stale_count flat .bin file(s) at $SLOT_SAVE_PATH/ root (pre-namespacing)."
+            echo "   Not used by current launch. Clean with: rm $SLOT_SAVE_PATH/*.bin"
+        fi
+        PROXY_ARGS+=(--slot-cache-dir "$EFFECTIVE_SLOT_SAVE_PATH" --api-key "$API_KEY")
     fi
     # Capture proxy stdout/stderr into ~/llama.log when --log is set, so slot
     # mgmt lines (slotLog console output) and any proxy errors are persisted
@@ -906,7 +920,7 @@ LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
   ${MMPROJ:+--mmproj "$MMPROJ"}
   ${REASONING_FLAGS:+$REASONING_FLAGS}
   ${REPEAT_FLAGS:+$REPEAT_FLAGS}
-  ${SLOT_SAVE_PATH:+--slot-save-path "$SLOT_SAVE_PATH"}
+  ${EFFECTIVE_SLOT_SAVE_PATH:+--slot-save-path "$EFFECTIVE_SLOT_SAVE_PATH"}
   ${EXTRA_ARGS:+$EXTRA_ARGS}
 )
 
