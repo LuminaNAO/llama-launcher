@@ -7,8 +7,9 @@
 #   export LLAMACPP_SERVER_PATH=/path/to/llama-server
 #   export LLAMACPP_BUILD_TYPE=rocm|vulkan|debug|release
 
-# Config file for storing user-selected models path
-CONFIG_FILE="$HOME/.llama-launcher-config"
+# Config file lives in the repo dir so it stays with the project
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
 
 # Default path
 DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
@@ -56,7 +57,6 @@ fi
 MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
 
 # Discover llama.cpp builds dynamically
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LLAMA_LAUNCHER_DIR="$SCRIPT_DIR"
 LLAMACPP_DIR="$LLAMA_LAUNCHER_DIR/llama.cpp"
 
