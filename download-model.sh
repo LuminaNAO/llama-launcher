@@ -240,6 +240,40 @@ for part in "${sel_parts[@]}"; do
     fi
 done
 
+# ── Select projection files ──────────────────────────────────────────────────
+proj_indices=()
+if [ "$PROJ_COUNT" -gt 0 ]; then
+    if [ "$PROJ_COUNT" -gt 1 ]; then
+        echo ""
+        echo "Select projection file(s):"
+        python3 -c "
+import json
+d = json.load(open('$PARSE_FILE'))
+for i, p in enumerate(d['projections']):
+    size_gb = p['size'] / (1024**3)
+    print(f'  {i+1}) {p[\"name\"]:50s} {size_gb:.2f} GB')
+"
+        echo "  a) All"
+        echo "  n) None"
+        echo ""
+        read -rp "Select [1-${PROJ_COUNT}, comma-separated, a=all, n=none]: " proj_sel
+
+        if [[ "$proj_sel" == "n" || "$proj_sel" == "N" ]]; then
+            proj_indices=()
+        elif [[ "$proj_sel" == "a" || "$proj_sel" == "A" ]]; then
+            for ((i=0; i<PROJ_COUNT; i++)); do proj_indices+=("$i"); done
+        else
+            IFS=',' read -ra pparts <<< "$proj_sel"
+            for pp in "${pparts[@]}"; do
+                pp="$(echo "$pp" | tr -d ' ')"
+                proj_indices+=("$((pp-1))")
+            done
+        fi
+    else
+        proj_indices=(0)
+    fi
+fi
+
 # ── Derive folder name ──────────────────────────────────────────────────────
 FOLDER_NAME="$REPO_NAME"
 FOLDER_NAME="${FOLDER_NAME%-GGUF}"
@@ -247,12 +281,34 @@ FOLDER_NAME="${FOLDER_NAME%-gguf}"
 
 TARGET_DIR="$MODELS_DIR/$FOLDER_NAME"
 
+# ── Summary and confirm ─────────────────────────────────────────────────────
 echo ""
 echo "Target folder: $TARGET_DIR"
-
 if [ -d "$TARGET_DIR" ]; then
     echo "  (folder exists — files will be added to it)"
 fi
+
+# Calculate total download size
+total_size=0
+for idx in "${selected_indices[@]}"; do
+    item_size="$(python3 -c "
+import json
+d = json.load(open('$PARSE_FILE'))
+print(d['items'][$idx]['size'])
+")"
+    total_size=$((total_size + item_size))
+done
+for pi in "${proj_indices[@]}"; do
+    proj_size="$(python3 -c "
+import json
+d = json.load(open('$PARSE_FILE'))
+print(d['projections'][$pi]['size'])
+")"
+    total_size=$((total_size + proj_size))
+done
+total_gb="$(python3 -c "print(f'{$total_size / (1024**3):.2f}')")"
+echo "  Total download: ~${total_gb} GB"
+echo ""
 
 read -rp "Proceed? [y/n]: " confirm
 if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
@@ -296,13 +352,12 @@ download_file() {
     fi
 }
 
-# ── Download selected quants ─────────────────────────────────────────────────
+# ── Download everything ──────────────────────────────────────────────────────
 echo ""
 echo "Downloading..."
 echo ""
 
 for idx in "${selected_indices[@]}"; do
-    # Extract item details from parse file
     item_data="$(python3 -c "
 import json, sys
 d = json.load(open('$PARSE_FILE'))
@@ -319,7 +374,6 @@ for f in item['files']:
     item_label="$(head -1 <<< "$item_data")"
     echo "── $item_label ──"
 
-    # Download each file
     tail -n +2 <<< "$item_data" | while IFS=$'\t' read -r file_path file_size; do
         file_name="$(basename "$file_path")"
         download_file "$file_path" "$TARGET_DIR/$file_name" "$file_size"
@@ -327,39 +381,8 @@ for f in item['files']:
     echo ""
 done
 
-# ── Download projection files ────────────────────────────────────────────────
-if [ "$PROJ_COUNT" -gt 0 ]; then
+if [ ${#proj_indices[@]} -gt 0 ]; then
     echo "── Projection files ──"
-
-    if [ "$PROJ_COUNT" -gt 1 ]; then
-        echo ""
-        echo "Multiple projection files available:"
-        python3 -c "
-import json
-d = json.load(open('$PARSE_FILE'))
-for i, p in enumerate(d['projections']):
-    size_gb = p['size'] / (1024**3)
-    print(f'  {i+1}) {p[\"name\"]:50s} {size_gb:.2f} GB')
-"
-        echo "  a) All"
-        echo ""
-        read -rp "Select [1-${PROJ_COUNT}, comma-separated, or a for all]: " proj_sel
-
-        if [[ "$proj_sel" == "a" || "$proj_sel" == "A" ]]; then
-            proj_indices=()
-            for ((i=0; i<PROJ_COUNT; i++)); do proj_indices+=("$i"); done
-        else
-            proj_indices=()
-            IFS=',' read -ra pparts <<< "$proj_sel"
-            for pp in "${pparts[@]}"; do
-                pp="$(echo "$pp" | tr -d ' ')"
-                proj_indices+=("$((pp-1))")
-            done
-        fi
-    else
-        proj_indices=(0)
-    fi
-
     for pi in "${proj_indices[@]}"; do
         proj_data="$(python3 -c "
 import json
