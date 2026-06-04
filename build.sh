@@ -4,13 +4,13 @@
 #
 # <build-type> is <backend>[-<tag>], where <backend> ∈ {rocm,vulkan,cuda}.
 # The optional -tag suffix selects a parallel output directory under builds/
-# so multiple variants of the same backend can coexist (e.g. a fork build).
+# so experimental variants of the same backend can coexist.
 #   ./build.sh rocm           # → builds/rocm (default mainline source)
-#   ./build.sh rocm-mtp       # → builds/rocm-mtp (tagged mainline build)
+#   ./build.sh rocm-test      # → builds/rocm-test
 #
 # To build from a non-default llama.cpp source tree,
 # set LLAMACPP_SRC:
-#   LLAMACPP_SRC=/path/to/llama.cpp ./build.sh rocm-mtp
+#   LLAMACPP_SRC=/path/to/llama.cpp ./build.sh rocm-test
 #
 # GPU arch is auto-detected for ROCm builds but can be overridden:
 #   ./build.sh rocm gfx1100    # Force RX 7900 series target
@@ -48,12 +48,12 @@ if [ -z "$BUILD_TYPE" ]; then
     echo "  ./build.sh rocm gfx1151    # ROCm for Strix Halo"
     echo "  ./build.sh cuda            # CUDA backend (auto-detect NVIDIA GPU)"
     echo "  ./build.sh cuda 89         # CUDA for Ada Lovelace (RTX 4090)"
-    echo "  ./build.sh rocm-mtp        # Tagged mainline ROCm build"
+    echo "  ./build.sh rocm-test       # Tagged ROCm build"
     exit 1
 fi
 
 BUILD_DIR="$SCRIPT_DIR/builds/$BUILD_TYPE"
-# Backend = prefix before the first dash, so e.g. "rocm-mtp" uses the rocm
+# Backend = prefix before the first dash, so e.g. "rocm-test" uses the rocm
 # toolchain/cmake flags but lands in a separate output dir.
 BACKEND="${BUILD_TYPE%%-*}"
 # Tag = the rest after the first dash, empty if none. Tags select separate
@@ -229,7 +229,7 @@ case "$BACKEND" in
         echo "  ./build.sh vulkan    # Recommended for Strix Halo / RDNA 3.5"
         echo "  ./build.sh rocm      # ROCm/HIP backend"
         echo "  ./build.sh cuda      # NVIDIA CUDA backend"
-        echo "  LLAMACPP_SRC=/path/to/llama.cpp ./build.sh rocm-mtp          # alternate source"
+        echo "  LLAMACPP_SRC=/path/to/llama.cpp ./build.sh rocm-test         # alternate source"
         exit 1
         ;;
 esac
