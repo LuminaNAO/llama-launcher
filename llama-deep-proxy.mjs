@@ -86,6 +86,7 @@ const SEP = "\n========================================\n";
 // ── Slot management state (parallel=1: single slot, but proxy serializes) ─
 let currentSession = null;        // sha256[:16] of (system + first user msg), or null
 let slotMutex = Promise.resolve(); // Promise chain — await prior op before starting next
+let messageQueue = Promise.resolve(); // End-to-end /v1/messages queue when HDD cache is active
 let inFlightRequests = 0;          // for graceful shutdown drain
 // Tracks whether the slot is believed to hold real KV content. Set true after
 // a successful restore (n_restored > 0) or a 200 response from /v1/messages
@@ -95,6 +96,13 @@ let inFlightRequests = 0;          // for graceful shutdown drain
 // file that overwrites a previously-good cache. The save gate below uses
 // this to refuse such self-destructive saves.
 let slotHasContent = false;
+
+function enqueueMessage(fn) {
+  const prev = messageQueue.catch(() => {});
+  const run = prev.then(fn);
+  messageQueue = run.catch(() => {});
+  return run;
+}
 
 // Slot ops to BOTH the deep log (for grep/audit) AND console (so the
 // launcher's stdout shows them even when --no-deep-log routes the deep log
@@ -408,7 +416,7 @@ async function saveCurrentSlot(reason, timeoutMs = 0) {
 // stream finishes (success or aborted).
 function pipeResponse(tag, proxyRes, clientRes, onDone) {
   let done = false;
-  const finalize = () => { if (!done) { done = true; onDone(); } };
+  const finalize = (result = {}) => { if (!done) { done = true; onDone(result); } };
 
   const teardown = () => {
     try { proxyRes.destroy(); } catch {}
@@ -435,7 +443,7 @@ function pipeResponse(tag, proxyRes, clientRes, onDone) {
     if (!done) {
       log.write(`\n--- client closed early ${tag}\n`);
       try { proxyRes.destroy(); } catch {}
-      finalize();
+      finalize({ ended: false, reason: "client-close", statusCode: proxyRes.statusCode });
     }
   });
   clientRes.on("error", (e) => {
@@ -446,12 +454,12 @@ function pipeResponse(tag, proxyRes, clientRes, onDone) {
   proxyRes.on("end", () => {
     log.write("\n");
     try { clientRes.end(); } catch {}
-    finalize();
+    finalize({ ended: true, reason: "backend-end", statusCode: proxyRes.statusCode });
   });
   proxyRes.on("error", (e) => {
     log.write(`\n!!! proxyRes error ${tag}: ${e.message}\n`);
     try { clientRes.end(); } catch {}
-    finalize();
+    finalize({ ended: false, reason: "backend-error", statusCode: proxyRes.statusCode });
   });
 }
 
@@ -471,6 +479,61 @@ function pipeRequestStreaming(tag, clientReq, proxyReq) {
   clientReq.on("error", (e) => {
     log.write(`\n!!! clientReq error ${tag}: ${e.message}\n`);
     try { proxyReq.destroy(); } catch {}
+  });
+}
+
+async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessionId, finalize) {
+  try {
+    if (sessionId && slotCacheDir) await ensureSlotLoaded(sessionId);
+  } catch (e) {
+    log.write(`\n!!! SLOT mgmt error ${tag}: ${e.message}\n`);
+  }
+
+  // Re-send the buffered request. Strip hop-by-hop and length-related
+  // headers from the inbound request — we control the body length now,
+  // and forwarding stale Transfer-Encoding/Connection/Host can corrupt
+  // the request on the backend (chunked + content-length conflict per
+  // RFC 7230 → silent body parsing failures, e.g., tool-call grammar
+  // not engaging on the response side).
+  const fwdHeaders = { ...clientReq.headers };
+  delete fwdHeaders["transfer-encoding"];
+  delete fwdHeaders["content-length"];
+  delete fwdHeaders["connection"];
+  delete fwdHeaders["host"];
+  fwdHeaders["content-length"] = Buffer.byteLength(bodyBuf);
+
+  await new Promise((resolve) => {
+    const proxyReq = httpRequest({
+      hostname: "127.0.0.1",
+      port: backendPort,
+      path: clientReq.url,
+      method: clientReq.method,
+      headers: fwdHeaders,
+    }, (proxyRes) => {
+      pipeResponse(tag, proxyRes, clientRes, (result) => {
+        // Only a complete 200 response means the loaded slot now contains
+        // a successful session state that is safe to save on the next switch.
+        // Setting this at response headers is too early: another session can
+        // arrive while prompt processing/generation is still mutating the slot.
+        if (result.ended && result.statusCode === 200) {
+          slotHasContent = true;
+        }
+        finalize();
+        resolve();
+      });
+    });
+
+    proxyReq.on("error", (e) => {
+      log.write(`\n!!! proxyReq error ${tag}: ${e.message}\n`);
+      if (!clientRes.headersSent) {
+        try { clientRes.writeHead(502, { "Content-Type": "text/plain" }); } catch {}
+      }
+      try { clientRes.end(`Proxy error: ${e.message}`); } catch {}
+      finalize();
+      resolve();
+    });
+
+    proxyReq.end(bodyBuf);
   });
 }
 
@@ -511,53 +574,12 @@ const server = createServer(async (clientReq, clientRes) => {
       requestLog(
         `REQUEST ${tag} body_bytes=${bodyBuf.length} (${formatBytes(bodyBuf.length)}) content_length=${clientReq.headers["content-length"] ?? "chunked"} session=${sessionId ?? "none"}\n`,
       );
-      try {
-        if (sessionId && slotCacheDir) await ensureSlotLoaded(sessionId);
-      } catch (e) {
-        log.write(`\n!!! SLOT mgmt error ${tag}: ${e.message}\n`);
+      const run = () => processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessionId, finalize);
+      if (slotCacheDir) {
+        await enqueueMessage(run);
+      } else {
+        await run();
       }
-
-      // Re-send the buffered request. Strip hop-by-hop and length-related
-      // headers from the inbound request — we control the body length now,
-      // and forwarding stale Transfer-Encoding/Connection/Host can corrupt
-      // the request on the backend (chunked + content-length conflict per
-      // RFC 7230 → silent body parsing failures, e.g., tool-call grammar
-      // not engaging on the response side).
-      const fwdHeaders = { ...clientReq.headers };
-      delete fwdHeaders["transfer-encoding"];
-      delete fwdHeaders["content-length"];
-      delete fwdHeaders["connection"];
-      delete fwdHeaders["host"];
-      fwdHeaders["content-length"] = Buffer.byteLength(bodyBuf);
-
-      const proxyReq = httpRequest({
-        hostname: "127.0.0.1",
-        port: backendPort,
-        path: clientReq.url,
-        method: clientReq.method,
-        headers: fwdHeaders,
-      }, (proxyRes) => {
-        // A 200 from /v1/messages means the backend got at least to prompt
-        // processing — slot is now populated with this session's tokens, so
-        // future saves on a session switch can persist real content. This
-        // also recovers from a stuck "known-empty" state caused by an earlier
-        // failed/zero-token restore.
-        if (proxyRes.statusCode === 200) {
-          slotHasContent = true;
-        }
-        pipeResponse(tag, proxyRes, clientRes, finalize);
-      });
-
-      proxyReq.on("error", (e) => {
-        log.write(`\n!!! proxyReq error ${tag}: ${e.message}\n`);
-        if (!clientRes.headersSent) {
-          try { clientRes.writeHead(502, { "Content-Type": "text/plain" }); } catch {}
-        }
-        try { clientRes.end(`Proxy error: ${e.message}`); } catch {}
-        finalize();
-      });
-
-      proxyReq.end(bodyBuf);
     });
     return;
   }
