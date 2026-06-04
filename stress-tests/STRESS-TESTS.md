@@ -89,5 +89,4 @@ Supports both ROCm (rocm-smi) and NVIDIA (nvidia-smi) GPUs.
 | Gemopus-4-26B-A4B-it | Q8_0 | PEG | 120K (62K pt) | b8783+ |
 | Gemopus-4-26B-A4B-it | Q8_0 | JINJA | 120K (62K pt) | b8783+ |
 | supergemma4-26b-uncensored | Q4_K_M | JINJA | 120K (62K pt) | b8783+ (was ~45K pre-fix) |
-| supergemma4-26b-uncensored | Q4_K_M | PEG | ~35K (26K pt) | pre-b8783, untested post-fix |
-| supergemma4-26b-uncensored | Q4_K_M | JINJA | ~45K (33K pt) | pre-b8783 (historical) |
+| supergemma4-26b-uncensored | Q4_K_M | PEG | 120K (62K pt) | b8783+ (was ~35K pre-fix) |
