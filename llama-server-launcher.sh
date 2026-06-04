@@ -59,7 +59,7 @@ export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
   -ngl 99 \
   -c 122144 \
   -fa on \
-  --temp 0.7 \
+  --temp 0.6 \
   --top-p 0.95 \
   --top-k 20 \
   --threads $(nproc) \
