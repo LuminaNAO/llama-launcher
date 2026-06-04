@@ -139,7 +139,9 @@ function totalSlotsBytes(rootDir) {
   return total;
 }
 
-function findOldestBin(rootDir, excludeBasename) {
+function findOldestBin(rootDir, excludeBasenames) {
+  // excludeBasenames is a Set of file basenames that must NOT be evicted —
+  // typically the slot we're saving now AND the slot we're about to load next.
   let oldest = null;
   let entries;
   try { entries = readdirSync(rootDir, { withFileTypes: true }); } catch { return null; }
@@ -150,7 +152,7 @@ function findOldestBin(rootDir, excludeBasename) {
     try { files = readdirSync(subPath); } catch { continue; }
     for (const f of files) {
       if (!f.endsWith(".bin")) continue;
-      if (f === excludeBasename) continue;
+      if (excludeBasenames.has(f)) continue;
       const full = join(subPath, f);
       let m;
       try { m = statSync(full).mtimeMs; } catch { continue; }
@@ -160,10 +162,18 @@ function findOldestBin(rootDir, excludeBasename) {
   return oldest;
 }
 
-function pruneSlotCacheIfNeeded(currentSlotFilename) {
+function pruneSlotCacheIfNeeded(currentSlotFilename, incomingSlotFilename = null) {
+  // Protect BOTH the slot we're about to save (current) and the slot we're
+  // about to load next (incoming). Without the second exclusion, an LRU
+  // candidate that happens to be the incoming session can get evicted right
+  // before the proxy tries to restore it, causing the restore to fail with
+  // "failed to open". incomingSlotFilename may be null (e.g., on plain
+  // saveCurrentSlot without a follow-up restore).
   if (!slotCacheDir) return;
   const slotRoot = dirname(slotCacheDir.replace(/\/$/, ""));
-  const excludeBasename = basename(currentSlotFilename);
+  const excludeBasenames = new Set();
+  if (currentSlotFilename) excludeBasenames.add(basename(currentSlotFilename));
+  if (incomingSlotFilename) excludeBasenames.add(basename(incomingSlotFilename));
   let evicted = 0;
   const maxIters = 1000;  // safety: never loop forever
   for (let iter = 0; iter < maxIters; iter++) {
@@ -172,7 +182,7 @@ function pruneSlotCacheIfNeeded(currentSlotFilename) {
     const lowFree = free < minFreeGB;
     const highTotal = totalGB > maxTotalSlotsGB;
     if (!lowFree && !highTotal) break;
-    const victim = findOldestBin(slotRoot, excludeBasename);
+    const victim = findOldestBin(slotRoot, excludeBasenames);
     if (!victim) {
       slotLog(`pruneSlotCache: out of candidates (free=${free.toFixed(1)} GB, total=${totalGB.toFixed(1)} GB; want free>=${minFreeGB}, total<=${maxTotalSlotsGB})\n`, C_YELLOW);
       break;
@@ -299,7 +309,10 @@ async function ensureSlotLoaded(newSessionId) {
         slotLog(`\n--- SLOT save SKIPPED (slot empty): ${currentSession}.bin\n`, C_YELLOW);
       } else {
         ensureSlotCacheDir();
-        pruneSlotCacheIfNeeded(`${currentSession}.bin`);
+        // Pass both: don't evict the slot we're saving (currentSession) OR
+        // the one we're about to restore next (newSessionId). Otherwise the
+        // LRU prune can wipe our restore target before we read it.
+        pruneSlotCacheIfNeeded(`${currentSession}.bin`, `${newSessionId}.bin`);
         slotLog(`\n--- SLOT save: ${currentSession}.bin\n`, C_DIM);
         const r = await callSlotAction("save", `${currentSession}.bin`);
         const save = slotSaveSucceeded(r);
