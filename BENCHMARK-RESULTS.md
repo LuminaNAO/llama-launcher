@@ -97,6 +97,36 @@ For ROCm (when used):
 
 For Vulkan: no special env vars needed.
 
+## Optimization Testing (2026-04-04)
+
+### Settings tested: --threads 8, -ub 256, -dio
+
+Tested reducing threads from 32→8, micro-batch from 512→256, and enabling direct I/O.
+
+| Setting | Impact on TG | Impact on PP | Verdict |
+|---------|-------------|-------------|---------|
+| `--threads 8` | +1-3% short ctx, ~0% long | **-18% across the board** | REVERT — PP regression too large |
+| `-ub 256` | ~0% | **-18% across the board** | REVERT — no TG benefit, PP hurt |
+| `-dio` | ~0% | ~0% | KEEP — no perf impact, faster model loading |
+
+Combined (threads=8 + ub=256 + dio): TG +1-3% short, PP -18%. Not worth it.
+Final decision: **keep only `-dio`**, revert threads and ubatch to defaults.
+
+### Extended Context Benchmark (Vulkan + DIO, defaults otherwise)
+
+| Context | PP tok/s | TG tok/s |
+|---------|----------|----------|
+| Short (~25 tok) | 200 | **53.1** |
+| 3k | 969 | **51.6** |
+| 10k | 861 | **49.8** |
+| 39k | 560 | **44.3** |
+| 52k | 336 | **38.7** |
+| ~128k | 231 | **34.4** |
+| ~256k | 175 | **19.9** |
+
+Context scaling: 53→20 tok/s from short to 256k = **62% degradation** at max context.
+Usable up to ~128k (34 tok/s). 256k works but is noticeably slow at 20 tok/s.
+
 ## Raw Data
 
 Benchmark results are in `benchmark-results/` as JSONL files.

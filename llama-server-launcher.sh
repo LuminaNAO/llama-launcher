@@ -367,6 +367,7 @@ echo ""
   --top-k 20 \
   --threads $(nproc) \
   --no-mmap \
+  -dio \
   --timeout 3600 \
   --host 0.0.0.0 \
   --port 40801 \
