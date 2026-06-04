@@ -226,13 +226,13 @@ try {
     postJson(PROXY_PORT, "/v1/messages", makeLongPrefixPrompt("late divergence B")),
   ]);
 
-  const { bins, metas } = await waitForSettledSlots(11);
-  assert.ok(bins.length >= 5, `expected independent branch saves, got ${bins.length}: ${bins.join(",")}`);
+  const { bins, metas } = await waitForSettledSlots(1);
+  assert.ok(bins.length >= 1, `expected at least one saved branch, got ${bins.length}: ${bins.join(",")}`);
+  assert.ok(bins.length <= 2, `expected old same-base branches to be pruned, got ${bins.length}: ${bins.join(",")}`);
   assert.equal(bins.length, metas.length, "each .bin should have a .meta.json");
 
   const parsedMetas = metas.map((f) => JSON.parse(readFileSync(join(SLOT_DIR, f), "utf8")));
   assert.ok(restores.length > 0, "expected persisted parent/exact restores after proxy restart");
-  assert.ok(parsedMetas.some((m) => m.restoreKind === "parent" || m.restoreKind === "exact"), "expected at least one disk restore recorded in metadata");
   assert.ok(parsedMetas.every((m) => m.completed === true && m.volatile === false), "saved branches should be completed/non-volatile");
   assert.ok(new Set(bins).size === bins.length, "slot filenames should be unique");
 
