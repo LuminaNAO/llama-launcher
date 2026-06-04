@@ -30,9 +30,9 @@
 #                    slot-cache root (default 200). Same LRU eviction.
 #   --proxy          Enable the proxy (default: off). Required for slot
 #                    save/restore. Slot mgmt lines log to console.
-#   --log            Tee server stdout/stderr to ~/llama.log (default: off)
+#   --log            Tee server stdout/stderr to llama.log (in repo dir; default: off)
 #   --deep-log       With --proxy: also persist request/response BODIES to
-#                    ~/llama-deep.log (default: off, since the file grows fast).
+#                    llama-deep.log (in repo dir; default: off, since the file grows fast).
 #                    Useful for diagnostics / debugging template issues.
 #   --save           Save effective launch settings as a per-model config
 #
@@ -135,6 +135,8 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
 LLAMA_LAUNCHER_DIR="$SCRIPT_DIR"
 LAUNCH_HISTORY="$SCRIPT_DIR/.launch-history"
+LLAMA_LOG_FILE="$SCRIPT_DIR/llama.log"
+DEEP_LOG="$SCRIPT_DIR/llama-deep.log"
 DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
 AUTHOR_BEST_PICKS_FILE="$SCRIPT_DIR/model-configs/author-best-picks.sh"
 
@@ -1228,9 +1230,8 @@ fi
 
 # ── Deep logging proxy ──────────────────────────────────────────────────────
 # The proxy listens on PORT (public) and forwards to INTERNAL_PORT (llama-server).
-# Both request and response bodies are tee-d to ~/llama-deep.log.
+# Both request and response bodies are tee-d to llama-deep.log (in the repo dir).
 INTERNAL_PORT="${INTERNAL_PORT:-40802}"
-DEEP_LOG="$HOME/llama-deep.log"
 PROXY_SCRIPT="$SCRIPT_DIR/llama-deep-proxy.mjs"
 
 # ── Port selection (CLI flags > interactive prompt > tune/default) ──────────
@@ -1328,9 +1329,9 @@ if [ "$LOG_FLAGS_TOUCHED" -eq 0 ]; then
     echo ""
     echo "🚩 Logging mode (or pass --proxy / --log / --deep-log on CLI to skip):"
     echo "   1) None             quiet, no proxy, no log"
-    echo "   2) Log only         server stdout to ~/llama.log"
+    echo "   2) Log only         server stdout to $LLAMA_LOG_FILE"
     echo "   3) Proxy + log      ← default; needed for slot save/restore"
-    echo "   4) Full diagnostic  proxy + log + body capture (~/llama-deep.log)"
+    echo "   4) Full diagnostic  proxy + log + body capture ($DEEP_LOG)"
     read -rp "Choice [1-4, default=3]: " _log_mode
     _log_mode="${_log_mode:-3}"
     case "$_log_mode" in
@@ -1364,7 +1365,7 @@ else
     _proxy_state="on  (proxy :$PORT -> server :$INTERNAL_PORT)"
     _deep_state=$([ "$NO_DEEP_LOG" -eq 0 ] && echo "on  ($DEEP_LOG)" || echo "off")
 fi
-_log_state=$([ "$NO_LOG" -eq 0 ] && echo "on  ($HOME/llama.log)" || echo "off")
+_log_state=$([ "$NO_LOG" -eq 0 ] && echo "on  ($LLAMA_LOG_FILE)" || echo "off")
 echo ""
 echo "🚀 Launching llama-server"
 echo "   proxy:    $_proxy_state"
@@ -1412,7 +1413,10 @@ if [ "$NO_PROXY" -eq 0 ]; then
         EFFECTIVE_DEEP_LOG="$DEEP_LOG"
         echo "ℹ️  Deep log enabled (--deep-log) — bodies persisted to $DEEP_LOG"
     fi
-    PROXY_ARGS=("$PORT" "$INTERNAL_PORT" "$EFFECTIVE_DEEP_LOG" --llama-log-file "$HOME/llama.log")
+    PROXY_ARGS=("$PORT" "$INTERNAL_PORT" "$EFFECTIVE_DEEP_LOG")
+    if [ "$NO_LOG" -eq 0 ]; then
+        PROXY_ARGS+=(--llama-log-file "$LLAMA_LOG_FILE")
+    fi
     if [ -n "${SLOT_SAVE_PATH:-}" ]; then
         # Per-quant namespacing: each .gguf file gets its own slot pool.
         # Slot files are KV cache bytes computed against specific model weights;
@@ -1436,11 +1440,11 @@ if [ "$NO_PROXY" -eq 0 ]; then
                      --min-free-gb "${MIN_FREE_GB:-100}" \
                      --max-total-slots-gb "${MAX_TOTAL_SLOTS_GB:-200}")
     fi
-    # Capture proxy stdout/stderr into ~/llama.log when --log is set, so slot
+    # Capture proxy stdout/stderr into llama.log when --log is set, so slot
     # mgmt lines (slotLog console output) and any proxy errors are persisted
     # alongside server output. Otherwise inherit terminal stdout.
     if [ "$NO_LOG" -eq 0 ]; then
-        node "$PROXY_SCRIPT" "${PROXY_ARGS[@]}" --stdout-is-llama-log >> "$HOME/llama.log" 2>&1 &
+        node "$PROXY_SCRIPT" "${PROXY_ARGS[@]}" --stdout-is-llama-log >> "$LLAMA_LOG_FILE" 2>&1 &
     else
         node "$PROXY_SCRIPT" "${PROXY_ARGS[@]}" &
     fi
@@ -1508,5 +1512,5 @@ LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
 if [ "$NO_LOG" -eq 1 ]; then
     "${LAUNCH_CMD[@]}" 2>&1
 else
-    "${LAUNCH_CMD[@]}" 2>&1 | tee -a "$HOME/llama.log"
+    "${LAUNCH_CMD[@]}" 2>&1 | tee -a "$LLAMA_LOG_FILE"
 fi

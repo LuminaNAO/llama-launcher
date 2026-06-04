@@ -60,7 +60,7 @@ Run without flags for the interactive launcher. Enter `s` from the recent-launch
 | `--hdd-cache`    | Enable disk-backed slot cache and force `CACHE_RAM=0`. For full benefit (prompt-checkpoint resumption — avoids cold prefill on prompt switch for hybrid/MTP models), install [`llama-hdd`](https://codeberg.org/LuminaNAO/git/llama-hdd.cpp) instead of vanilla `llama.cpp`. With vanilla llama.cpp the slot KV still restores, but the `common_prompt_checkpoint` list is lost and the model cold-prefills. |
 | `--no-hdd-cache` | Disable disk-backed slot cache for this launch; flag-driven launches default off when neither HDD flag is passed |
 | `--proxy`        | Enable deep-logging proxy (off by default) |
-| `--log`          | Tee server output to `~/llama.log` (off by default) |
+| `--log`          | Tee server output to `llama.log` (in the llama-launcher dir; off by default) |
 | `--save`         | Persist effective settings into the model's `.yaml` |
 
 **Subcommand:**
@@ -79,7 +79,7 @@ The interactive tune menu also supports `n` for a new tune and `e` to edit an ex
 
 ### `llama-deep-proxy.mjs <listen-port> <backend-port> [log-file]`
 
-Transparent HTTP proxy that tees request/response bodies to a log (default `~/llama-deep.log`). Started automatically by the launcher when `--proxy` is passed.
+Transparent HTTP proxy that tees request/response bodies to a log (default `llama-deep.log` in the llama-launcher dir). Started automatically by the launcher when `--proxy` is passed.
 
 ### `download-model.sh <hf-url-or-repo>`
 

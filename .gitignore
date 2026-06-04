@@ -1,5 +1,6 @@
 # Logs
 llama.log
+llama-deep.log
 
 # Cache
 .cache/
