@@ -458,6 +458,16 @@ API_KEY="${API_KEY:-ollama-local}"
 KV_UNIFIED="${KV_UNIFIED:-1}"
 FLASH_ATTN="${FLASH_ATTN:-1}"
 
+# ── Anti-repeat sampling (disabled by default) ─────────────────────────────
+REPEAT_PENALTY="${REPEAT_PENALTY:-1.0}"
+REPEAT_LAST_N="${REPEAT_LAST_N:-64}"
+PRESENCE_PENALTY="${PRESENCE_PENALTY:-0.0}"
+FREQUENCY_PENALTY="${FREQUENCY_PENALTY:-0.0}"
+DRY_MULTIPLIER="${DRY_MULTIPLIER:-0.0}"
+DRY_BASE="${DRY_BASE:-1.75}"
+DRY_ALLOWED_LENGTH="${DRY_ALLOWED_LENGTH:-2}"
+DRY_PENALTY_LAST_N="${DRY_PENALTY_LAST_N:--1}"
+
 # ── Apply CLI overrides ──────────────────────────────────────────────────────
 if [ -n "$CONTEXT_OVERRIDE" ]; then
     echo "⚙️  Context override: $CONTEXT → $CONTEXT_OVERRIDE"
@@ -526,6 +536,16 @@ FLASH_ATTN=__FLASH_ATTN__
 TEMP=__TEMP__
 TOP_P=__TOP_P__
 TOP_K=__TOP_K__
+
+# ── Anti-repeat ─────────────────────────────────────────────────────────
+# REPEAT_PENALTY=__REPEAT_PENALTY__
+# REPEAT_LAST_N=__REPEAT_LAST_N__
+# PRESENCE_PENALTY=__PRESENCE_PENALTY__
+# FREQUENCY_PENALTY=__FREQUENCY_PENALTY__
+# DRY_MULTIPLIER=__DRY_MULTIPLIER__
+# DRY_BASE=__DRY_BASE__
+# DRY_ALLOWED_LENGTH=__DRY_ALLOWED_LENGTH__
+# DRY_PENALTY_LAST_N=__DRY_PENALTY_LAST_N__
 
 # ── Server ──────────────────────────────────────────────────────────────────
 HOST=__HOST__
@@ -602,6 +622,13 @@ KV_UNIFIED_FLAG=""
 FA_FLAG=""
 [ "$FLASH_ATTN" = "1" ] && FA_FLAG="-fa on"
 
+# ── Anti-repeat flags (only add if non-default) ──────────────────────────
+REPEAT_FLAGS=""
+[ "$REPEAT_PENALTY" != "1.0" ] && REPEAT_FLAGS="$REPEAT_FLAGS --repeat-penalty $REPEAT_PENALTY --repeat-last-n $REPEAT_LAST_N"
+[ "$PRESENCE_PENALTY" != "0.0" ] && REPEAT_FLAGS="$REPEAT_FLAGS --presence-penalty $PRESENCE_PENALTY"
+[ "$FREQUENCY_PENALTY" != "0.0" ] && REPEAT_FLAGS="$REPEAT_FLAGS --frequency-penalty $FREQUENCY_PENALTY"
+[ "$DRY_MULTIPLIER" != "0.0" ] && REPEAT_FLAGS="$REPEAT_FLAGS --dry-multiplier $DRY_MULTIPLIER --dry-base $DRY_BASE --dry-allowed-length $DRY_ALLOWED_LENGTH --dry-penalty-last-n $DRY_PENALTY_LAST_N"
+
 "$LLAMACPP_SERVER_PATH" \
   -m "$model_path" \
   -ngl "$NGL" \
@@ -628,5 +655,6 @@ FA_FLAG=""
   --seed "$SEED" \
   ${MLOCK_FLAG:+$MLOCK_FLAG} \
   ${MMPROJ:+--mmproj "$MMPROJ"} \
+  ${REPEAT_FLAGS:+$REPEAT_FLAGS} \
   ${EXTRA_ARGS:+$EXTRA_ARGS} \
   2>&1 | tee -a $HOME/llama.log
