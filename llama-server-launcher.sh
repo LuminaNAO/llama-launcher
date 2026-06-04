@@ -10,6 +10,7 @@
 CONFIG_FILE="$HOME/.llama-launcher-config"
 
 # Default paths (can be overridden via environment variables)
+# Note: LLAMACPP_MODELS_DIR is set via config file or environment variable
 MODELS_DIR="${LLAMACPP_MODELS_DIR:-/usr/local/share/llama.cpp/models}"
 
 # Check if we have models at the current path, if not prompt for new path
@@ -25,7 +26,7 @@ check_and_prompt_path() {
         read -rp "Enter path to models directory: " new_path
         MODELS_DIR="$new_path"
         # Save to config for next time
-        echo "LLAMACPP_MODELS_DIR=$MODELS_DIR" > "$CONFIG_FILE"
+        echo "LLAMACPP_MODELS_DIR=$new_path" > "$CONFIG_FILE"
         echo "✅ Path saved to $CONFIG_FILE for next launch"
         echo ""
     fi
@@ -34,6 +35,9 @@ check_and_prompt_path() {
 # Load config from previous session if it exists
 if [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
+    export LLAMACPP_MODELS_DIR
+    echo "📝 Using saved path: $MODELS_DIR"
+    echo ""
 fi
 
 # Check if we have models at the current path, if not prompt for new path
