@@ -1,0 +1,144 @@
+#!/usr/bin/expect -f
+#
+# FAST regression test: drive the launcher's interactive flow and verify
+# the launch banner exposes proxy/log/deep-log states correctly.
+#
+# - Handles the recent-launches picker first (sends "0" for new launch).
+# - Picks rocm, gemma-4-26B-A4B-it folder, Q8_0 quant, default tune, no vision.
+# - Watches for the banner output, parses the three flag lines.
+# - Sends Ctrl-C as soon as banner verified — no need to wait for model load.
+#
+# Should complete in well under 30 seconds.
+
+set timeout 30
+set script_dir [file dirname [file normalize [info script]]]
+log_user 1
+
+catch { exec bash $script_dir/llama-server-launcher.sh stop }
+after 1000
+
+puts "============================================================"
+puts "  REGRESSION: launcher banner exposure (interactive flow)"
+puts "============================================================\n"
+
+spawn bash [file join $script_dir llama-server-launcher.sh]
+
+# ── Step 1: handle recent-launches picker (if present) ──────────────────────
+# Match the explicit prompt line, NOT entries inside the list (which can
+# contain "N) rocm <model>" patterns).
+expect {
+    -re {Relaunch\? \[0=new[^\]]*\]:} { send "0\r"; puts "\n>>> Recent picker: chose new launch" }
+    -re {Select build \[1-} { puts "\n>>> No history shown; build picker is up" }
+    timeout { puts "FAIL: no picker visible after 30s"; exit 1 }
+}
+
+# ── Step 2: build picker → rocm ──────────────────────────────────────────────
+expect {
+    -re {Select build \[1-} {
+        # Already saw the build prompt above — send response. But we need to
+        # know the rocm number. The build menu listed entries before the prompt;
+        # expect's buffer may still contain them, but they were before the match.
+        # Use a fresh send pattern: try "2" (rocm typically) and fall back if needed.
+        # Better: re-look at the recent buffer for the rocm line.
+        # Simpler: send a known-good answer. From earlier tests we know rocm is #2.
+        send "2\r"
+        puts ">>> Build: sent #2 (rocm)"
+    }
+    -re {Select model \[1-} {
+        # Build was auto-selected (single available)
+        puts ">>> Build: auto (single available)"
+    }
+    timeout { puts "FAIL: didn't reach build/model prompt"; exit 1 }
+}
+
+# ── Step 3: model picker → find gemma-4-26B-A4B-it folder ───────────────────
+# Capture the number for the gemma folder before responding to the prompt
+expect {
+    -re {(\d+)\) gemma-4-26B-A4B-it\s} {
+        set model_num $expect_out(1,string)
+        puts ">>> Model: gemma-4-26B-A4B-it (#$model_num)"
+        expect -re {Select model \[1-} {}
+        send "$model_num\r"
+    }
+    timeout { puts "FAIL: gemma-4-26B-A4B-it not in model list"; exit 1 }
+}
+
+# ── Step 4: quant picker → Q8_0 ─────────────────────────────────────────────
+expect {
+    -re {(\d+)\) gemma-4-26B-A4B-it-Q8_0\.gguf} {
+        set quant_num $expect_out(1,string)
+        puts ">>> Quant: Q8_0 (#$quant_num)"
+        expect -re {Select quant \[1-} {}
+        send "$quant_num\r"
+    }
+    -re {📋 Profile:} {
+        puts ">>> Quant: auto-selected"
+    }
+    timeout { puts "FAIL: quant picker"; exit 1 }
+}
+
+# ── Step 5: tune picker → default ────────────────────────────────────────────
+expect {
+    -re {Select tune \[1-} {
+        send "\r"
+        puts ">>> Tune: default"
+    }
+    -re {📋 Tune:} {
+        puts ">>> Tune: auto-selected"
+    }
+    timeout { puts "FAIL: tune picker"; exit 1 }
+}
+
+# ── Step 6: vision picker → none ────────────────────────────────────────────
+expect {
+    -re {Enable vision\?} { send "0\r"; puts ">>> Vision: none" }
+    -re {🚀 Launching} { puts ">>> Vision: none (auto)" }
+    timeout { puts "FAIL: vision/launch step"; exit 1 }
+}
+
+# ── Step 7: parse the launch banner ──────────────────────────────────────────
+set banner_proxy ""
+set banner_log ""
+set banner_deep ""
+set t0 [clock seconds]
+
+# Banner has up to 3 lines we care about: proxy:, log:, deep-log:
+# Match them in order; each match consumes that line from the buffer.
+expect {
+    -re {🚀 Launching llama-server\s*\r?\n} {}
+    timeout { puts "FAIL: launch banner header missing"; exit 1 }
+}
+expect {
+    -re {proxy:\s+(\S+(?: +\([^\)]*\))?)} { set banner_proxy $expect_out(1,string) }
+    timeout { puts "FAIL: proxy: line missing"; exit 1 }
+}
+expect {
+    -re {log:\s+(\S+(?: +\([^\)]*\))?)} { set banner_log $expect_out(1,string) }
+    timeout { puts "FAIL: log: line missing"; exit 1 }
+}
+expect {
+    -re {deep-log:\s+(\S+(?: +\([^\)]*\))?)} { set banner_deep $expect_out(1,string) }
+    timeout { puts "FAIL: deep-log: line missing"; exit 1 }
+}
+
+set elapsed [expr {[clock seconds] - $t0}]
+puts ""
+puts "  banner: proxy=$banner_proxy  log=$banner_log  deep-log=$banner_deep"
+
+if {$banner_proxy eq "off" && $banner_log eq "off" && $banner_deep eq "—"} {
+    puts "PASS: all flags off (correct interactive defaults)"
+} else {
+    puts "FAIL: expected off/off/—  got proxy=$banner_proxy log=$banner_log deep-log=$banner_deep"
+    catch { exec bash $script_dir/llama-server-launcher.sh stop }
+    exit 1
+}
+
+# ── Step 8: kill before model load (we're done) ─────────────────────────────
+puts "\n--- killing launcher (don't need full model load) ---"
+catch { exec bash $script_dir/llama-server-launcher.sh stop }
+after 500
+
+puts "\n============================================================"
+puts "  ALL CHECKS PASSED in [expr {[clock seconds] - $t0}]s after banner"
+puts "============================================================"
+exit 0
