@@ -1,10 +1,14 @@
 #!/bin/bash
 # Build llama.cpp in the builds/ directory
-# Usage: build.sh <rocm|vulkan> [gpu-arch]
+# Usage: build.sh <rocm|vulkan|cuda> [gpu-arch]
 #
 # GPU arch is auto-detected for ROCm builds but can be overridden:
 #   ./build.sh rocm gfx1100    # Force RX 7900 series target
 #   ./build.sh rocm gfx1151    # Force Strix Halo target
+#
+# For CUDA builds, compute capability is auto-detected but can be overridden:
+#   ./build.sh cuda             # Auto-detect NVIDIA GPU
+#   ./build.sh cuda 89          # Force Ada Lovelace (RTX 4090)
 #
 # Supported AMD GPU targets:
 #   gfx1100  — RDNA 3   (RX 7900 XTX/XT/GRE)
@@ -25,13 +29,15 @@ GPU_ARCH_OVERRIDE="${2:-}"
 if [ -z "$BUILD_TYPE" ]; then
     echo "❌ Build type required."
     echo ""
-    echo "Usage: build.sh <rocm|vulkan> [gpu-arch]"
+    echo "Usage: build.sh <rocm|vulkan|cuda> [gpu-arch]"
     echo ""
     echo "Examples:"
     echo "  ./build.sh vulkan          # Vulkan backend (any GPU)"
     echo "  ./build.sh rocm            # ROCm/HIP backend (auto-detect GPU)"
     echo "  ./build.sh rocm gfx1100    # ROCm for RX 7900 series"
     echo "  ./build.sh rocm gfx1151    # ROCm for Strix Halo"
+    echo "  ./build.sh cuda            # CUDA backend (auto-detect NVIDIA GPU)"
+    echo "  ./build.sh cuda 89         # CUDA for Ada Lovelace (RTX 4090)"
     exit 1
 fi
 
@@ -85,6 +91,20 @@ case "$BUILD_TYPE" in
         # Check glslc (shader compiler) — needed at build time
         command -v glslc >/dev/null 2>&1 || MISSING+=("glslc|shaderc (Arch) / glslc (Debian) — Vulkan shader compiler")
         ;;
+    cuda)
+        # Check CUDA toolkit (nvcc compiler)
+        if ! command -v nvcc >/dev/null 2>&1; then
+            MISSING+=("nvcc|cuda (Arch) / nvidia-cuda-toolkit (Debian/Ubuntu) — CUDA compiler")
+        fi
+        # Check NVIDIA driver / nvidia-smi
+        if ! command -v nvidia-smi >/dev/null 2>&1; then
+            MISSING+=("nvidia-smi|nvidia (Arch) / nvidia-driver (Debian/Ubuntu) — NVIDIA GPU driver")
+        fi
+        # Check cublas
+        if ! ldconfig -p 2>/dev/null | grep -q libcublas && [ ! -f /usr/local/cuda/lib64/libcublas.so ]; then
+            MISSING+=("cublas|cuda (Arch) / libcublas-dev (Debian/Ubuntu) — CUDA BLAS library")
+        fi
+        ;;
     rocm)
         # Check ROCm base installation
         if [ ! -d /opt/rocm ] && ! command -v hipcc >/dev/null 2>&1; then
@@ -114,11 +134,12 @@ case "$BUILD_TYPE" in
     *)
         echo "❌ Unknown build type: $BUILD_TYPE"
         echo ""
-        echo "Usage: build.sh <rocm|vulkan>"
+        echo "Usage: build.sh <rocm|vulkan|cuda>"
         echo ""
         echo "Examples:"
         echo "  ./build.sh vulkan    # Recommended for Strix Halo / RDNA 3.5"
         echo "  ./build.sh rocm      # ROCm/HIP backend"
+        echo "  ./build.sh cuda      # NVIDIA CUDA backend"
         exit 1
         ;;
 esac
@@ -136,18 +157,18 @@ if [ ${#MISSING[@]} -gt 0 ]; then
     # Detect package manager and give a one-liner
     if command -v pacman >/dev/null 2>&1; then
         echo "Arch/CachyOS quick install:"
-        if [ "$BUILD_TYPE" = "vulkan" ]; then
-            echo "  sudo pacman -S vulkan-headers vulkan-icd-loader shaderc vulkan-tools"
-        else
-            echo "  sudo pacman -S rocm-hip-sdk rocblas hipblas rocminfo"
-        fi
+        case "$BUILD_TYPE" in
+            vulkan) echo "  sudo pacman -S vulkan-headers vulkan-icd-loader shaderc vulkan-tools" ;;
+            rocm)   echo "  sudo pacman -S rocm-hip-sdk rocblas hipblas rocminfo" ;;
+            cuda)   echo "  sudo pacman -S cuda" ;;
+        esac
     elif command -v apt-get >/dev/null 2>&1; then
         echo "Debian/Ubuntu quick install:"
-        if [ "$BUILD_TYPE" = "vulkan" ]; then
-            echo "  sudo apt-get install libvulkan-dev vulkan-tools glslc"
-        else
-            echo "  See https://rocm.docs.amd.com for ROCm installation"
-        fi
+        case "$BUILD_TYPE" in
+            vulkan) echo "  sudo apt-get install libvulkan-dev vulkan-tools glslc" ;;
+            rocm)   echo "  See https://rocm.docs.amd.com for ROCm installation" ;;
+            cuda)   echo "  sudo apt-get install nvidia-cuda-toolkit libcublas-dev" ;;
+        esac
     fi
     echo ""
     exit 1
@@ -256,8 +277,51 @@ if [ "$BUILD_TYPE" = "rocm" ]; then
     fi
 fi
 
+# ── GPU architecture detection (CUDA) ─────────────────────────────────────
+if [ "$BUILD_TYPE" = "cuda" ]; then
+    if [ -n "$GPU_ARCH_OVERRIDE" ]; then
+        CUDA_ARCH="$GPU_ARCH_OVERRIDE"
+        echo "🎯 CUDA compute capability (override): $CUDA_ARCH"
+    elif command -v nvidia-smi >/dev/null 2>&1; then
+        # Query compute capability from nvidia-smi
+        DETECTED_CAPS=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | sort -u | tr -d '.' || true)
+        if [ -z "$DETECTED_CAPS" ]; then
+            echo "⚠️  nvidia-smi found no NVIDIA GPUs — using native detection."
+            CUDA_ARCH="native"
+        else
+            CUDA_ARCH=$(echo "$DETECTED_CAPS" | tr '\n' ';' | sed 's/;$//')
+            echo "🎯 CUDA compute capability (auto-detected): $CUDA_ARCH"
+        fi
+    else
+        echo "⚠️  nvidia-smi not found — using native detection."
+        CUDA_ARCH="native"
+    fi
+
+    # Pretty-print detected targets
+    for cap in $(echo "$CUDA_ARCH" | tr ';' ' '); do
+        case "$cap" in
+            70) echo "   → sm_$cap: Volta (V100)" ;;
+            75) echo "   → sm_$cap: Turing (RTX 2080, T4)" ;;
+            80) echo "   → sm_$cap: Ampere (A100)" ;;
+            86) echo "   → sm_$cap: Ampere (RTX 3090, A40)" ;;
+            89) echo "   → sm_$cap: Ada Lovelace (RTX 4090, L40)" ;;
+            90) echo "   → sm_$cap: Hopper (H100)" ;;
+            native) echo "   → native: will detect at build time" ;;
+            *)  echo "   → sm_$cap: (unknown — build may still work)" ;;
+        esac
+    done
+    echo ""
+fi
+
 # ── Configure and build ────────────────────────────────────────────────────
 case "$BUILD_TYPE" in
+    cuda)
+        CMAKE_CUDA_ARGS=(-DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release)
+        if [ "$CUDA_ARCH" != "native" ]; then
+            CMAKE_CUDA_ARGS+=(-DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH")
+        fi
+        cmake -S . -B "$BUILD_DIR" "${CMAKE_CUDA_ARGS[@]}"
+        ;;
     rocm)
         cmake -S . -B "$BUILD_DIR" \
           -DGGML_HIP=ON \
