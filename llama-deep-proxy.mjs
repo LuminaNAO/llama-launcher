@@ -221,6 +221,13 @@ function hddBanner(action, filename, detail = "") {
   slotLog(`\n=== HDD CACHE ${action}: ${filename}${suffix}\n`, C_MAGENTA);
 }
 
+function formatBytes(n) {
+  if (!Number.isFinite(n)) return "unknown";
+  if (n >= 1024 ** 2) return `${(n / (1024 ** 2)).toFixed(2)} MiB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KiB`;
+  return `${n} B`;
+}
+
 function parseSlotActionBody(r) {
   try {
     return JSON.parse(r.body);
@@ -477,6 +484,10 @@ const server = createServer(async (clientReq, clientRes) => {
       log.write(bodyBuf);
 
       const sessionId = sessionIdFromBody(bodyBuf.toString("utf8"));
+      slotLog(
+        `REQUEST ${tag} body_bytes=${bodyBuf.length} (${formatBytes(bodyBuf.length)}) content_length=${clientReq.headers["content-length"] ?? "chunked"} session=${sessionId ?? "none"}\n`,
+        C_CYAN,
+      );
       try {
         if (sessionId) await ensureSlotLoaded(sessionId);
       } catch (e) {
