@@ -425,7 +425,14 @@ case "$BACKEND" in
         ;;
 esac
 
-cmake --build "$BUILD_DIR" -j$(nproc)
+if [ -n "$BUILD_TAG" ]; then
+    # Tagged builds (e.g. forks) often have broken examples/ targets.
+    # Match the upstream MTP model card recipe and build only essentials.
+    echo "ℹ️  Tagged build ($BUILD_TAG) — building only llama-cli + llama-server"
+    cmake --build "$BUILD_DIR" -j$(nproc) --target llama-cli llama-server
+else
+    cmake --build "$BUILD_DIR" -j$(nproc)
+fi
 
 echo ""
 echo "✅ Build complete! ($BUILD_TYPE)"

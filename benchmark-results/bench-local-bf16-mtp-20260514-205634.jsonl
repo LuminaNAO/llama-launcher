@@ -1,0 +1,2 @@
+{"type": "header", "label": "local-bf16-mtp", "model": "Qwen3.6-27B-BF16-00001-of-00002.gguf", "timestamp": "2026-05-14T20:56:34+08:00"}
+{"test": "short-gen50", "target_ctx": 0, "actual_prompt_tokens": 25, "gen_tokens": 50, "prompt_tok_s": 23.33, "gen_tok_s": 7.38, "prompt_ms": 1071, "gen_ms": 6779}
