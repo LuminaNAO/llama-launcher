@@ -1,6 +1,6 @@
 # TODO
 
-## Verify slot save actually wrote the file (don't trust 200 alone)
+## Verify slot save actually wrote the file (don't trust 200 alone) — done
 
 llama-server's `/slots/0?action=save` endpoint returns HTTP 200 even when
 the underlying `llama_state_seq_save_file` call fails (e.g., parent dir
@@ -20,18 +20,18 @@ modes (full disk, ENOSPC, EACCES, etc.).
 
 ### Fix
 
-In `llama-deep-proxy.mjs::ensureSlotLoaded` and `saveCurrentSlot`, parse
-the JSON response body and require `n_saved > 0` before logging success.
-On detected failure, log clearly (red) and don't update `currentSession`
-state on a phantom save.
+Implemented in `llama-deep-proxy.mjs::ensureSlotLoaded` and
+`saveCurrentSlot`: parse the JSON response body and require both
+`n_saved > 0` and `n_written > 0` before logging a save as successful.
+Detected failures now log clearly (red), including the parsed counters.
 
 ```js
 const r = await callSlotAction("save", `${currentSession}.bin`);
-let saved = 0;
-try { saved = JSON.parse(r.body)?.n_saved ?? 0; } catch {}
-const ok = r.status === 200 && saved > 0;
-slotLog(`--- SLOT save status=${r.status} n_saved=${saved}\n`,
-        ok ? colorForStatus("save", 200) : C_RED);
+const save = slotSaveSucceeded(r);
+slotLog(
+  `--- SLOT save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten}\n`,
+  save.ok ? C_CYAN : C_RED,
+);
 ```
 
 ### Upstream
@@ -41,6 +41,89 @@ returning 200 on failed write is a contract violation that affects any
 client trusting the status code. Worth a one-line PR if motivated:
 propagate the file-open error to `result_->error()` instead of bubbling
 out via `LLAMA_LOG_ERROR`.
+
+## HDD slot restore does not preserve prompt checkpoints
+
+Observed 2026-05-05 with `Qwen3.6-27B.62gb-q8-131k-v2`: the proxy proved
+that HDD slot save/restore moved real bytes:
+
+```text
+SLOT save status=200 n_saved=43 n_written=158392888
+SLOT restore status=200 n_restored=43 n_read=158392888
+```
+
+But the next request still fell back to cold prompt processing:
+
+```text
+common_context_can_seq_rm: the target context does not support partial sequence removal
+slot update_slots: n_past = 28, slot.prompt.tokens.size() = 43, seq_id = 0, pos_min = 42, n_swa = 0
+slot update_slots: forcing full prompt re-processing due to lack of cache data
+```
+
+Root cause: `llama_state_seq_save_file()` / `llama_state_seq_load_file()`
+persist the raw sequence state and tokens, but not
+`server_prompt.checkpoints`. `CACHE_RAM` works because
+`server_prompt_cache::alloc()` copies the whole `server_prompt`, including
+its checkpoint list:
+
+```cpp
+cur = {
+    /*.tokens      =*/ prompt.tokens.clone(),
+    /*.data        =*/ std::move(state_data),
+    /*.checkpoints =*/ prompt.checkpoints,
+};
+```
+
+For Qwen3.6 / hybrid / recurrent contexts where llama.cpp reports
+`COMMON_CONTEXT_SEQ_RM_TYPE_FULL`, restored state cannot be partially
+trimmed. If the saved slot contains `prompt + generated output` and the next
+request only matches the prompt prefix, llama.cpp needs an earlier checkpoint
+to roll back. The HDD slot file does not have that checkpoint, so the restore
+is valid but not useful for prompt reuse.
+
+### Implications
+
+- Disabling context checkpoints when `CACHE_RAM=0` is counterproductive for
+  these models. The launcher should leave checkpoint settings alone.
+- HDD slot persistence can still be useful for append-only continuations where
+  the next request includes the entire saved transcript plus new tokens.
+- It will not replace `CACHE_RAM` for replay/branching workloads until
+  llama.cpp can persist and restore `server_prompt.checkpoints`, or exposes a
+  prompt-cache save/load endpoint that includes checkpoint data.
+
+### Fix direction
+
+Local proof-of-fix implemented in sibling `~/code/llama.cpp`:
+`tools/server/server-context.cpp` now writes a sidecar file next to each slot
+save, named `<slot>.bin.ckpt`, and reloads it during slot restore. The sidecar
+serializes the missing checkpoint state:
+
+1. `server_prompt.checkpoints` metadata
+2. checkpoint byte buffers
+
+The existing `.bin` file still carries `server_prompt.tokens` and the
+`llama_state_seq_*` state bytes.
+
+Validation on Qwen3.6-27B with `CACHE_RAM=0`, `SLOT_SAVE_PATH`, and 32k ctx:
+
+```text
+saved 2 context checkpoint(s), sidecar size = 299.252 MiB
+restored 2 context checkpoint(s), sidecar size = 299.252 MiB
+restored context checkpoint (pos_min = 3416, pos_max = 3416, n_tokens = 3417, n_past = 3417, size = 149.626 MiB)
+prompt eval time = 410.50 ms / 24 tokens
+usage: cache_read_input_tokens=3417, input_tokens=24
+```
+
+Before the sidecar patch, the same append test cold-prefilled:
+
+```text
+forcing full prompt re-processing due to lack of cache data
+usage: cache_read_input_tokens=0, input_tokens=3439
+```
+
+Helper-side workaround: use non-zero `CACHE_RAM` for Qwen3.6/full-seq-rm
+models when prompt replay/branching matters, and let the kernel page the
+prompt cache to swap/NVMe if RAM is tight.
 
 ## Enable --mlock to prevent swap thrashing
 

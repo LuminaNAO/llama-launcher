@@ -96,6 +96,36 @@ function colorForStatus(action, status) {
   return null;
 }
 
+function parseSlotActionBody(r) {
+  try {
+    return JSON.parse(r.body);
+  } catch {
+    return {};
+  }
+}
+
+function slotSaveSucceeded(r) {
+  const body = parseSlotActionBody(r);
+  const nSaved = Number(body.n_saved ?? 0);
+  const nWritten = Number(body.n_written ?? 0);
+  return {
+    ok: r.status === 200 && nSaved > 0 && nWritten > 0,
+    nSaved,
+    nWritten,
+  };
+}
+
+function slotRestoreSucceeded(r) {
+  const body = parseSlotActionBody(r);
+  const nRestored = Number(body.n_restored ?? 0);
+  const nRead = Number(body.n_read ?? 0);
+  return {
+    ok: r.status === 200 && nRestored > 0 && nRead > 0,
+    nRestored,
+    nRead,
+  };
+}
+
 // ── Slot cache helpers ────────────────────────────────────────────────────
 function callSlotAction(action, filename, timeoutMs = 0) {
   return new Promise((resolve) => {
@@ -156,11 +186,19 @@ async function ensureSlotLoaded(newSessionId) {
       ensureSlotCacheDir();
       slotLog(`\n--- SLOT save: ${currentSession}.bin\n`, C_DIM);
       const r = await callSlotAction("save", `${currentSession}.bin`);
-      slotLog(`--- SLOT save status=${r.status}\n`, colorForStatus("save", r.status));
+      const save = slotSaveSucceeded(r);
+      slotLog(
+        `--- SLOT save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten}\n`,
+        save.ok ? C_CYAN : C_RED,
+      );
     }
     slotLog(`\n--- SLOT restore: ${newSessionId}.bin\n`, C_DIM);
     const r = await callSlotAction("restore", `${newSessionId}.bin`);
-    slotLog(`--- SLOT restore status=${r.status} ${r.body.slice(0, 200)}\n`, colorForStatus("restore", r.status));
+    const restore = slotRestoreSucceeded(r);
+    slotLog(
+      `--- SLOT restore status=${r.status} n_restored=${restore.nRestored} n_read=${restore.nRead} ${r.body.slice(0, 200)}\n`,
+      restore.ok ? C_GREEN : colorForStatus("restore", r.status),
+    );
     // Restore returning 4xx/5xx (e.g., file not found) is normal for new sessions.
     currentSession = newSessionId;
   } finally {
@@ -179,7 +217,11 @@ async function saveCurrentSlot(reason, timeoutMs = 0) {
     ensureSlotCacheDir();
     slotLog(`\n--- SLOT save (${reason}): ${currentSession}.bin\n`, C_DIM);
     const r = await callSlotAction("save", `${currentSession}.bin`, timeoutMs);
-    slotLog(`--- SLOT save status=${r.status}\n`, colorForStatus("save", r.status));
+    const save = slotSaveSucceeded(r);
+    slotLog(
+      `--- SLOT save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten}\n`,
+      save.ok ? C_CYAN : C_RED,
+    );
   } finally {
     release();
   }
