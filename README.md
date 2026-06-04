@@ -1,5 +1,7 @@
 # llama-launcher
 
+> **⚠️ This GitHub repository is a read-only mirror.** The primary repository is on [Codeberg](https://codeberg.org/LuminaNAO/llama-launcher). Please raise issues and submit pull requests there — submissions to this GitHub mirror will be ignored.
+
 Helper scripts for building llama.cpp and running `llama-server` with per-model configs, launch history, benchmarking, and SSH tunneling.
 
 ## Layout
