@@ -23,10 +23,10 @@ Scripts resolve their own location via `readlink -f`, so the launcher can be sym
 ## Install the launcher into `PATH`
 
 ```bash
-ln -s "$PWD/llama-server-launcher.sh" ~/.local/bin/llama-launcher
+./install.sh
 ```
 
-Then call `llama-launcher …` from anywhere.
+Symlinks `llama-launcher` into `/usr/local/bin` (if root) or `~/.local/bin` (otherwise), creating the directory if needed and warning if it isn't on `PATH`. Then call `llama-launcher …` from anywhere.
 
 ## Scripts
 
