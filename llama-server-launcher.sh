@@ -8,8 +8,17 @@
 
 # Default paths (can be overridden via environment variables)
 MODELS_DIR="${LLAMACPP_MODELS_DIR:-/usr/local/share/llama.cpp/models}"
-#LLAMACPP_SERVER_PATH="${LLAMACPP_SERVER_PATH:-$(dirname "$(readlink -f "$0")")/../../llama.cpp/build/bin/llama-server}"
-LLAMACPP_SERVER_PATH="/srv/shared/git/llama.cpp/build/bin/llama-server"
+
+# Find llama.cpp repo and server dynamically
+LLAMACPP_BASE="$(dirname "$(readlink -f "$0")")/../../llama.cpp"
+LLAMACPP_SERVER_PATH="${LLAMACPP_BASE}/build/bin/llama-server"
+
+# Verify server exists, exit with helpful message if not
+if [ ! -f "$LLAMACPP_SERVER_PATH" ]; then
+    echo "❌ llama-server not found at $LLAMACPP_SERVER_PATH"
+    echo "   Expected llama.cpp repo at: $LLAMACPP_BASE"
+    exit 1
+fi
 
 echo "🔍 Scanning models in $MODELS_DIR..."
 echo ""

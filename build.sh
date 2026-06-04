@@ -1,4 +1,6 @@
-cd /srv/shared/git/llama.cpp
+cd ..
+ls
+cd llama.cpp || $(echo "main llamacpp rep not found exiting" && exit 1)
 mkdir -p build
 
 cmake -S . -B build \
