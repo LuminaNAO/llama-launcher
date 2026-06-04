@@ -46,8 +46,24 @@ else
     echo ""
 fi
 
-# Check if we have models at the current path, if not prompt for new path
-check_and_prompt_path
+# Re-check if we have models at the current path
+models=()
+while IFS= read -r -d '' file; do
+    models+=("$(basename "$file")")
+done < <(find "$MODELS_DIR" -maxdepth 1 -name "*.gguf" -print0 2>/dev/null)
+
+if [ ${#models[@]} -eq 0 ]; then
+    echo "❌ No .gguf models found at $MODELS_DIR"
+    echo ""
+    read -rp "Enter path to models directory: " new_path
+    # Save to config for next time
+    echo "LLAMACPP_MODELS_DIR=$new_path" > "$CONFIG_FILE"
+    echo "✅ Path saved to $CONFIG_FILE for next launch"
+    echo ""
+    # Update MODELS_DIR for current session
+    export LLAMACPP_MODELS_DIR="$new_path"
+    MODELS_DIR="$new_path"
+fi
 
 # Find llama.cpp repo and server dynamically
 LLAMACPP_BASE="$(dirname "$(readlink -f "$0")")/../llama.cpp"
@@ -74,9 +90,6 @@ if [ ${#models[@]} -eq 0 ]; then
     echo "   Please run the launcher again to set the correct path"
     exit 1
 fi
-
-echo "Found ${#models[@]} model(s):"
-echo ""
 
 echo "Found ${#models[@]} model(s):"
 echo ""
