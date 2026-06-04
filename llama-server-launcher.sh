@@ -16,8 +16,10 @@
 #   --seed <N>       Override the random seed (default: 42)
 #   --context <N>    Override context size
 #   --parallel <N>   Override number of parallel slots
-#   --no-proxy       Skip the deep-logging proxy (llama-server binds directly)
-#   --no-log         Don't tee output to ~/llama.log
+#   --proxy          Enable the deep-logging proxy (default: off)
+#   --log            Tee output to ~/llama.log (default: off)
+#   --no-proxy       (deprecated, no-op; proxy is now off by default)
+#   --no-log         (deprecated, no-op; logging is now off by default)
 #   --save           Save effective launch settings as a per-model config
 #
 # Per-model configs are stored in model-configs/<model-name>.conf and
@@ -31,8 +33,8 @@ SAVE_CONFIG=0
 ARG_BUILD_TYPE=""
 ARG_MODEL_PATH=""
 ARG_TUNE=""
-NO_PROXY=0
-NO_LOG=0
+NO_PROXY=1
+NO_LOG=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --seed) SEED="$2"; shift 2 ;;
@@ -42,6 +44,8 @@ while [[ $# -gt 0 ]]; do
         --build) ARG_BUILD_TYPE="$2"; shift 2 ;;
         --model) ARG_MODEL_PATH="$2"; shift 2 ;;
         --tune) ARG_TUNE="$2"; shift 2 ;;
+        --proxy) NO_PROXY=0; shift ;;
+        --log) NO_LOG=0; shift ;;
         --no-proxy) NO_PROXY=1; shift ;;
         --no-log) NO_LOG=1; shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
