@@ -12,16 +12,17 @@
 
 set timeout 30
 set script_dir [file dirname [file normalize [info script]]]
+set root_dir [file dirname $script_dir]
 log_user 1
 
-catch { exec bash $script_dir/llama-server-launcher.sh stop }
+catch { exec bash [file join $root_dir llama-server-launcher.sh] stop }
 after 1000
 
 puts "============================================================"
 puts "  REGRESSION: launcher banner exposure (interactive flow)"
 puts "============================================================\n"
 
-spawn bash [file join $script_dir llama-server-launcher.sh]
+spawn bash [file join $root_dir llama-server-launcher.sh]
 
 # ── Step 1: handle recent-launches picker (if present) ──────────────────────
 # Match the explicit prompt line, NOT entries inside the list (which can
@@ -129,13 +130,13 @@ if {$banner_proxy eq "off" && $banner_log eq "off" && $banner_deep eq "—"} {
     puts "PASS: all flags off (correct interactive defaults)"
 } else {
     puts "FAIL: expected off/off/—  got proxy=$banner_proxy log=$banner_log deep-log=$banner_deep"
-    catch { exec bash $script_dir/llama-server-launcher.sh stop }
+    catch { exec bash [file join $root_dir llama-server-launcher.sh] stop }
     exit 1
 }
 
 # ── Step 8: kill before model load (we're done) ─────────────────────────────
 puts "\n--- killing launcher (don't need full model load) ---"
-catch { exec bash $script_dir/llama-server-launcher.sh stop }
+catch { exec bash [file join $root_dir llama-server-launcher.sh] stop }
 after 500
 
 puts "\n============================================================"

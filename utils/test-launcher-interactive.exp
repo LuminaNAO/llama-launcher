@@ -12,6 +12,7 @@
 
 set timeout 180
 set script_dir [file dirname [file normalize [info script]]]
+set root_dir [file dirname $script_dir]
 log_user 1
 
 # Kill any existing server on port 40801
@@ -22,7 +23,7 @@ puts "============================================================"
 puts "  LAUNCHER INTERACTIVE FLOW + SERVER QUALITY TEST"
 puts "============================================================\n"
 
-spawn bash [file join $script_dir llama-server-launcher.sh]
+spawn bash [file join $root_dir llama-server-launcher.sh]
 
 # ── Build selection: pick vulkan ─────────────────────────────────────────────
 expect {
