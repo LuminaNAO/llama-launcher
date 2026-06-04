@@ -620,8 +620,18 @@ if [ "$SAVE_CONFIG" -eq 1 ]; then
     echo "💾 Saved model config: $MODEL_CONFIG_FILE"
 fi
 
+# ── Deep logging proxy ──────────────────────────────────────────────────────
+# The proxy listens on PORT (public) and forwards to INTERNAL_PORT (llama-server).
+# Both request and response bodies are tee-d to ~/llama-deep.log.
+INTERNAL_PORT="${INTERNAL_PORT:-40802}"
+DEEP_LOG="$HOME/llama-deep.log"
+PROXY_SCRIPT="$SCRIPT_DIR/llama-deep-proxy.mjs"
+
 echo ""
 echo "🚀 Launching llama-server..."
+echo "   llama-server on internal port $INTERNAL_PORT"
+echo "   proxy on public port $PORT -> $INTERNAL_PORT"
+echo "   deep log: $DEEP_LOG"
 echo ""
 
 # ── Build launch flags from tuneable variables ──────────────────────────────
@@ -646,6 +656,31 @@ REPEAT_FLAGS=""
 [ "$FREQUENCY_PENALTY" != "0.0" ] && REPEAT_FLAGS="$REPEAT_FLAGS --frequency-penalty $FREQUENCY_PENALTY"
 [ "$DRY_MULTIPLIER" != "0.0" ] && REPEAT_FLAGS="$REPEAT_FLAGS --dry-multiplier $DRY_MULTIPLIER --dry-base $DRY_BASE --dry-allowed-length $DRY_ALLOWED_LENGTH --dry-penalty-last-n $DRY_PENALTY_LAST_N"
 
+# ── Start deep-logging proxy ────────────────────────────────────────────────
+# The proxy must be up before clients connect to PORT.
+# It runs in the background and is killed when the launcher exits.
+PROXY_PID=""
+cleanup_proxy() {
+    if [ -n "$PROXY_PID" ] && kill -0 "$PROXY_PID" 2>/dev/null; then
+        kill "$PROXY_PID" 2>/dev/null
+        wait "$PROXY_PID" 2>/dev/null
+    fi
+}
+trap cleanup_proxy EXIT
+
+node "$PROXY_SCRIPT" "$PORT" "$INTERNAL_PORT" "$DEEP_LOG" &
+PROXY_PID=$!
+
+# Give the proxy a moment to bind
+sleep 0.3
+if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+    echo "❌ Deep-logging proxy failed to start"
+    exit 1
+fi
+echo "✅ Deep-logging proxy running (PID $PROXY_PID)"
+echo ""
+
+# ── Launch llama-server on internal port ────────────────────────────────────
 "$LLAMACPP_SERVER_PATH" \
   -m "$model_path" \
   -ngl "$NGL" \
@@ -658,8 +693,8 @@ REPEAT_FLAGS=""
   ${MMAP_FLAG:+$MMAP_FLAG} \
   ${DIO_FLAG:+$DIO_FLAG} \
   --timeout "$TIMEOUT" \
-  --host "$HOST" \
-  --port "$PORT" \
+  --host 127.0.0.1 \
+  --port "$INTERNAL_PORT" \
   --api-key "$API_KEY" \
   ${JINJA_FLAG:+$JINJA_FLAG} \
   --parallel "$PARALLEL" \
