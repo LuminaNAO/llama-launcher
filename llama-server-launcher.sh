@@ -310,6 +310,16 @@ if [ -n "$PARALLEL_OVERRIDE" ]; then
     PARALLEL="$PARALLEL_OVERRIDE"
 fi
 
+# ── Jinja flag (default: on, per-model configs can disable) ──────────────────
+JINJA="${JINJA-1}"
+if [ "$JINJA" = "1" ]; then
+    JINJA_FLAG="--jinja"
+    echo "🧩 Jinja: enabled"
+else
+    JINJA_FLAG=""
+    echo "🧩 Jinja: disabled (model uses native template parser)"
+fi
+
 # ── Check mlock capability ───────────────────────────────────────────────────
 MEMLOCK_KB=$(ulimit -l 2>/dev/null || echo 0)
 if [ "$MEMLOCK_KB" = "unlimited" ]; then
@@ -344,6 +354,9 @@ CHECKPOINT_INTERVAL=$CHECKPOINT_INTERVAL
 CHECKPOINT_MAX=$CHECKPOINT_MAX
 
 
+# Set JINJA=0 to disable --jinja (e.g. for Gemma 4 models)
+# JINJA=1
+
 # Uncomment to override additional server flags:
 # EXTRA_ARGS="--flag value"
 CONF
@@ -369,7 +382,7 @@ echo ""
   --host 0.0.0.0 \
   --port 40801 \
   --api-key ollama-local \
-  --jinja \
+  ${JINJA_FLAG:+$JINJA_FLAG} \
   --parallel "$PARALLEL" \
   --kv-unified \
   --cache-ram "$CACHE_RAM" \
