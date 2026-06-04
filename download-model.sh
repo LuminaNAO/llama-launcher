@@ -58,6 +58,7 @@ if [ -f "$CONFIG_FILE" ]; then
     eval "$(cat "$CONFIG_FILE")"
 fi
 MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
+MODELS_DIR="${MODELS_DIR%/}"
 
 if [ ! -d "$MODELS_DIR" ]; then
     echo "ERROR: Models directory not found: $MODELS_DIR"
