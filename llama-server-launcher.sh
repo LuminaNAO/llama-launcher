@@ -238,6 +238,7 @@ for conf in "$MODEL_CONFIG_FILE" "$MODEL_CONFIG_FILE_BY_FILE" "$MODEL_CONFIG_FIL
 done
 if [ "$HAS_MODEL_CONFIG" -eq 0 ]; then
     echo "📋 Config: none (using system profile)"
+    echo "   Expected: model-configs/${selected_folder_name}.conf"
     echo "   Save one with: $(basename "$0") --save"
 fi
 
@@ -320,15 +321,14 @@ elif [ "$TOTAL_RAM_GB" -ge 112 ]; then
     CHECKPOINT_MAX=64
     echo "📋 Profile: 128 GB (488k context, q8_0 KV, 30 GB cache, 2 slots)"
 elif [ "$TOTAL_RAM_GB" -ge 48 ]; then
-    CONTEXT=122144
-    PARALLEL=2
-    CACHE_RAM=8192
+    CONTEXT=131072
+    PARALLEL=1
+    CACHE_RAM=10240
     CACHE_TYPE_K="q8_0"
     CACHE_TYPE_V="q8_0"
-    CHECKPOINT_INTERVAL=8192
+    CHECKPOINT_INTERVAL=4096
     CHECKPOINT_MAX=32
-    echo "📋 Profile: 64 GB (122k context, q8_0 KV, 8 GB cache, 2 slots)"
-    echo "⚠️  64 GB profile not yet tuned — using conservative defaults"
+    echo "📋 Profile: 64 GB (131k context, q8_0 KV, 10 GB cache, 1 slot)"
 else
     CONTEXT=61072
     PARALLEL=1
@@ -375,6 +375,37 @@ else
     echo "   Fix: add to /etc/security/limits.conf and re-login:"
     echo "     $(whoami)  hard  memlock  unlimited"
     echo "     $(whoami)  soft  memlock  unlimited"
+fi
+
+# ── Auto-generate config if none existed ─────────────────────────────────────
+# When launching a model for the first time (no config file), save the effective
+# settings so the user has a starting point to tune. Uses the folder-name
+# convention so the launcher finds it automatically next time.
+if [ "$HAS_MODEL_CONFIG" -eq 0 ] && [ "$SAVE_CONFIG" -eq 0 ]; then
+    mkdir -p "$MODEL_CONFIG_DIR"
+    MODEL_CONFIG_FILE="$MODEL_CONFIG_DIR/${selected_folder_name}.conf"
+    cat > "$MODEL_CONFIG_FILE" <<CONF
+# Per-model launch config for: $selected_model
+# Auto-generated from ${TOTAL_RAM_GB} GB system profile: $(date -Iseconds)
+# Edit these values and they'll be loaded automatically on next launch.
+# CLI flags (--context, --parallel) override these settings.
+
+CONTEXT=$CONTEXT
+PARALLEL=$PARALLEL
+CACHE_RAM=$CACHE_RAM
+CACHE_TYPE_K=$CACHE_TYPE_K
+CACHE_TYPE_V=$CACHE_TYPE_V
+CHECKPOINT_INTERVAL=$CHECKPOINT_INTERVAL
+CHECKPOINT_MAX=$CHECKPOINT_MAX
+
+
+# Set JINJA=0 to disable --jinja (e.g. for Gemma 4 models)
+# JINJA=1
+
+# Uncomment to override additional server flags:
+# EXTRA_ARGS="--flag value"
+CONF
+    echo "💾 Auto-saved config: model-configs/${selected_folder_name}.conf"
 fi
 
 # ── Save per-model config if requested ───────────────────────────────────────
