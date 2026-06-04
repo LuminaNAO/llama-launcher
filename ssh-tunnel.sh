@@ -27,7 +27,7 @@ TUNNEL_HISTORY="$SCRIPT_DIR/.tunnel-history"
 TUNNEL_PIDFILE="/tmp/llama-tunnel-${PORT}.pid"
 TUNNEL_REMOTEFILE="/tmp/llama-tunnel-${PORT}.remote"
 
-SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=auto -o ControlPath=/tmp/ssh-tunnel-%r@%h:%p -o ControlPersist=600"
+SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ServerAliveCountMax=3"
 
 # ── Parse args ──────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -100,15 +100,84 @@ check_local_health() {
     echo "$resp" | grep -q '"status"' 2>/dev/null
 }
 
+ensure_ssh_agent() {
+    # If ssh-agent has at least one key loaded, we're good
+    if ssh-add -l >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Agent not running or empty. Try to start/load.
+    local agent_status
+    agent_status=$(ssh-add -l 2>&1 >/dev/null) || true
+
+    if echo "$agent_status" | grep -q "Could not open a connection"; then
+        # No agent running — start one for this session
+        echo "  Starting ssh-agent for this session..."
+        eval "$(ssh-agent -s)" >/dev/null
+    fi
+
+    # Still no keys loaded
+    if ! ssh-add -l >/dev/null 2>&1; then
+        # Without a tty, don't block on prompts — assume caller set things up
+        if [[ ! -t 0 ]]; then
+            echo "  No keys in agent and no tty — skipping ssh-add." >&2
+            echo "  ssh may prompt or fail depending on key setup." >&2
+            return 0
+        fi
+        echo "  No SSH keys loaded in ssh-agent."
+        read -rp "  Run ssh-add to load your key now? [Y/n] " yn
+        case "$yn" in
+            [nN]*)
+                echo "  Continuing without agent — you may be prompted for passphrase multiple times." >&2
+                return 0
+                ;;
+            *)
+                ssh-add || {
+                    echo "  ssh-add failed." >&2
+                    return 1
+                }
+                ;;
+        esac
+    fi
+    return 0
+}
+
 check_remote_ssh() {
-    # No BatchMode — allow passphrase prompts. ControlMaster ensures one
-    # unlock covers subsequent calls.
-    ssh $SSH_OPTS -o ConnectTimeout=10 "$1" 'echo ok' 2>/dev/null | grep -q ok
+    # No BatchMode — allow interactive prompts if the key isn't in ssh-agent.
+    # Capture stderr so failures surface instead of silently dropping the error.
+    local err_file
+    err_file=$(mktemp)
+    local out
+    out=$(ssh $SSH_OPTS -o ConnectTimeout=10 "$1" 'echo ok' 2>"$err_file") || true
+    if echo "$out" | grep -q ok; then
+        rm -f "$err_file"
+        return 0
+    fi
+    # Failed — show the error
+    if [[ -s "$err_file" ]]; then
+        echo "  SSH error:" >&2
+        sed 's/^/    /' "$err_file" >&2
+    fi
+    rm -f "$err_file"
+    return 1
 }
 
 check_remote_llama() {
-    ssh $SSH_OPTS -o ConnectTimeout=10 "$1" \
-        "curl -sf --max-time 3 -H 'Authorization: Bearer ${API_KEY}' http://127.0.0.1:${PORT}/health" 2>/dev/null | grep -q '"status"'
+    local err_file
+    err_file=$(mktemp)
+    local out
+    out=$(ssh $SSH_OPTS -o ConnectTimeout=10 "$1" \
+        "curl -sf --max-time 3 -H 'Authorization: Bearer ${API_KEY}' http://127.0.0.1:${PORT}/health" 2>"$err_file") || true
+    if echo "$out" | grep -q '"status"'; then
+        rm -f "$err_file"
+        return 0
+    fi
+    if [[ -s "$err_file" ]]; then
+        echo "  Remote health check error:" >&2
+        sed 's/^/    /' "$err_file" >&2
+    fi
+    rm -f "$err_file"
+    return 1
 }
 
 stop_tunnel() {
@@ -285,11 +354,13 @@ fi
 
 # ── Pre-flight checks ──────────────────────────────────────────────────────
 echo ""
+echo "Checking SSH agent..."
+ensure_ssh_agent || exit 1
+echo "  SSH agent: ok"
+
 echo "Checking SSH connectivity to ${REMOTE}..."
-echo "  (enter your SSH key passphrase if prompted — it will be cached for subsequent calls)"
 if ! check_remote_ssh "$REMOTE"; then
     echo "Error: cannot reach ${REMOTE} via SSH." >&2
-    echo "Hint: if this host needs a key passphrase, run 'ssh-add' first, or try 'ssh ${REMOTE}' manually to confirm connectivity." >&2
     exit 1
 fi
 echo "  SSH: ok"
