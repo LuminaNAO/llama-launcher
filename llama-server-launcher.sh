@@ -25,6 +25,9 @@ else
     echo ""
 fi
 
+# Force re-evaluation of MODELS_DIR from environment
+MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
+
 # Check if we have models at the current path, if not prompt for new path
 models=()
 while IFS= read -r -d '' file; do
@@ -47,6 +50,9 @@ if [ ${#models[@]} -eq 0 ]; then
         models+=("$(basename "$file")")
     done < <(find "$MODELS_DIR" -maxdepth 1 -name "*.gguf" -print0 2>/dev/null)
 fi
+
+# Force re-evaluation of MODELS_DIR from environment
+MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
 
 # Find llama.cpp repo and server dynamically
 LLAMACPP_BASE="$(dirname "$(readlink -f "$0")")/../llama.cpp"
