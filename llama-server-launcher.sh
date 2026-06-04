@@ -103,9 +103,10 @@ if [ -n "$ARG_MODEL_PATH" ]; then
     fi
     model_path="$(realpath "$ARG_MODEL_PATH")"
     selected_model="$(basename "$model_path")"
-    MODELS_DIR="$(dirname "$model_path")"
+    MODEL_FOLDER="$(dirname "$model_path")"
+    MODELS_DIR="$(dirname "$MODEL_FOLDER")"
 else
-    # Interactive: scan for models and let user pick
+    # Interactive: scan model folders and let user pick
     DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
 
     # Load saved models dir from config
@@ -115,98 +116,138 @@ else
     fi
     MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
 
-    scan_models() {
+    # Scan for model folders (each folder = one model family)
+    scan_model_folders() {
         local dir="$1"
-        models=()
-        while IFS= read -r -d '' file; do
-            name="$(basename "$file")"
-            # Skip non-first split files (e.g. -00002-of-00006.gguf)
-            if [[ "$name" =~ -[0-9]+-of-[0-9]+\.gguf$ ]] && ! [[ "$name" =~ -00001-of-[0-9]+\.gguf$ ]]; then
-                continue
+        model_folders=()
+        for folder in "$dir"/*/; do
+            [ ! -d "$folder" ] && continue
+            local fname="$(basename "$folder")"
+            # Skip downloading/ or other non-model dirs
+            [[ "$fname" == "downloading" ]] && continue
+            # Must contain at least one .gguf that isn't an mmproj
+            if find "$folder" -maxdepth 1 -name "*.gguf" -print0 2>/dev/null | grep -zqv "mmproj"; then
+                model_folders+=("$fname")
             fi
-            # Skip mmproj files — they're vision projectors, not main models
-            if [[ "$name" == *mmproj* ]]; then
-                continue
-            fi
-            models+=("$name")
-        done < <(find "$dir" -maxdepth 1 -name "*.gguf" -print0 2>/dev/null)
+        done
     }
 
-    scan_models "$MODELS_DIR"
+    scan_model_folders "$MODELS_DIR"
 
-    # If no models found, prompt for a new path
-    if [ ${#models[@]} -eq 0 ]; then
-        echo "❌ No .gguf models found at $MODELS_DIR"
+    # If no model folders found, prompt for a new path
+    if [ ${#model_folders[@]} -eq 0 ]; then
+        echo "❌ No model folders found at $MODELS_DIR"
         echo ""
         read -rp "Enter path to models directory: " new_path
         echo "LLAMACPP_MODELS_DIR=$new_path" > "$CONFIG_FILE"
         echo "✅ Path saved to $CONFIG_FILE for next launch"
         echo ""
         MODELS_DIR="$new_path"
-        scan_models "$MODELS_DIR"
+        scan_model_folders "$MODELS_DIR"
     fi
 
-    if [ ${#models[@]} -eq 0 ]; then
-        echo "❌ No .gguf models found in $MODELS_DIR"
+    if [ ${#model_folders[@]} -eq 0 ]; then
+        echo "❌ No model folders found in $MODELS_DIR"
         exit 1
     fi
 
     echo "📂 Models in $MODELS_DIR:"
     echo ""
-    for i in "${!models[@]}"; do
-        name="${models[$i]}"
-        if [[ "$name" =~ -00001-of-([0-9]+)\.gguf$ ]]; then
-            total="${BASH_REMATCH[1]}"
-            printf "  %d) %s  [split: %d parts]\n" $((i+1)) "$name" "$((10#$total))"
-        else
-            printf "  %d) %s\n" $((i+1)) "$name"
-        fi
+    for i in "${!model_folders[@]}"; do
+        folder="${model_folders[$i]}"
+        # Count quants (non-mmproj, non-split-continuation .gguf files)
+        quant_count=0
+        has_vision=""
+        while IFS= read -r -d '' file; do
+            name="$(basename "$file")"
+            [[ "$name" == *mmproj* ]] && { has_vision=" 👁️"; continue; }
+            [[ "$name" =~ -[0-9]+-of-[0-9]+\.gguf$ ]] && ! [[ "$name" =~ -00001-of-[0-9]+\.gguf$ ]] && continue
+            quant_count=$((quant_count + 1))
+        done < <(find "$MODELS_DIR/$folder" -maxdepth 1 -name "*.gguf" -print0 2>/dev/null)
+        printf "  %d) %s  [%d quant(s)]%s\n" $((i+1)) "$folder" "$quant_count" "$has_vision"
     done
     echo ""
 
-    read -rp "Select model [1-${#models[@]}]: " selection
+    read -rp "Select model [1-${#model_folders[@]}]: " folder_sel
 
-    if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt ${#models[@]} ]; then
+    if ! [[ "$folder_sel" =~ ^[0-9]+$ ]] || [ "$folder_sel" -lt 1 ] || [ "$folder_sel" -gt ${#model_folders[@]} ]; then
         echo "❌ Invalid selection"
         exit 1
     fi
 
-    selected_model="${models[$((selection-1))]}"
-    model_path="${MODELS_DIR}/${selected_model}"
+    selected_folder="${model_folders[$((folder_sel-1))]}"
+    MODEL_FOLDER="$MODELS_DIR/$selected_folder"
+
+    # Scan quants within the selected folder
+    quants=()
+    while IFS= read -r -d '' file; do
+        name="$(basename "$file")"
+        [[ "$name" == *mmproj* ]] && continue
+        [[ "$name" =~ -[0-9]+-of-[0-9]+\.gguf$ ]] && ! [[ "$name" =~ -00001-of-[0-9]+\.gguf$ ]] && continue
+        quants+=("$name")
+    done < <(find "$MODEL_FOLDER" -maxdepth 1 -name "*.gguf" -print0 2>/dev/null)
+
+    if [ ${#quants[@]} -eq 0 ]; then
+        echo "❌ No model files in $MODEL_FOLDER"
+        exit 1
+    elif [ ${#quants[@]} -eq 1 ]; then
+        selected_model="${quants[0]}"
+    else
+        echo ""
+        echo "Available quants in $selected_folder:"
+        for i in "${!quants[@]}"; do
+            name="${quants[$i]}"
+            if [[ "$name" =~ -00001-of-([0-9]+)\.gguf$ ]]; then
+                total="${BASH_REMATCH[1]}"
+                printf "  %d) %s  [split: %d parts]\n" $((i+1)) "$name" "$((10#$total))"
+            else
+                printf "  %d) %s\n" $((i+1)) "$name"
+            fi
+        done
+        echo ""
+        read -rp "Select quant [1-${#quants[@]}]: " quant_sel
+        if ! [[ "$quant_sel" =~ ^[0-9]+$ ]] || [ "$quant_sel" -lt 1 ] || [ "$quant_sel" -gt ${#quants[@]} ]; then
+            echo "❌ Invalid selection"
+            exit 1
+        fi
+        selected_model="${quants[$((quant_sel-1))]}"
+    fi
+
+    model_path="$MODEL_FOLDER/$selected_model"
 fi
 
 echo "📦 Model: $selected_model"
 
 # ── Load per-model config ────────────────────────────────────────────────────
+# Check for config by: folder name, then model filename, then split-stripped filename
 MODEL_CONFIG_DIR="$SCRIPT_DIR/model-configs"
-MODEL_CONFIG_FILE="$MODEL_CONFIG_DIR/${selected_model%.gguf}.conf"
-# Also check split models without the part suffix
-MODEL_CONFIG_FILE_ALT="$MODEL_CONFIG_DIR/$(echo "${selected_model%.gguf}" | sed 's/-00001-of-[0-9]*//' ).conf"
+selected_folder_name="$(basename "$MODEL_FOLDER")"
+MODEL_CONFIG_FILE="$MODEL_CONFIG_DIR/${selected_folder_name}.conf"
+MODEL_CONFIG_FILE_BY_FILE="$MODEL_CONFIG_DIR/${selected_model%.gguf}.conf"
+MODEL_CONFIG_FILE_SPLIT="$MODEL_CONFIG_DIR/$(echo "${selected_model%.gguf}" | sed 's/-00001-of-[0-9]*//' ).conf"
 
 HAS_MODEL_CONFIG=0
-if [ -f "$MODEL_CONFIG_FILE" ]; then
-    echo "📋 Config: $(basename "$MODEL_CONFIG_FILE")"
-    source "$MODEL_CONFIG_FILE"
-    HAS_MODEL_CONFIG=1
-elif [ -f "$MODEL_CONFIG_FILE_ALT" ] && [ "$MODEL_CONFIG_FILE_ALT" != "$MODEL_CONFIG_FILE" ]; then
-    MODEL_CONFIG_FILE="$MODEL_CONFIG_FILE_ALT"
-    echo "📋 Config: $(basename "$MODEL_CONFIG_FILE")"
-    source "$MODEL_CONFIG_FILE"
-    HAS_MODEL_CONFIG=1
-else
+for conf in "$MODEL_CONFIG_FILE" "$MODEL_CONFIG_FILE_BY_FILE" "$MODEL_CONFIG_FILE_SPLIT"; do
+    if [ -f "$conf" ]; then
+        MODEL_CONFIG_FILE="$conf"
+        echo "📋 Config: $(basename "$MODEL_CONFIG_FILE")"
+        source "$MODEL_CONFIG_FILE"
+        HAS_MODEL_CONFIG=1
+        break
+    fi
+done
+if [ "$HAS_MODEL_CONFIG" -eq 0 ]; then
     echo "📋 Config: none (using system profile)"
     echo "   Save one with: $(basename "$0") --save"
 fi
 
 # ── Auto-detect vision projector ─────────────────────────────────────────────
-# Searches the same directory as the selected model
+# Searches the same folder as the selected model — no prefix matching needed
 MMPROJ=""
-model_prefix=$(echo "$selected_model" | cut -d'-' -f1-3)
 mmproj_matches=()
 while IFS= read -r -d '' file; do
     mmproj_matches+=("$file")
-done < <(find "$MODELS_DIR" -maxdepth 1 -name "*mmproj*.gguf" -print0 2>/dev/null | \
-         grep -z "$model_prefix" 2>/dev/null || true)
+done < <(find "$MODEL_FOLDER" -maxdepth 1 -name "*mmproj*.gguf" -print0 2>/dev/null)
 
 if [ ${#mmproj_matches[@]} -eq 1 ]; then
     MMPROJ="${mmproj_matches[0]}"
