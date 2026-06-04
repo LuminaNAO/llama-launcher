@@ -89,11 +89,22 @@ if [ ! -d "$MODELS_DIR" ]; then
     esac
     MODELS_DIR="${MODELS_DIR%/}"
 
-    # Create the directory (with sudo for system paths)
+    # Create the directory (with sudo + open permissions for system paths)
     if [[ "$MODELS_DIR" == /usr/local/* ]]; then
         echo ""
         echo "Creating $MODELS_DIR (requires sudo)..."
         sudo mkdir -p "$MODELS_DIR" || { echo "ERROR: Failed to create $MODELS_DIR"; exit 1; }
+        sudo chmod 2775 "$MODELS_DIR"
+        # Set group to a shared group if available, otherwise open to all
+        if getent group users >/dev/null 2>&1; then
+            sudo chown :users "$MODELS_DIR"
+            echo "  Permissions: group 'users' has read/write access"
+        else
+            sudo chmod 2777 "$MODELS_DIR"
+            echo "  Permissions: all users have read/write access"
+        fi
+        # Ensure parent dirs are traversable
+        sudo chmod o+rx /usr/local/share/llama.cpp 2>/dev/null || true
     else
         mkdir -p "$MODELS_DIR" || { echo "ERROR: Failed to create $MODELS_DIR"; exit 1; }
     fi
@@ -362,6 +373,10 @@ if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
 fi
 
 $SUDO mkdir -p "$TARGET_DIR"
+# Inherit permissions from parent models dir (setgid propagates group)
+if [ -n "$SUDO" ]; then
+    $SUDO chmod --reference="$MODELS_DIR" "$TARGET_DIR" 2>/dev/null || true
+fi
 
 # ── Download function ────────────────────────────────────────────────────────
 download_file() {
@@ -394,6 +409,11 @@ download_file() {
         $SUDO curl -L -C - --progress-bar \
             -o "$local_path" \
             "$url"
+    fi
+
+    # Ensure downloaded files are accessible by other users
+    if [ -n "$SUDO" ]; then
+        $SUDO chmod 664 "$local_path" 2>/dev/null || true
     fi
 }
 
