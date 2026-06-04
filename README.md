@@ -48,7 +48,7 @@ Interactive launcher with per-model configs and launch history.
 | `--seed <N>`     | Override seed |
 | `--context <N>`  | Override context size |
 | `--parallel <N>` | Override parallel slots |
-| `--hdd-cache`    | Enable disk-backed slot cache and force `CACHE_RAM=0` |
+| `--hdd-cache`    | Enable disk-backed slot cache and force `CACHE_RAM=0`. For full benefit (prompt-checkpoint resumption — avoids cold prefill on prompt switch for hybrid/MTP models), install [`llama-hdd`](https://codeberg.org/LuminaNAO/git/llama-hdd.cpp) instead of vanilla `llama.cpp`. With vanilla llama.cpp the slot KV still restores, but the `common_prompt_checkpoint` list is lost and the model cold-prefills. |
 | `--no-hdd-cache` | Disable disk-backed slot cache for this launch; flag-driven launches default off when neither HDD flag is passed |
 | `--proxy`        | Enable deep-logging proxy (off by default) |
 | `--log`          | Tee server output to `~/llama.log` (off by default) |
