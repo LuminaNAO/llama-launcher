@@ -1,6 +1,16 @@
 #!/bin/bash
 # Build llama.cpp in the builds/ directory
-# Usage: build.sh <rocm|vulkan|cuda> [gpu-arch]
+# Usage: build.sh <build-type> [gpu-arch]
+#
+# <build-type> is <backend>[-<tag>], where <backend> ∈ {rocm,vulkan,cuda}.
+# The optional -tag suffix selects a parallel output directory under builds/
+# so multiple variants of the same backend can coexist (e.g. a fork build).
+#   ./build.sh rocm           # → builds/rocm (default mainline source)
+#   ./build.sh rocm-mtp       # → builds/rocm-mtp (use LLAMACPP_SRC to point at fork)
+#
+# To build from a non-default llama.cpp source tree (e.g. an upstream fork),
+# set LLAMACPP_SRC:
+#   LLAMACPP_SRC=~/code/llama-mtp/llama.cpp ./build.sh rocm-mtp
 #
 # GPU arch is auto-detected for ROCm builds but can be overridden:
 #   ./build.sh rocm gfx1100    # Force RX 7900 series target
@@ -21,7 +31,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LLAMACPP_DIR="$(dirname "$SCRIPT_DIR")/llama.cpp"
+DEFAULT_LLAMACPP_DIR="$(dirname "$SCRIPT_DIR")/llama.cpp"
 
 # ── Build type argument (required) ──────────────────────────────────────────
 BUILD_TYPE="${1:-}"
@@ -29,7 +39,7 @@ GPU_ARCH_OVERRIDE="${2:-}"
 if [ -z "$BUILD_TYPE" ]; then
     echo "❌ Build type required."
     echo ""
-    echo "Usage: build.sh <rocm|vulkan|cuda> [gpu-arch]"
+    echo "Usage: build.sh <rocm|vulkan|cuda>[-tag] [gpu-arch]"
     echo ""
     echo "Examples:"
     echo "  ./build.sh vulkan          # Vulkan backend (any GPU)"
@@ -38,13 +48,91 @@ if [ -z "$BUILD_TYPE" ]; then
     echo "  ./build.sh rocm gfx1151    # ROCm for Strix Halo"
     echo "  ./build.sh cuda            # CUDA backend (auto-detect NVIDIA GPU)"
     echo "  ./build.sh cuda 89         # CUDA for Ada Lovelace (RTX 4090)"
+    echo "  ./build.sh rocm-mtp        # Tagged build (prompts for source dir)"
     exit 1
 fi
 
 BUILD_DIR="$SCRIPT_DIR/builds/$BUILD_TYPE"
+# Backend = prefix before the first dash, so e.g. "rocm-mtp" uses the rocm
+# toolchain/cmake flags but lands in a separate output dir.
+BACKEND="${BUILD_TYPE%%-*}"
+# Tag = the rest after the first dash, empty if none. Used to bias the
+# source-tree picker (a tag of "mtp" suggests the path containing "mtp").
+BUILD_TAG=""
+[ "$BUILD_TYPE" != "$BACKEND" ] && BUILD_TAG="${BUILD_TYPE#*-}"
+
+# ── Resolve llama.cpp source directory ──────────────────────────────────────
+# Priority:
+#   1. LLAMACPP_SRC env var (explicit override — non-interactive)
+#   2. Plain BUILD_TYPE (no tag) with default source present → silent default
+#   3. Otherwise interactive picker (smart default based on tag, custom-path option)
+if [ -n "${LLAMACPP_SRC:-}" ]; then
+    LLAMACPP_DIR="$LLAMACPP_SRC"
+elif [ -z "$BUILD_TAG" ] && [ -f "$DEFAULT_LLAMACPP_DIR/CMakeLists.txt" ]; then
+    LLAMACPP_DIR="$DEFAULT_LLAMACPP_DIR"
+else
+    # Discover candidate llama.cpp source trees near the helper.
+    # Patterns covered:
+    #   ~/code/llama.cpp            (default sibling)
+    #   ~/code/llama.cpp-*          (suffix style, e.g. llama.cpp-v4flash)
+    #   ~/code/llama*/llama.cpp     (nested style, e.g. llama-mtp/llama.cpp)
+    parent_dir="$(dirname "$SCRIPT_DIR")"
+    candidates=()
+    for c in "$parent_dir"/llama.cpp "$parent_dir"/llama.cpp-* "$parent_dir"/llama*/llama.cpp; do
+        [ -f "$c/CMakeLists.txt" ] || continue
+        # Deduplicate (a glob can hit the same path twice)
+        c_real="$(realpath "$c" 2>/dev/null || echo "$c")"
+        seen=0
+        for s in "${candidates[@]}"; do
+            [ "$(realpath "$s" 2>/dev/null || echo "$s")" = "$c_real" ] && { seen=1; break; }
+        done
+        [ "$seen" -eq 1 ] && continue
+        candidates+=("$c")
+    done
+
+    if [ ${#candidates[@]} -eq 0 ]; then
+        echo "❌ No llama.cpp source trees found near $parent_dir"
+        echo "   Either clone one (e.g. git clone https://github.com/ggml-org/llama.cpp.git $DEFAULT_LLAMACPP_DIR)"
+        echo "   or set LLAMACPP_SRC=/path/to/llama.cpp"
+        exit 1
+    fi
+
+    # Smart default: prefer a candidate whose path contains the BUILD_TAG
+    default_sel=1
+    if [ -n "$BUILD_TAG" ]; then
+        for i in "${!candidates[@]}"; do
+            [[ "${candidates[$i]}" == *"$BUILD_TAG"* ]] && { default_sel=$((i+1)); break; }
+        done
+    fi
+
+    echo "🔍 Available llama.cpp source trees:"
+    for i in "${!candidates[@]}"; do
+        label=""
+        [ "${candidates[$i]}" = "$DEFAULT_LLAMACPP_DIR" ] && label="$label (default)"
+        if [ -d "${candidates[$i]}/.git" ]; then
+            branch=$(git -C "${candidates[$i]}" branch --show-current 2>/dev/null || true)
+            [ -n "$branch" ] && label="$label [$branch]"
+        fi
+        printf "  %d) %s%s\n" $((i+1)) "${candidates[$i]}" "$label"
+    done
+    echo "  c) Custom path"
+    echo ""
+
+    read -rp "Select source [1-${#candidates[@]}, c=custom, default=$default_sel]: " src_sel
+    src_sel="${src_sel:-$default_sel}"
+    if [[ "$src_sel" == "c" || "$src_sel" == "C" ]]; then
+        read -rp "Enter llama.cpp source path: " LLAMACPP_DIR
+    elif [[ "$src_sel" =~ ^[0-9]+$ ]] && [ "$src_sel" -ge 1 ] && [ "$src_sel" -le ${#candidates[@]} ]; then
+        LLAMACPP_DIR="${candidates[$((src_sel-1))]}"
+    else
+        echo "❌ Invalid selection: $src_sel"
+        exit 1
+    fi
+    LLAMACPP_DIR="$(realpath "$LLAMACPP_DIR")"
+fi
 
 echo "🔍 llama.cpp source: $LLAMACPP_DIR"
-echo "🏗️  Build type: $BUILD_TYPE"
+echo "🏗️  Build type: $BUILD_TYPE  (backend: $BACKEND)"
 echo "🏗️  Build directory: $BUILD_DIR"
 echo ""
 
@@ -70,7 +158,7 @@ command -v gcc >/dev/null 2>&1 && command -v g++ >/dev/null 2>&1 || MISSING+=("g
 command -v git >/dev/null 2>&1 || MISSING+=("git|git — version control")
 command -v pkg-config >/dev/null 2>&1 || MISSING+=("pkg-config|pkgconf (Arch) / pkg-config (Debian)")
 
-case "$BUILD_TYPE" in
+case "$BACKEND" in
     vulkan)
         # Check Vulkan headers (needed at compile time — vulkan-headers package)
         if [ ! -f /usr/include/vulkan/vulkan.h ] && [ ! -f /usr/local/include/vulkan/vulkan.h ]; then
@@ -132,20 +220,21 @@ case "$BUILD_TYPE" in
         fi
         ;;
     *)
-        echo "❌ Unknown build type: $BUILD_TYPE"
+        echo "❌ Unknown backend: $BACKEND (derived from build type '$BUILD_TYPE')"
         echo ""
-        echo "Usage: build.sh <rocm|vulkan|cuda>"
+        echo "Usage: build.sh <rocm|vulkan|cuda>[-tag]"
         echo ""
         echo "Examples:"
         echo "  ./build.sh vulkan    # Recommended for Strix Halo / RDNA 3.5"
         echo "  ./build.sh rocm      # ROCm/HIP backend"
         echo "  ./build.sh cuda      # NVIDIA CUDA backend"
+        echo "  LLAMACPP_SRC=~/code/llama-mtp/llama.cpp ./build.sh rocm-mtp  # fork build"
         exit 1
         ;;
 esac
 
 if [ ${#MISSING[@]} -gt 0 ]; then
-    echo "❌ Missing dependencies for $BUILD_TYPE build:"
+    echo "❌ Missing dependencies for $BACKEND build:"
     echo ""
     for entry in "${MISSING[@]}"; do
         name="${entry%%|*}"
@@ -157,14 +246,14 @@ if [ ${#MISSING[@]} -gt 0 ]; then
     # Detect package manager and give a one-liner
     if command -v pacman >/dev/null 2>&1; then
         echo "Arch/CachyOS quick install:"
-        case "$BUILD_TYPE" in
+        case "$BACKEND" in
             vulkan) echo "  sudo pacman -S vulkan-headers vulkan-icd-loader shaderc vulkan-tools" ;;
             rocm)   echo "  sudo pacman -S rocm-hip-sdk rocblas hipblas rocminfo" ;;
             cuda)   echo "  sudo pacman -S cuda" ;;
         esac
     elif command -v apt-get >/dev/null 2>&1; then
         echo "Debian/Ubuntu quick install:"
-        case "$BUILD_TYPE" in
+        case "$BACKEND" in
             vulkan) echo "  sudo apt-get install libvulkan-dev vulkan-tools glslc" ;;
             rocm)   echo "  See https://rocm.docs.amd.com for ROCm installation" ;;
             cuda)   echo "  sudo apt-get install nvidia-cuda-toolkit libcublas-dev" ;;
@@ -174,7 +263,7 @@ if [ ${#MISSING[@]} -gt 0 ]; then
     exit 1
 fi
 
-echo "✅ All dependencies found for $BUILD_TYPE build"
+echo "✅ All dependencies found for $BACKEND build"
 echo ""
 
 # ── Prepare build directory ─────────────────────────────────────────────────
@@ -193,7 +282,7 @@ if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
 fi
 
 # ── GPU architecture detection (ROCm only) ────────────────────────────────
-if [ "$BUILD_TYPE" = "rocm" ]; then
+if [ "$BACKEND" = "rocm" ]; then
     if [ -n "$GPU_ARCH_OVERRIDE" ]; then
         GPU_ARCH="$GPU_ARCH_OVERRIDE"
         echo "🎯 GPU arch (override): $GPU_ARCH"
@@ -278,7 +367,7 @@ if [ "$BUILD_TYPE" = "rocm" ]; then
 fi
 
 # ── GPU architecture detection (CUDA) ─────────────────────────────────────
-if [ "$BUILD_TYPE" = "cuda" ]; then
+if [ "$BACKEND" = "cuda" ]; then
     if [ -n "$GPU_ARCH_OVERRIDE" ]; then
         CUDA_ARCH="$GPU_ARCH_OVERRIDE"
         echo "🎯 CUDA compute capability (override): $CUDA_ARCH"
@@ -314,7 +403,7 @@ if [ "$BUILD_TYPE" = "cuda" ]; then
 fi
 
 # ── Configure and build ────────────────────────────────────────────────────
-case "$BUILD_TYPE" in
+case "$BACKEND" in
     cuda)
         CMAKE_CUDA_ARGS=(-DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release)
         if [ "$CUDA_ARCH" != "native" ]; then
