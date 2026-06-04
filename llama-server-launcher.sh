@@ -466,6 +466,10 @@ API_KEY="${API_KEY:-ollama-local}"
 KV_UNIFIED="${KV_UNIFIED:-1}"
 FLASH_ATTN="${FLASH_ATTN:-1}"
 
+# ── Reasoning / thinking (auto by default) ──────────────────────────────────
+REASONING="${REASONING:-auto}"
+REASONING_BUDGET="${REASONING_BUDGET:--1}"
+
 # ── Anti-repeat sampling (disabled by default) ─────────────────────────────
 REPEAT_PENALTY="${REPEAT_PENALTY:-1.0}"
 REPEAT_LAST_N="${REPEAT_LAST_N:-64}"
@@ -630,6 +634,11 @@ KV_UNIFIED_FLAG=""
 FA_FLAG=""
 [ "$FLASH_ATTN" = "1" ] && FA_FLAG="-fa on"
 
+# ── Reasoning flags (only add if non-default) ──────────────────────────────
+REASONING_FLAGS=""
+[ "$REASONING" != "auto" ] && REASONING_FLAGS="$REASONING_FLAGS --reasoning $REASONING"
+[ "$REASONING_BUDGET" != "-1" ] && REASONING_FLAGS="$REASONING_FLAGS --reasoning-budget $REASONING_BUDGET"
+
 # ── Anti-repeat flags (only add if non-default) ──────────────────────────
 REPEAT_FLAGS=""
 [ "$REPEAT_PENALTY" != "1.0" ] && REPEAT_FLAGS="$REPEAT_FLAGS --repeat-penalty $REPEAT_PENALTY --repeat-last-n $REPEAT_LAST_N"
@@ -663,6 +672,7 @@ REPEAT_FLAGS=""
   --seed "$SEED" \
   ${MLOCK_FLAG:+$MLOCK_FLAG} \
   ${MMPROJ:+--mmproj "$MMPROJ"} \
+  ${REASONING_FLAGS:+$REASONING_FLAGS} \
   ${REPEAT_FLAGS:+$REPEAT_FLAGS} \
   ${EXTRA_ARGS:+$EXTRA_ARGS} \
   2>&1 | tee -a $HOME/llama.log
