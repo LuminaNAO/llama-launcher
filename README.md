@@ -41,7 +41,7 @@ Builds llama.cpp into `builds/<backend>/`. GPU arch (gfx target or CUDA compute 
 
 Interactive launcher with per-model configs and launch history.
 
-Run without flags to choose `Launch` or `Settings`. Settings edits the repo-local `.llama-launcher-config` for global defaults such as model directory, slot-cache directory, slot-cache disk limits, ports, bind host, API key, log colors, and default build type.
+Run without flags for the interactive launcher. Enter `s` from the recent-launch or build menus to open Settings. Settings edits the repo-local `.llama-launcher-config` for global defaults such as model directory, HDD slot-cache directory, HDD slot-cache disk limits, ports, bind host, API key, log colors, and default build type.
 
 **Flags:**
 
@@ -79,9 +79,9 @@ Transparent HTTP proxy that tees request/response bodies to a log (default `~/ll
 
 Interactive GGUF downloader from HuggingFace with quant selection. Reads `HF_TOKEN` or `~/.cache/huggingface/token`.
 
-### `utils/install-service.sh [--seed N] [--uninstall]`
+### `utils/install-service.sh [--seed N] [--uninstall] [--system]`
 
-Installs `llama-server` as a systemd unit. Reads `LLAMACPP_BUILD_TYPE` (default `rocm`) to select the backend binary.
+Installs `llama-server` as a systemd unit. Defaults to a per-user service; pass `--system` with sudo for a system service. The installer follows the launcher flow for build, model, tune, vision, proxy, and HDD cache choices.
 
 ### `utils/ssh-tunnel.sh [remote] [--port N] [--api-key K] [--status|--stop]`
 
