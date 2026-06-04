@@ -84,6 +84,10 @@ Manage an SSH tunnel to a remote `llama-server`. History in `.tunnel-history`.
 
 Raises `memlock` in `/etc/security/limits.conf` so `llama-server --mlock` doesn't swap. Requires re-login.
 
+## Tuning notes
+
+- [`docs/CACHE-RAM.md`](docs/CACHE-RAM.md) — what `--cache-ram` / `CACHE_RAM` actually is (hint: it's not what the name suggests). **Read this before adjusting the value in a tune.**
+
 ## Benchmarking / stress
 
 | Script | Purpose |
