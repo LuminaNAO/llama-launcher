@@ -1,185 +1,107 @@
 # llama-launcher
 
-Helper scripts for managing llama.cpp models and server.
+Helper scripts for building llama.cpp and running `llama-server` with per-model configs, launch history, benchmarking, and SSH tunneling.
 
-## Placement
+## Layout
 
-This repo is designed to be placed **next to** the main `llama.cpp` repo:
-
-```
-/path/to/code/
-├── llama.cpp/           # Main llama.cpp repo
-├── llama-launcher/     # This repo (contains these scripts)
-│   ├── build.sh
-│   ├── llama-server-launcher.sh
-│   └── benchmark.sh
-└── ...
-```
-
-The scripts automatically discover the `llama.cpp` repo by looking one level up from their location.
-
-## Build Structure
-
-Builds are now stored in a dedicated `builds/` directory:
+Place next to the `llama.cpp` repo:
 
 ```
-llama-launcher/
-├── builds/
-│   ├── rocm/            # ROCm/HIP build
-│   │   ├── bin/         # llama-server, etc.
-│   │   └── lib/         # .so files
-│   └── vulkan/          # Vulkan build (future)
-├── build.sh
-├── llama-server-launcher.sh
-└── benchmark.sh
+code/
+├── llama.cpp/
+└── llama-launcher/
+    ├── builds/<backend>/{bin,lib}/   # built artifacts
+    ├── model-configs/                # per-model tunes (*.conf)
+    ├── benchmark-results/            # JSONL/TXT results
+    ├── build.sh
+    ├── llama-server-launcher.sh
+    └── ...
 ```
 
-This keeps the source tree clean and makes it easy to maintain multiple configurations.
+Scripts resolve their own location via `readlink -f`, so the launcher can be symlinked into `PATH`.
+
+## Install the launcher into `PATH`
+
+```bash
+ln -s "$PWD/llama-server-launcher.sh" ~/.local/bin/llama-launcher
+```
+
+Then call `llama-launcher …` from anywhere.
 
 ## Scripts
 
-### `build.sh`
+### `build.sh <rocm|vulkan|cuda> [gpu-arch]`
 
-Builds llama.cpp for a specific backend.
-
-**Usage:**
-```bash
-cd /path/to/code/llama-launcher
-./build.sh rocm
-```
-
-**Supported backends:**
-- `rocm` - AMD ROCm/HIP (default)
-- `vulkan` - Vulkan backend
-
-**What it does:**
-- Creates build directory in `builds/<backend>/`
-- Runs CMake with backend-specific configuration
-- Builds the project
-
-**Error message if llama.cpp not found:**
-```
-❌ llama.cpp not found at /path/to/code/llama.cpp
-```
+Builds llama.cpp into `builds/<backend>/`. GPU arch (gfx target or CUDA compute cap) is auto-detected via `rocminfo` / `nvidia-smi` and can be overridden.
 
 ### `llama-server-launcher.sh`
 
-Lists available `.gguf` models and launches llama-server with your selection.
+Interactive launcher with per-model configs and launch history.
 
-**Usage:**
-```bash
-cd /path/to/code/llama-launcher
-./llama-server-launcher.sh
-```
+**Flags:**
 
-**Environment Variables:**
-- `LLAMACPP_MODELS_DIR` - Path to models directory (default: `/usr/local/share/llama.cpp/models`)
-- `LLAMACPP_BUILD_TYPE` - Backend to use (rocm, vulkan, etc.)
+| Flag | Description |
+|------|-------------|
+| `--build <type>` | rocm / vulkan / cuda (skips build menu) |
+| `--model <path>` | Path to `.gguf` (skips model menu) |
+| `--tune <name>`  | Named tune from model's `.conf` |
+| `--seed <N>`     | Override seed |
+| `--context <N>`  | Override context size |
+| `--parallel <N>` | Override parallel slots |
+| `--proxy`        | Enable deep-logging proxy (off by default) |
+| `--log`          | Tee server output to `~/llama.log` (off by default) |
+| `--save`         | Persist effective settings into the model's `.conf` |
 
-**Error messages:**
-
-If `llama-server` binary not found:
-```
-❌ llama-server not found at /path/to/builds/rocm/bin/llama-server
-
-Available builds:
-  ✅ rocm
-  ⚠️  vulkan (not built)
-
-To build a backend, run:
-  cd /path/to/code/llama-launcher
-  ./build.sh [rocm|vulkan]
-```
-
-If no `.gguf` models found:
-```
-❌ No .gguf models found in /path/to/models
-```
-
-If invalid model selection:
-```
-❌ Invalid selection
-```
-
-### `benchmark.sh`
-
-Runs performance benchmarks on llama.cpp servers with interactive model selection.
-
-**Usage:**
-```bash
-cd /path/to/code/llama-launcher
-./benchmark.sh
-```
-
-**What it does:**
-- Reads model path from config (same as launcher)
-- Lists available `.gguf` models interactively
-- Lets you select a model
-- Starts llama-server in background
-- Runs multiple benchmark tests
-- Measures tokens/sec, duration, and generates CSV results
-- Stops the server when done
-
-**Benchmark tests:**
-- Short response (100 tokens)
-- Medium response (500 tokens)
-- Long response (2000 tokens)
-
-**Output:**
-- Real-time progress
-- Results saved to `$HOME/benchmark-results.csv`
-- Summary table at the end
-
-**Environment Variables:**
-- `LLAMACPP_BUILD_TYPE` - Backend to use (rocm, vulkan, etc.)
-- `LLAMACPP_MODELS_DIR` - Path to models directory (default: `/usr/local/share/llama.cpp/models`)
-
-## Configuration
-
-### Default Paths
-
-The scripts expect:
-- `llama.cpp` repo at: `$(dirname "$0")/../../llama.cpp`
-- Builds directory at: `$(dirname "$0")/builds/`
-- Models directory at: `/usr/local/share/llama.cpp/models`
-
-### Customization
-
-Override defaults via environment variables before running scripts:
+**Subcommand:**
 
 ```bash
-export LLAMACPP_MODELS_DIR=/custom/path/to/models
-./llama-server-launcher.sh
+llama-launcher stop      # SIGINT llama-server and deep proxy; SIGTERM after 10s
 ```
+
+**Launch history:** the last 5 unique `build+model+tune` combinations are shown at startup. Selecting one re-applies the flags (`--log` / `--proxy`) used in that launch. Stored at `.launch-history`.
+
+**Per-model configs:** `model-configs/<model>.conf`. CLI flags override saved values; use `--save` to persist.
+
+**Models directory:** scanned from `LLAMACPP_MODELS_DIR` or `/usr/local/share/llama.cpp/models`. Path is saved to `.llama-launcher-config` on first run.
+
+### `llama-deep-proxy.mjs <listen-port> <backend-port> [log-file]`
+
+Transparent HTTP proxy that tees request/response bodies to a log (default `~/llama-deep.log`). Started automatically by the launcher when `--proxy` is passed.
+
+### `download-model.sh <hf-url-or-repo>`
+
+Interactive GGUF downloader from HuggingFace with quant selection. Reads `HF_TOKEN` or `~/.cache/huggingface/token`.
+
+### `install-service.sh [--seed N] [--uninstall]`
+
+Installs `llama-server` as a systemd unit. Reads `LLAMACPP_BUILD_TYPE` (default `rocm`) to select the backend binary.
+
+### `ssh-tunnel.sh [remote] [--port N] [--api-key K] [--status|--stop]`
+
+Manage an SSH tunnel to a remote `llama-server`. History in `.tunnel-history`.
+
+### `mlock-fixer.sh`
+
+Raises `memlock` in `/etc/security/limits.conf` so `llama-server --mlock` doesn't swap. Requires re-login.
+
+## Benchmarking / stress
+
+| Script | Purpose |
+|--------|---------|
+| `benchmark.sh <label>` | Inference benchmarks across context sizes against `localhost:40801`. Writes `benchmark-results/bench-<label>-<ts>.jsonl`. |
+| `bench-batch-sizes.sh` | Sweep `-b` values, restart server between runs, log GTT. |
+| `benchmark-backends.sh [model]` | Compare vulkan / rocm / rocm-gfx1100 via `llama-bench`. |
+| `load-test.sh` | Fire concurrent diverse requests, monitor slot usage. |
+| `soak-test-v3b.sh` | 1-hour soak test under concurrent high-context load. |
+| `vram-stress-test.sh` | Peak VRAM/GTT measurement across all slots. |
+| `tune-gemma4-v3.sh` | Sweep v3a/v3b/v3c tunes, report best under VRAM limit. |
+
+See `BENCHMARK-RESULTS.md` for recorded results.
 
 ## Requirements
 
-- `cmake` - For building llama.cpp
-- `git` - For cloning llama.cpp (if needed)
-- `bash` - Script interpreter
-- `curl` - For benchmarking
-- `jq` - For parsing JSON responses
-- `bc` - For floating-point calculations
-
-## ROCm Build Configuration
-
-The default ROCm build uses:
-- `GGML_HIP=ON`
-- `AMDGPU_TARGETS=gfx1151` (RDNA 3 - Strix Halo)
-- `GGML_HIP_ROCWMMA_FATTN=ON` (FlashAttention)
-- `CMAKE_BUILD_TYPE=Release`
-
-## Vulkan Build Configuration
-
-To build for Vulkan, you'll need:
-- Vulkan SDK installed
-- GLSLC compiler
-
-```bash
-export LLAMACPP_BUILD_TYPE=vulkan
-./build.sh vulkan
-```
+`cmake`, `git`, `bash`, `curl`, `jq`, `bc`, `node` (for the deep proxy), `ssh` (for tunnels).
 
 ## License
 
-MIT (same as llama.cpp)
+MIT (same as llama.cpp).
