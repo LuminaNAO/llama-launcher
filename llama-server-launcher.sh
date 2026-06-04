@@ -8,12 +8,15 @@
 #   export LLAMACPP_BUILD_TYPE=rocm|vulkan|debug|release
 #
 # Options:
-#   --seed <N>   Override the random seed (default: 42)
+#   --seed <N>      Override the random seed (default: 42)
+#   --mmproj <path> Path to vision projector GGUF for multimodal models
 
 SEED=42
+MMPROJ=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --seed) SEED="$2"; shift 2 ;;
+        --seed)   SEED="$2";   shift 2 ;;
+        --mmproj) MMPROJ="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -173,6 +176,13 @@ echo "   Backend: $BUILD_TYPE"
 echo "   Build dir: $BUILD_DIR"
 echo "   Model: $selected_model"
 echo "   Server: $LLAMACPP_SERVER_PATH"
+if [ -n "$MMPROJ" ]; then
+    if [ ! -f "$MMPROJ" ]; then
+        echo "❌ mmproj file not found: $MMPROJ"
+        exit 1
+    fi
+    echo "   Mmproj: $MMPROJ"
+fi
 echo ""
 
 # Run llama-server with the selected model
@@ -270,4 +280,5 @@ echo ""
   --checkpoint-every-n-tokens "$CHECKPOINT_INTERVAL" \
   --ctx-checkpoints "$CHECKPOINT_MAX" \
   --seed "$SEED" \
+  ${MMPROJ:+--mmproj "$MMPROJ"} \
   --swa-full 2>&1 | tee -a $HOME/llama.log
