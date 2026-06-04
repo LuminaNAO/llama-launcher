@@ -16,6 +16,8 @@
 #   --seed <N>       Override the random seed (default: 42)
 #   --context <N>    Override context size
 #   --parallel <N>   Override number of parallel slots
+#   --no-proxy       Skip the deep-logging proxy (llama-server binds directly)
+#   --no-log         Don't tee output to ~/llama.log
 #   --save           Save effective launch settings as a per-model config
 #
 # Per-model configs are stored in model-configs/<model-name>.conf and
@@ -29,6 +31,8 @@ SAVE_CONFIG=0
 ARG_BUILD_TYPE=""
 ARG_MODEL_PATH=""
 ARG_TUNE=""
+NO_PROXY=0
+NO_LOG=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --seed) SEED="$2"; shift 2 ;;
@@ -38,6 +42,8 @@ while [[ $# -gt 0 ]]; do
         --build) ARG_BUILD_TYPE="$2"; shift 2 ;;
         --model) ARG_MODEL_PATH="$2"; shift 2 ;;
         --tune) ARG_TUNE="$2"; shift 2 ;;
+        --no-proxy) NO_PROXY=1; shift ;;
+        --no-log) NO_LOG=1; shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -712,19 +718,29 @@ INTERNAL_PORT="${INTERNAL_PORT:-40802}"
 DEEP_LOG="$HOME/llama-deep.log"
 PROXY_SCRIPT="$SCRIPT_DIR/llama-deep-proxy.mjs"
 
-echo ""
-echo "🚀 Launching llama-server..."
-echo "   llama-server on internal port $INTERNAL_PORT"
-echo "   proxy on public port $PORT -> $INTERNAL_PORT"
-echo "   deep log: $DEEP_LOG"
-echo ""
+if [ "$NO_PROXY" -eq 1 ]; then
+    # No proxy — llama-server binds directly to the public port
+    INTERNAL_PORT="$PORT"
+    LLAMA_BIND_HOST="$HOST"
+    echo ""
+    echo "🚀 Launching llama-server..."
+    echo "   llama-server on port $PORT (no proxy)"
+    echo ""
+else
+    echo ""
+    echo "🚀 Launching llama-server..."
+    echo "   llama-server on internal port $INTERNAL_PORT"
+    echo "   proxy on public port $PORT -> $INTERNAL_PORT"
+    echo "   deep log: $DEEP_LOG"
+    echo ""
+fi
 
 # ── Build launch flags from tuneable variables ──────────────────────────────
 MMAP_FLAG=""
 [ "$NO_MMAP" = "1" ] && MMAP_FLAG="--no-mmap"
 DIO_FLAG=""
 [ "$DIO" = "1" ] && DIO_FLAG="-dio"
-KV_UNIFIED_FLAG=""
+KV_UNIFIED_FLAG="--no-kv-unified"
 [ "$KV_UNIFIED" = "1" ] && KV_UNIFIED_FLAG="--kv-unified"
 FA_FLAG=""
 [ "$FLASH_ATTN" = "1" ] && FA_FLAG="-fa on"
@@ -742,8 +758,6 @@ REPEAT_FLAGS=""
 [ "$DRY_MULTIPLIER" != "0.0" ] && REPEAT_FLAGS="$REPEAT_FLAGS --dry-multiplier $DRY_MULTIPLIER --dry-base $DRY_BASE --dry-allowed-length $DRY_ALLOWED_LENGTH --dry-penalty-last-n $DRY_PENALTY_LAST_N"
 
 # ── Start deep-logging proxy ────────────────────────────────────────────────
-# The proxy must be up before clients connect to PORT.
-# It runs in the background and is killed when the launcher exits.
 PROXY_PID=""
 cleanup_proxy() {
     if [ -n "$PROXY_PID" ] && kill -0 "$PROXY_PID" 2>/dev/null; then
@@ -753,51 +767,59 @@ cleanup_proxy() {
 }
 trap cleanup_proxy EXIT
 
-node "$PROXY_SCRIPT" "$PORT" "$INTERNAL_PORT" "$DEEP_LOG" &
-PROXY_PID=$!
+if [ "$NO_PROXY" -eq 0 ]; then
+    node "$PROXY_SCRIPT" "$PORT" "$INTERNAL_PORT" "$DEEP_LOG" &
+    PROXY_PID=$!
 
-# Give the proxy a moment to bind
-sleep 0.3
-if ! kill -0 "$PROXY_PID" 2>/dev/null; then
-    echo "❌ Deep-logging proxy failed to start"
-    exit 1
+    # Give the proxy a moment to bind
+    sleep 0.3
+    if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+        echo "❌ Deep-logging proxy failed to start"
+        exit 1
+    fi
+    echo "✅ Deep-logging proxy running (PID $PROXY_PID)"
+    echo ""
 fi
-echo "✅ Deep-logging proxy running (PID $PROXY_PID)"
-echo ""
 
 # ── Log this launch to history ─────────────────────────────────────────────
 _tune_log=""
 [[ -n "${MODEL_CONFIG_FILE:-}" ]] && _tune_log="$(grep -m1 '^# Tune:' "$MODEL_CONFIG_FILE" 2>/dev/null | sed 's/^# Tune: *//')"
 printf '%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$BUILD_TYPE" "$model_path" "$_tune_log" >> "$LAUNCH_HISTORY"
 
-# ── Launch llama-server on internal port ────────────────────────────────────
-"$LLAMACPP_SERVER_PATH" \
-  -m "$model_path" \
-  -ngl "$NGL" \
-  -c "$CONTEXT" \
-  ${FA_FLAG:+$FA_FLAG} \
-  --temp "$TEMP" \
-  --top-p "$TOP_P" \
-  --top-k "$TOP_K" \
-  --threads "$THREADS" \
-  ${MMAP_FLAG:+$MMAP_FLAG} \
-  ${DIO_FLAG:+$DIO_FLAG} \
-  --timeout "$TIMEOUT" \
-  --host 127.0.0.1 \
-  --port "$INTERNAL_PORT" \
-  --api-key "$API_KEY" \
-  ${JINJA_FLAG:+$JINJA_FLAG} \
-  --parallel "$PARALLEL" \
-  ${KV_UNIFIED_FLAG:+$KV_UNIFIED_FLAG} \
-  --cache-ram "$CACHE_RAM" \
-  -ctk "$CACHE_TYPE_K" \
-  -ctv "$CACHE_TYPE_V" \
-  --checkpoint-every-n-tokens "$CHECKPOINT_INTERVAL" \
-  --ctx-checkpoints "$CHECKPOINT_MAX" \
-  --seed "$SEED" \
-  ${MLOCK_FLAG:+$MLOCK_FLAG} \
-  ${MMPROJ:+--mmproj "$MMPROJ"} \
-  ${REASONING_FLAGS:+$REASONING_FLAGS} \
-  ${REPEAT_FLAGS:+$REPEAT_FLAGS} \
-  ${EXTRA_ARGS:+$EXTRA_ARGS} \
-  2>&1 | tee -a $HOME/llama.log
+# ── Launch llama-server ─────────────────────────────────────────────────────
+LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
+  -m "$model_path"
+  -ngl "$NGL"
+  -c "$CONTEXT"
+  ${FA_FLAG:+$FA_FLAG}
+  --temp "$TEMP"
+  --top-p "$TOP_P"
+  --top-k "$TOP_K"
+  --threads "$THREADS"
+  ${MMAP_FLAG:+$MMAP_FLAG}
+  ${DIO_FLAG:+$DIO_FLAG}
+  --timeout "$TIMEOUT"
+  --host "${LLAMA_BIND_HOST:-127.0.0.1}"
+  --port "$INTERNAL_PORT"
+  --api-key "$API_KEY"
+  ${JINJA_FLAG:+$JINJA_FLAG}
+  --parallel "$PARALLEL"
+  ${KV_UNIFIED_FLAG:+$KV_UNIFIED_FLAG}
+  --cache-ram "$CACHE_RAM"
+  -ctk "$CACHE_TYPE_K"
+  -ctv "$CACHE_TYPE_V"
+  --checkpoint-every-n-tokens "$CHECKPOINT_INTERVAL"
+  --ctx-checkpoints "$CHECKPOINT_MAX"
+  --seed "$SEED"
+  ${MLOCK_FLAG:+$MLOCK_FLAG}
+  ${MMPROJ:+--mmproj "$MMPROJ"}
+  ${REASONING_FLAGS:+$REASONING_FLAGS}
+  ${REPEAT_FLAGS:+$REPEAT_FLAGS}
+  ${EXTRA_ARGS:+$EXTRA_ARGS}
+)
+
+if [ "$NO_LOG" -eq 1 ]; then
+    "${LAUNCH_CMD[@]}" 2>&1
+else
+    "${LAUNCH_CMD[@]}" 2>&1 | tee -a "$HOME/llama.log"
+fi
