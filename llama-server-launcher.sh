@@ -45,6 +45,50 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
 LLAMA_LAUNCHER_DIR="$SCRIPT_DIR"
+LAUNCH_HISTORY="$SCRIPT_DIR/.launch-history"
+
+# ── Launch history: quick relaunch ──────────────────────────────────────────
+# Show recent launches if no CLI args were given (fully interactive mode)
+if [[ -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && -z "$ARG_TUNE" && -f "$LAUNCH_HISTORY" ]]; then
+    # Read up to 5 most recent unique launches (newest first)
+    recent=()
+    while IFS=$'\t' read -r ts build model tune; do
+        entry="${build}${model}${tune}"
+        # Deduplicate
+        dup=0
+        for r in "${recent[@]}"; do
+            [[ "$r" == "$entry" ]] && { dup=1; break; }
+        done
+        [[ "$dup" -eq 1 ]] && continue
+        recent+=("$entry")
+        recent_build+=("$build")
+        recent_model+=("$model")
+        recent_tune+=("$tune")
+        [[ ${#recent[@]} -ge 5 ]] && break
+    done < <(tac "$LAUNCH_HISTORY")
+
+    if [[ ${#recent[@]} -gt 0 ]]; then
+        echo "🕐 Recent launches:"
+        for i in "${!recent[@]}"; do
+            tune_display="${recent_tune[$i]}"
+            [[ -z "$tune_display" ]] && tune_display="(no tune)"
+            printf "  %d) %-12s  %-40s  %s\n" $((i+1)) "${recent_build[$i]}" "$(basename "${recent_model[$i]}")" "$tune_display"
+        done
+        echo "  0) New launch"
+        echo ""
+        read -rp "Relaunch? [0=new, default=1]: " hist_sel
+        hist_sel="${hist_sel:-1}"
+        if [[ "$hist_sel" =~ ^[1-9]$ ]] && [[ "$hist_sel" -le ${#recent[@]} ]]; then
+            idx=$((hist_sel - 1))
+            ARG_BUILD_TYPE="${recent_build[$idx]}"
+            ARG_MODEL_PATH="${recent_model[$idx]}"
+            [[ -n "${recent_tune[$idx]}" ]] && ARG_TUNE="${recent_tune[$idx]}"
+            echo ""
+            echo "🔄 Relaunching: $ARG_BUILD_TYPE / $(basename "$ARG_MODEL_PATH") / ${ARG_TUNE:-(no tune)}"
+            echo ""
+        fi
+    fi
+fi
 
 # ── Build type selection ─────────────────────────────────────────────────────
 
@@ -720,6 +764,11 @@ if ! kill -0 "$PROXY_PID" 2>/dev/null; then
 fi
 echo "✅ Deep-logging proxy running (PID $PROXY_PID)"
 echo ""
+
+# ── Log this launch to history ─────────────────────────────────────────────
+_tune_log=""
+[[ -n "${MODEL_CONFIG_FILE:-}" ]] && _tune_log="$(grep -m1 '^# Tune:' "$MODEL_CONFIG_FILE" 2>/dev/null | sed 's/^# Tune: *//')"
+printf '%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$BUILD_TYPE" "$model_path" "$_tune_log" >> "$LAUNCH_HISTORY"
 
 # ── Launch llama-server on internal port ────────────────────────────────────
 "$LLAMACPP_SERVER_PATH" \
