@@ -234,13 +234,21 @@ tune_suggested=-1
 TOTAL_RAM_MB_DETECT=$(free -m | awk '/^Mem:/{print $2}')
 TOTAL_RAM_GB_DETECT=$((TOTAL_RAM_MB_DETECT / 1024))
 
-# Collect configs: exact name first, then wildcard variants
-for conf in "$MODEL_CONFIG_DIR/${selected_folder_name}".*.conf "$MODEL_CONFIG_DIR/${selected_folder_name}.conf"; do
+# Collect configs: match by model-type family (prefix matching)
+# e.g., folder "gemma-4-26B-A4B-it" matches configs for "gemma-4-26B-A4B" and vice versa
+for conf in "$MODEL_CONFIG_DIR"/*.conf; do
     [ -f "$conf" ] || continue
+    conf_base="$(basename "$conf" .conf)"
+    # Extract model-name portion (everything before first '.')
+    conf_model="${conf_base%%.*}"
+    # Family match: one must be a prefix of the other
+    if [[ "$selected_folder_name" != "$conf_model"* ]] && [[ "$conf_model" != "$selected_folder_name"* ]]; then
+        continue
+    fi
     # Extract tune name from "# Tune:" header, or derive from filename
     tune_label=$(grep -m1 '^# Tune:' "$conf" 2>/dev/null | sed 's/^# Tune: *//')
     if [ -z "$tune_label" ]; then
-        tune_label="$(basename "$conf" .conf)"
+        tune_label="$conf_base"
     fi
     tune_configs+=("$conf")
     tune_names+=("$tune_label")
