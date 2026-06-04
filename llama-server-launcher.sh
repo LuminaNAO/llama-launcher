@@ -12,6 +12,7 @@
 # Options:
 #   --build <type>   Build type (rocm, vulkan, etc.) — skips build selection
 #   --model <path>   Full path to .gguf model file — skips model selection
+#   --tune <name>    Select a specific tune (e.g., "64gb", "128gb") — skips tune menu
 #   --seed <N>       Override the random seed (default: 42)
 #   --context <N>    Override context size
 #   --parallel <N>   Override number of parallel slots
@@ -27,6 +28,7 @@ PARALLEL_OVERRIDE=""
 SAVE_CONFIG=0
 ARG_BUILD_TYPE=""
 ARG_MODEL_PATH=""
+ARG_TUNE=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --seed) SEED="$2"; shift 2 ;;
@@ -35,6 +37,7 @@ while [[ $# -gt 0 ]]; do
         --save) SAVE_CONFIG=1; shift ;;
         --build) ARG_BUILD_TYPE="$2"; shift 2 ;;
         --model) ARG_MODEL_PATH="$2"; shift 2 ;;
+        --tune) ARG_TUNE="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -218,28 +221,104 @@ fi
 
 echo "📦 Model: $selected_model"
 
-# ── Load per-model config ────────────────────────────────────────────────────
-# Check for config by: folder name, then model filename, then split-stripped filename
+# ── Load per-model config (with tune selection) ─────────────────────────────
 MODEL_CONFIG_DIR="$SCRIPT_DIR/model-configs"
 selected_folder_name="$(basename "$MODEL_FOLDER")"
-MODEL_CONFIG_FILE="$MODEL_CONFIG_DIR/${selected_folder_name}.conf"
-MODEL_CONFIG_FILE_BY_FILE="$MODEL_CONFIG_DIR/${selected_model%.gguf}.conf"
-MODEL_CONFIG_FILE_SPLIT="$MODEL_CONFIG_DIR/$(echo "${selected_model%.gguf}" | sed 's/-00001-of-[0-9]*//' ).conf"
+
+# Find all config files matching this model
+# Matches: folder-name.conf, folder-name.*.conf (e.g., .64gb.conf)
+tune_configs=()
+tune_names=()
+tune_suggested=-1
+
+TOTAL_RAM_MB_DETECT=$(free -m | awk '/^Mem:/{print $2}')
+TOTAL_RAM_GB_DETECT=$((TOTAL_RAM_MB_DETECT / 1024))
+
+# Collect configs: exact name first, then wildcard variants
+for conf in "$MODEL_CONFIG_DIR/${selected_folder_name}".*.conf "$MODEL_CONFIG_DIR/${selected_folder_name}.conf"; do
+    [ -f "$conf" ] || continue
+    # Extract tune name from "# Tune:" header, or derive from filename
+    tune_label=$(grep -m1 '^# Tune:' "$conf" 2>/dev/null | sed 's/^# Tune: *//')
+    if [ -z "$tune_label" ]; then
+        tune_label="$(basename "$conf" .conf)"
+    fi
+    tune_configs+=("$conf")
+    tune_names+=("$tune_label")
+done
 
 HAS_MODEL_CONFIG=0
-for conf in "$MODEL_CONFIG_FILE" "$MODEL_CONFIG_FILE_BY_FILE" "$MODEL_CONFIG_FILE_SPLIT"; do
-    if [ -f "$conf" ]; then
-        MODEL_CONFIG_FILE="$conf"
-        echo "📋 Config: $(basename "$MODEL_CONFIG_FILE")"
-        source "$MODEL_CONFIG_FILE"
-        HAS_MODEL_CONFIG=1
-        break
-    fi
-done
-if [ "$HAS_MODEL_CONFIG" -eq 0 ]; then
+if [ ${#tune_configs[@]} -eq 0 ]; then
     echo "📋 Config: none (using system profile)"
     echo "   Expected: model-configs/${selected_folder_name}.conf"
     echo "   Save one with: $(basename "$0") --save"
+elif [ -n "$ARG_TUNE" ]; then
+    # --tune passed on CLI: find matching tune
+    found=0
+    for i in "${!tune_names[@]}"; do
+        if [[ "${tune_names[$i]}" == *"$ARG_TUNE"* ]] || [[ "$(basename "${tune_configs[$i]}")" == *"$ARG_TUNE"* ]]; then
+            MODEL_CONFIG_FILE="${tune_configs[$i]}"
+            echo "📋 Tune: ${tune_names[$i]} ($(basename "$MODEL_CONFIG_FILE"))"
+            source "$MODEL_CONFIG_FILE"
+            HAS_MODEL_CONFIG=1
+            found=1
+            break
+        fi
+    done
+    if [ "$found" -eq 0 ]; then
+        echo "❌ No tune matching '$ARG_TUNE' found. Available:"
+        for i in "${!tune_names[@]}"; do
+            echo "   - ${tune_names[$i]} ($(basename "${tune_configs[$i]}"))"
+        done
+        exit 1
+    fi
+elif [ ${#tune_configs[@]} -eq 1 ]; then
+    # Only one config — use it directly
+    MODEL_CONFIG_FILE="${tune_configs[0]}"
+    echo "📋 Tune: ${tune_names[0]} ($(basename "$MODEL_CONFIG_FILE"))"
+    source "$MODEL_CONFIG_FILE"
+    HAS_MODEL_CONFIG=1
+else
+    # Multiple tunes — suggest based on system RAM, let user pick
+    # Auto-suggest: pick the tune whose name contains the closest RAM tier
+    for i in "${!tune_names[@]}"; do
+        name="${tune_names[$i]}"
+        if [ "$TOTAL_RAM_GB_DETECT" -ge 112 ] && [[ "$name" == *128gb* ]]; then
+            tune_suggested=$i
+        elif [ "$TOTAL_RAM_GB_DETECT" -ge 48 ] && [ "$TOTAL_RAM_GB_DETECT" -lt 112 ] && [[ "$name" == *64gb* ]]; then
+            tune_suggested=$i
+        fi
+    done
+
+    echo ""
+    echo "🎛️  Available tunes for $selected_folder_name:"
+    for i in "${!tune_names[@]}"; do
+        local_suggested=""
+        if [ "$i" -eq "$tune_suggested" ]; then
+            local_suggested=" ← suggested for ${TOTAL_RAM_GB_DETECT}GB system"
+        fi
+        # Show key params from config
+        tune_ctx=$(grep -m1 '^CONTEXT=' "${tune_configs[$i]}" | cut -d= -f2)
+        tune_par=$(grep -m1 '^PARALLEL=' "${tune_configs[$i]}" | cut -d= -f2)
+        tune_cp=$(grep -m1 '^CHECKPOINT_MAX=' "${tune_configs[$i]}" | cut -d= -f2)
+        printf "  %d) %-30s [ctx=%s, parallel=%s, checkpoints=%s]%s\n" \
+            $((i+1)) "${tune_names[$i]}" "${tune_ctx:-?}" "${tune_par:-?}" "${tune_cp:-?}" "$local_suggested"
+    done
+    echo ""
+
+    default_sel=$((tune_suggested + 1))
+    if [ "$default_sel" -le 0 ]; then default_sel=1; fi
+    read -rp "Select tune [1-${#tune_configs[@]}, default=$default_sel]: " tune_sel
+    tune_sel="${tune_sel:-$default_sel}"
+
+    if ! [[ "$tune_sel" =~ ^[0-9]+$ ]] || [ "$tune_sel" -lt 1 ] || [ "$tune_sel" -gt ${#tune_configs[@]} ]; then
+        echo "❌ Invalid selection"
+        exit 1
+    fi
+
+    MODEL_CONFIG_FILE="${tune_configs[$((tune_sel-1))]}"
+    echo "📋 Tune: ${tune_names[$((tune_sel-1))]} ($(basename "$MODEL_CONFIG_FILE"))"
+    source "$MODEL_CONFIG_FILE"
+    HAS_MODEL_CONFIG=1
 fi
 
 # ── Auto-detect vision projector ─────────────────────────────────────────────

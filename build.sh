@@ -178,7 +178,8 @@ if [ "$BUILD_TYPE" = "rocm" ]; then
         echo "🎯 GPU arch (override): $GPU_ARCH"
     elif command -v rocminfo >/dev/null 2>&1; then
         # Extract unique gfx targets from rocminfo
-        DETECTED_ARCHS=$(rocminfo 2>/dev/null | grep -oP 'gfx[0-9a-f]+' | sort -u || true)
+        # Match full gfx arch IDs (4+ hex chars) — excludes partial matches like gfx11-generic
+        DETECTED_ARCHS=$(rocminfo 2>/dev/null | grep -oP 'gfx[0-9a-f]{4,}' | sort -u || true)
         if [ -z "$DETECTED_ARCHS" ]; then
             echo "⚠️  rocminfo found no AMD GPUs — falling back to manual selection."
             echo ""
