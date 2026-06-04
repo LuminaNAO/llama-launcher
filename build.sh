@@ -229,7 +229,7 @@ case "$BACKEND" in
         echo "  ./build.sh vulkan    # Recommended for Strix Halo / RDNA 3.5"
         echo "  ./build.sh rocm      # ROCm/HIP backend"
         echo "  ./build.sh cuda      # NVIDIA CUDA backend"
-    echo "  LLAMACPP_SRC=/path/to/llama.cpp ./build.sh rocm-mtp          # alternate source"
+        echo "  LLAMACPP_SRC=/path/to/llama.cpp ./build.sh rocm-mtp          # alternate source"
         exit 1
         ;;
 esac
