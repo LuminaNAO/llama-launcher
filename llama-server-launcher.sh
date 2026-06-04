@@ -10,7 +10,7 @@
 MODELS_DIR="${LLAMACPP_MODELS_DIR:-/usr/local/share/llama.cpp/models}"
 
 # Find llama.cpp repo and server dynamically
-LLAMACPP_BASE="$(dirname "$(readlink -f "$0")")/../../llama.cpp"
+LLAMACPP_BASE="$(dirname "$(readlink -f "$0")")/../llama.cpp"
 LLAMACPP_SERVER_PATH="${LLAMACPP_BASE}/build/bin/llama-server"
 
 # Verify server exists, exit with helpful message if not
