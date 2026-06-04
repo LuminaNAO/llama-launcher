@@ -39,9 +39,9 @@
 # Subcommands:
 #   stop             Gracefully stop a running llama-server (and deep proxy)
 #
-# Per-model configs are stored in model-configs/<model-name>.conf and
+# Per-model tunes are stored in model-configs/<model-name>[.<tune>].yaml and
 # automatically loaded when that model is selected. CLI flags override
-# saved configs. Use --save to persist tuned settings.
+# saved tunes. Use --save to persist tuned settings.
 
 canonical_build_type() {
     case "$1" in
@@ -322,6 +322,7 @@ if [[ "$ORIGINAL_ARGC" -eq 0 && -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && 
     # Read up to 5 most recent unique launches (newest first)
     recent=()
     while IFS=$'\t' read -r ts build model tune extras; do
+        [[ "$tune" == *.conf ]] && continue
         build="$(canonical_build_type "$build")"
         entry="${build}${model}${tune}"
         # Deduplicate (latest flags win for a given build+model+tune)
@@ -573,12 +574,296 @@ fi
 
 echo "📦 Model: $selected_model"
 
-# ── Load per-model config (with tune selection) ─────────────────────────────
+# ── YAML tune helpers ────────────────────────────────────────────────────────
 MODEL_CONFIG_DIR="$SCRIPT_DIR/model-configs"
 selected_folder_name="$(basename "$MODEL_FOLDER")"
 
-# Find all config files matching this model
-# Matches: folder-name.conf, folder-name.*.conf (e.g., .64gb.conf)
+TUNE_KEYS=(
+    CONTEXT PARALLEL
+    CACHE_RAM CACHE_TYPE_K CACHE_TYPE_V KV_UNIFIED
+    SLOT_SAVE_PATH MIN_FREE_GB MAX_TOTAL_SLOTS_GB
+    CHECKPOINT_MIN_STEP CHECKPOINT_MAX
+    NGL FLASH_ATTN
+    TEMP TOP_P TOP_K
+    HOST PORT API_KEY TIMEOUT THREADS
+    NO_MMAP DIO
+    JINJA LOG_COLORS
+    REASONING REASONING_BUDGET
+    REPEAT_PENALTY REPEAT_LAST_N PRESENCE_PENALTY FREQUENCY_PENALTY
+    DRY_MULTIPLIER DRY_BASE DRY_ALLOWED_LENGTH DRY_PENALTY_LAST_N
+    EXTRA_ARGS
+)
+
+require_yq() {
+    local version
+    if ! command -v yq >/dev/null 2>&1; then
+        echo "❌ YAML tunes require yq (the Python jq-wrapper YAML processor). Install yq and re-run."
+        exit 1
+    fi
+    version="$(yq --version 2>/dev/null || true)"
+    if [[ "$version" != yq\ 3.* ]]; then
+        echo "❌ YAML tunes require the Python/jq-wrapper yq 3.x; found: ${version:-unknown}"
+        exit 1
+    fi
+}
+
+tune_yq() {
+    local file="$1"
+    local expr="$2"
+    local value
+    value="$(yq -r "$expr" "$file" 2>/dev/null || true)"
+    [ "$value" = "null" ] && value=""
+    printf '%s\n' "$value"
+}
+
+tune_label() {
+    local file="$1"
+    local label
+    label="$(tune_yq "$file" '.name // ""')"
+    [ -z "$label" ] && label="$(basename "$file" .yaml)"
+    [ "$label" = "$(basename "$file")" ] && label="$(basename "$file" .yml)"
+    printf '%s\n' "$label"
+}
+
+tune_setting() {
+    tune_yq "$1" ".settings.$2 // \"\""
+}
+
+load_tune() {
+    local file="$1"
+    local key value kind
+    kind="$(tune_yq "$file" '.kind // ""')"
+    if [ "$kind" != "llama-launcher-tune" ]; then
+        echo "❌ Invalid tune file: $(basename "$file") (kind must be llama-launcher-tune)"
+        exit 1
+    fi
+    for key in "${TUNE_KEYS[@]}"; do
+        value="$(tune_setting "$file" "$key")"
+        if [ -n "$value" ]; then
+            printf -v "$key" '%s' "$value"
+        fi
+    done
+}
+
+tune_slug() {
+    printf '%s' "$1" \
+        | tr '[:upper:]' '[:lower:]' \
+        | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//; s/-+/-/g'
+}
+
+yaml_scalar() {
+    jq -Rn --arg value "$1" '$value'
+}
+
+write_tune_yaml() {
+    local file="$1"
+    local name="$2"
+    local generated="$3"
+    local old_notes
+    if [ -f "$file" ]; then
+        old_notes="$(tune_yq "$file" '.metadata.notes // ""')"
+    fi
+    mkdir -p "$MODEL_CONFIG_DIR"
+    {
+        printf '%s\n' "kind: llama-launcher-tune"
+        printf '%s\n' "version: 1"
+        printf 'name: %s\n' "$(yaml_scalar "$name")"
+        printf 'model: %s\n' "$(yaml_scalar "$selected_folder_name")"
+        printf '%s\n' "metadata:"
+        printf '  generated: %s\n' "$(yaml_scalar "$generated")"
+        printf '%s\n' "  shareable: true"
+        if [ -n "${old_notes:-}" ]; then
+            printf '%s\n' "  notes: |-"
+            while IFS= read -r line; do
+                printf '    %s\n' "$line"
+            done <<< "$old_notes"
+        fi
+        printf '%s\n' "settings:"
+        local key value
+        for key in "${TUNE_KEYS[@]}"; do
+            value="${!key-}"
+            [ -z "$value" ] && continue
+            printf '  %s: %s\n' "$key" "$(yaml_scalar "$value")"
+        done
+    } > "$file"
+}
+
+seed_system_profile_values() {
+    local ram_mb ram_gb
+    ram_mb="$(free -m | awk '/^Mem:/{print $2}')"
+    ram_gb=$((ram_mb / 1024))
+    if [ "$ram_gb" -ge 112 ]; then
+        CONTEXT=488576; PARALLEL=2; CACHE_RAM=102400; CACHE_TYPE_K=q8_0; CACHE_TYPE_V=q8_0
+        CHECKPOINT_MIN_STEP=8192; CHECKPOINT_MAX=64
+    elif [ "$ram_gb" -ge 48 ]; then
+        CONTEXT=131072; PARALLEL=1; CACHE_RAM=40960; CACHE_TYPE_K=q8_0; CACHE_TYPE_V=q8_0
+        CHECKPOINT_MIN_STEP=4096; CHECKPOINT_MAX=32
+    else
+        CONTEXT=61072; PARALLEL=1; CACHE_RAM=16384; CACHE_TYPE_K=q8_0; CACHE_TYPE_V=q8_0
+        CHECKPOINT_MIN_STEP=4096; CHECKPOINT_MAX=16
+    fi
+    KV_UNIFIED=1; NGL=99; FLASH_ATTN=1; TEMP=0.3; TOP_P=0.95; TOP_K=20
+    THREADS="$(nproc)"; NO_MMAP=1; DIO=1; TIMEOUT=3600; HOST=0.0.0.0
+    PORT=40801; API_KEY=ollama-local; JINJA=1; LOG_COLORS=1
+    REASONING=auto; REASONING_BUDGET=-1
+    REPEAT_PENALTY=1.0; REPEAT_LAST_N=64; PRESENCE_PENALTY=0.0; FREQUENCY_PENALTY=0.0
+    DRY_MULTIPLIER=0.0; DRY_BASE=1.75; DRY_ALLOWED_LENGTH=2; DRY_PENALTY_LAST_N=-1
+}
+
+prompt_tune_value() {
+    local key="$1"
+    local current="${!key-}"
+    local value
+    read -rp "$key [$current]: " value
+    value="${value:-$current}"
+    case "$key" in
+        CONTEXT|PARALLEL|CACHE_RAM|KV_UNIFIED|MIN_FREE_GB|MAX_TOTAL_SLOTS_GB|CHECKPOINT_MIN_STEP|CHECKPOINT_MAX|NGL|FLASH_ATTN|TOP_K|PORT|TIMEOUT|THREADS|NO_MMAP|DIO|JINJA|LOG_COLORS|REPEAT_LAST_N|DRY_ALLOWED_LENGTH)
+            if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+                echo "❌ $key must be a non-negative integer"
+                return 1
+            fi
+            ;;
+        REASONING_BUDGET|DRY_PENALTY_LAST_N)
+            if ! [[ "$value" =~ ^-?[0-9]+$ ]]; then
+                echo "❌ $key must be an integer"
+                return 1
+            fi
+            ;;
+        TEMP|TOP_P|REPEAT_PENALTY|PRESENCE_PENALTY|FREQUENCY_PENALTY|DRY_MULTIPLIER|DRY_BASE)
+            if ! [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+                echo "❌ $key must be a number"
+                return 1
+            fi
+            ;;
+    esac
+    printf -v "$key" '%s' "$value"
+}
+
+edit_tune_values() {
+    local choice key
+    while true; do
+        echo ""
+        echo "🛠️  Tune editor:"
+        for i in "${!TUNE_KEYS[@]}"; do
+            key="${TUNE_KEYS[$i]}"
+            printf "  %2d) %-24s %s\n" $((i+1)) "$key" "${!key-}"
+        done
+        echo "   s) Save"
+        echo "   q) Cancel"
+        read -rp "Edit setting: " choice
+        case "$choice" in
+            s|S) return 0 ;;
+            q|Q) return 1 ;;
+        esac
+        if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#TUNE_KEYS[@]} ]; then
+            echo "❌ Invalid selection"
+            continue
+        fi
+        prompt_tune_value "${TUNE_KEYS[$((choice-1))]}"
+    done
+}
+
+create_tune_interactive() {
+    local mode base_sel tune_name slug file
+    echo ""
+    echo "Create tune:"
+    echo "  1) Fresh from system profile"
+    echo "  2) Based on existing tune"
+    read -rp "Choice [1-2, default=1]: " mode
+    mode="${mode:-1}"
+    if [ "$mode" = "2" ] && [ ${#tune_configs[@]} -gt 0 ]; then
+        for i in "${!tune_names[@]}"; do
+            printf "  %d) %s\n" $((i+1)) "${tune_names[$i]}"
+        done
+        read -rp "Base tune [1-${#tune_configs[@]}]: " base_sel
+        if ! [[ "$base_sel" =~ ^[0-9]+$ ]] || [ "$base_sel" -lt 1 ] || [ "$base_sel" -gt ${#tune_configs[@]} ]; then
+            echo "❌ Invalid selection"
+            return 1
+        fi
+        load_tune "${tune_configs[$((base_sel-1))]}"
+    else
+        seed_system_profile_values
+    fi
+    read -rp "Tune name: " tune_name
+    if [ -z "$tune_name" ]; then
+        echo "❌ Tune name required"
+        return 1
+    fi
+    slug="$(tune_slug "$tune_name")"
+    file="$MODEL_CONFIG_DIR/${selected_folder_name}.${slug}.yaml"
+    if [ -e "$file" ]; then
+        echo "❌ Tune already exists: $(basename "$file")"
+        return 1
+    fi
+    edit_tune_values || return 1
+    write_tune_yaml "$file" "$tune_name" "Created interactively: $(date -Iseconds)"
+    echo "💾 Created tune: model-configs/$(basename "$file")"
+    MODEL_CONFIG_FILE="$file"
+    HAS_MODEL_CONFIG=1
+}
+
+edit_existing_tune_interactive() {
+    local edit_sel file name
+    if [ ${#tune_configs[@]} -eq 0 ]; then
+        echo "❌ No tunes to edit"
+        return 1
+    fi
+    for i in "${!tune_names[@]}"; do
+        printf "  %d) %s\n" $((i+1)) "${tune_names[$i]}"
+    done
+    read -rp "Edit tune [1-${#tune_configs[@]}]: " edit_sel
+    if ! [[ "$edit_sel" =~ ^[0-9]+$ ]] || [ "$edit_sel" -lt 1 ] || [ "$edit_sel" -gt ${#tune_configs[@]} ]; then
+        echo "❌ Invalid selection"
+        return 1
+    fi
+    file="${tune_configs[$((edit_sel-1))]}"
+    name="${tune_names[$((edit_sel-1))]}"
+    load_tune "$file"
+    edit_tune_values || return 1
+    write_tune_yaml "$file" "$name" "Edited interactively: $(date -Iseconds)"
+    echo "💾 Updated tune: model-configs/$(basename "$file")"
+    MODEL_CONFIG_FILE="$file"
+    HAS_MODEL_CONFIG=1
+}
+
+collect_tunes() {
+    tune_configs=()
+    tune_names=()
+    _specific_configs=()
+    _specific_names=()
+    _family_configs=()
+    _family_names=()
+    local conf conf_base conf_model tune_label
+    shopt -s nullglob
+    for conf in "$MODEL_CONFIG_DIR"/*.yaml "$MODEL_CONFIG_DIR"/*.yml; do
+        [ -f "$conf" ] || continue
+        conf_base="$(basename "$conf")"
+        conf_base="${conf_base%.yaml}"
+        conf_base="${conf_base%.yml}"
+        conf_model="${conf_base%%.*}"
+        tune_label="$(tune_label "$conf")"
+        if [[ "$selected_folder_name" == "$conf_model" ]]; then
+            _specific_configs+=("$conf")
+            _specific_names+=("$tune_label")
+        elif [[ "$selected_folder_name" == "$conf_model"* ]]; then
+            _family_configs+=("$conf")
+            _family_names+=("$tune_label")
+        fi
+    done
+    shopt -u nullglob
+    for i in "${!_specific_configs[@]}"; do
+        tune_configs+=("${_specific_configs[$i]}")
+        tune_names+=("${_specific_names[$i]}")
+    done
+    TUNE_FAMILY_SPLIT=${#tune_configs[@]}
+    for i in "${!_family_configs[@]}"; do
+        tune_configs+=("${_family_configs[$i]}")
+        tune_names+=("${_family_names[$i]}")
+    done
+}
+
+# ── Load per-model tune (with tune selection) ───────────────────────────────
+require_yq
 tune_configs=()
 tune_names=()
 tune_suggested=-1
@@ -586,49 +871,23 @@ tune_suggested=-1
 TOTAL_RAM_MB_DETECT=$(free -m | awk '/^Mem:/{print $2}')
 TOTAL_RAM_GB_DETECT=$((TOTAL_RAM_MB_DETECT / 1024))
 
-# Collect configs: model-specific first, then family tunes
-# Config filename format: <model-name>.<tune-name>.conf
-# "Model-specific" = conf_model matches the folder name exactly
-# "Family" = conf_model is a prefix of the folder name (shorter match)
-_specific_configs=()
-_specific_names=()
-_family_configs=()
-_family_names=()
-for conf in "$MODEL_CONFIG_DIR"/*.conf; do
-    [ -f "$conf" ] || continue
-    conf_base="$(basename "$conf" .conf)"
-    conf_model="${conf_base%%.*}"
-    if [[ "$selected_folder_name" == "$conf_model" ]]; then
-        # Exact match — model-specific tune
-        tune_label=$(grep -m1 '^# Tune:' "$conf" 2>/dev/null | sed 's/^# Tune: *//')
-        [ -z "$tune_label" ] && tune_label="$conf_base"
-        _specific_configs+=("$conf")
-        _specific_names+=("$tune_label")
-    elif [[ "$selected_folder_name" == "$conf_model"* ]]; then
-        # Prefix match — family tune
-        tune_label=$(grep -m1 '^# Tune:' "$conf" 2>/dev/null | sed 's/^# Tune: *//')
-        [ -z "$tune_label" ] && tune_label="$conf_base"
-        _family_configs+=("$conf")
-        _family_names+=("$tune_label")
-    fi
-done
-# Model-specific tunes first
-for i in "${!_specific_configs[@]}"; do
-    tune_configs+=("${_specific_configs[$i]}")
-    tune_names+=("${_specific_names[$i]}")
-done
-# Then family tunes (with a separator marker)
-TUNE_FAMILY_SPLIT=${#tune_configs[@]}
-for i in "${!_family_configs[@]}"; do
-    tune_configs+=("${_family_configs[$i]}")
-    tune_names+=("${_family_names[$i]}")
-done
+collect_tunes
 
 HAS_MODEL_CONFIG=0
 if [ ${#tune_configs[@]} -eq 0 ]; then
-    echo "📋 Config: none (using system profile)"
-    echo "   Expected: model-configs/${selected_folder_name}.conf"
-    echo "   Save one with: $(basename "$0") --save"
+    if [ -n "$ARG_TUNE" ]; then
+        echo "❌ No YAML tunes found for '$ARG_TUNE'. Expected: model-configs/${selected_folder_name}[.<tune>].yaml"
+        exit 1
+    fi
+    echo "📋 Tune: none (using system profile)"
+    echo "   Expected: model-configs/${selected_folder_name}.yaml"
+    echo "   Save one with: $(basename "$0") --save, or create one interactively."
+    if [ "$ORIGINAL_ARGC" -eq 0 ]; then
+        read -rp "Create a tune now? [y/N] " _create_tune
+        if [[ "$_create_tune" =~ ^[Yy]$ ]]; then
+            create_tune_interactive
+        fi
+    fi
 elif [ -n "$ARG_TUNE" ]; then
     # --tune passed on CLI: find matching tune
     found=0
@@ -636,7 +895,7 @@ elif [ -n "$ARG_TUNE" ]; then
         if [[ "${tune_names[$i]}" == *"$ARG_TUNE"* ]] || [[ "$(basename "${tune_configs[$i]}")" == *"$ARG_TUNE"* ]]; then
             MODEL_CONFIG_FILE="${tune_configs[$i]}"
             echo "📋 Tune: ${tune_names[$i]} ($(basename "$MODEL_CONFIG_FILE"))"
-            source "$MODEL_CONFIG_FILE"
+            load_tune "$MODEL_CONFIG_FILE"
             HAS_MODEL_CONFIG=1
             found=1
             break
@@ -697,37 +956,49 @@ else
                 local_suggested=" ← $suggested_reason"
             fi
             # Show key params from config
-            tune_ctx=$(grep -m1 '^CONTEXT=' "${tune_configs[$i]}" | cut -d= -f2)
-            tune_par=$(grep -m1 '^PARALLEL=' "${tune_configs[$i]}" | cut -d= -f2)
-            tune_cp=$(grep -m1 '^CHECKPOINT_MAX=' "${tune_configs[$i]}" | cut -d= -f2)
+            tune_ctx=$(tune_setting "${tune_configs[$i]}" CONTEXT)
+            tune_par=$(tune_setting "${tune_configs[$i]}" PARALLEL)
+            tune_cp=$(tune_setting "${tune_configs[$i]}" CHECKPOINT_MAX)
             printf "  %d) %-30s [ctx=%s, parallel=%s, checkpoints=%s]%s\n" \
                 $((i+1)) "${tune_names[$i]}" "${tune_ctx:-?}" "${tune_par:-?}" "${tune_cp:-?}" "$local_suggested"
         done
         if [ "$show_all_tunes" -eq 0 ]; then
             echo "  a) Browse all tunes"
         fi
+        echo "  n) New tune"
+        echo "  e) Edit tune"
         echo "  0) None (use system profile)"
         echo ""
 
         default_sel=$((tune_suggested + 1))
         if [ "$default_sel" -le 0 ]; then default_sel=1; fi
-        read -rp "Select tune [1-${#tune_configs[@]}, a=all, 0=none, default=$default_sel]: " tune_sel
+        read -rp "Select tune [1-${#tune_configs[@]}, a=all, n=new, e=edit, 0=none, default=$default_sel]: " tune_sel
 
         # "Browse all" — reload with every config in the directory
         if [[ "$tune_sel" == "a" || "$tune_sel" == "A" ]] && [ "$show_all_tunes" -eq 0 ]; then
             tune_configs=()
             tune_names=()
-            for conf in "$MODEL_CONFIG_DIR"/*.conf; do
+            shopt -s nullglob
+            for conf in "$MODEL_CONFIG_DIR"/*.yaml "$MODEL_CONFIG_DIR"/*.yml; do
                 [ -f "$conf" ] || continue
-                conf_base="$(basename "$conf" .conf)"
-                tune_label=$(grep -m1 '^# Tune:' "$conf" 2>/dev/null | sed 's/^# Tune: *//')
-                if [ -z "$tune_label" ]; then
-                    tune_label="$conf_base"
-                fi
+                tune_label="$(tune_label "$conf")"
                 tune_configs+=("$conf")
                 tune_names+=("$tune_label")
             done
+            shopt -u nullglob
             show_all_tunes=1
+            continue
+        fi
+
+        if [[ "$tune_sel" == "n" || "$tune_sel" == "N" ]]; then
+            create_tune_interactive && break
+            collect_tunes
+            continue
+        fi
+
+        if [[ "$tune_sel" == "e" || "$tune_sel" == "E" ]]; then
+            edit_existing_tune_interactive && break
+            collect_tunes
             continue
         fi
 
@@ -745,7 +1016,7 @@ else
 
         MODEL_CONFIG_FILE="${tune_configs[$((tune_sel-1))]}"
         echo "📋 Tune: ${tune_names[$((tune_sel-1))]} ($(basename "$MODEL_CONFIG_FILE"))"
-        source "$MODEL_CONFIG_FILE"
+        load_tune "$MODEL_CONFIG_FILE"
         HAS_MODEL_CONFIG=1
         break
     done
@@ -937,109 +1208,22 @@ else
     echo "     $(whoami)  soft  memlock  unlimited"
 fi
 
-# ── Auto-generate config if none existed ─────────────────────────────────────
-# When launching a model for the first time (no config file), save the effective
-# settings so the user has a starting point to tune. Uses the folder-name
-# convention so the launcher finds it automatically next time.
-CONFIG_TEMPLATE=$(cat <<'CONFTEMPLATE'
-# Per-model launch config for: __MODEL__
-# __GENERATED__
-# Edit these values and they'll be loaded automatically on next launch.
-# CLI flags (--context, --parallel) override these settings.
-
-# ── Context & Scheduling ────────────────────────────────────────────────────
-CONTEXT=__CONTEXT__
-PARALLEL=__PARALLEL__
-
-# ── KV Cache ────────────────────────────────────────────────────────────────
-CACHE_RAM=__CACHE_RAM__
-CACHE_TYPE_K=__CACHE_TYPE_K__
-CACHE_TYPE_V=__CACHE_TYPE_V__
-KV_UNIFIED=__KV_UNIFIED__
-
-# ── Checkpoints ─────────────────────────────────────────────────────────────
-CHECKPOINT_MIN_STEP=__CHECKPOINT_MIN_STEP__
-CHECKPOINT_MAX=__CHECKPOINT_MAX__
-
-# ── GPU Offload ─────────────────────────────────────────────────────────────
-NGL=__NGL__
-FLASH_ATTN=__FLASH_ATTN__
-
-# ── Sampling ────────────────────────────────────────────────────────────────
-TEMP=__TEMP__
-TOP_P=__TOP_P__
-TOP_K=__TOP_K__
-
-# ── Anti-repeat ─────────────────────────────────────────────────────────
-# REPEAT_PENALTY=__REPEAT_PENALTY__
-# REPEAT_LAST_N=__REPEAT_LAST_N__
-# PRESENCE_PENALTY=__PRESENCE_PENALTY__
-# FREQUENCY_PENALTY=__FREQUENCY_PENALTY__
-# DRY_MULTIPLIER=__DRY_MULTIPLIER__
-# DRY_BASE=__DRY_BASE__
-# DRY_ALLOWED_LENGTH=__DRY_ALLOWED_LENGTH__
-# DRY_PENALTY_LAST_N=__DRY_PENALTY_LAST_N__
-
-# ── Server ──────────────────────────────────────────────────────────────────
-HOST=__HOST__
-PORT=__PORT__
-API_KEY=__API_KEY__
-TIMEOUT=__TIMEOUT__
-THREADS=__THREADS__
-
-# ── I/O & Memory ────────────────────────────────────────────────────────────
-NO_MMAP=__NO_MMAP__
-DIO=__DIO__
-
-# ── Template ────────────────────────────────────────────────────────────────
-# Set JINJA=0 to disable --jinja (e.g. for Gemma 4 models)
-# JINJA=1
-
-# ── Extra ───────────────────────────────────────────────────────────────────
-# LOG_COLORS=1
-# Append arbitrary flags to the server command:
-# EXTRA_ARGS="--flag value"
-CONFTEMPLATE
-)
-
-fill_config_template() {
-    echo "$CONFIG_TEMPLATE" \
-        | sed "s|__MODEL__|$selected_model|g" \
-        | sed "s|__GENERATED__|$1|g" \
-        | sed "s|__CONTEXT__|$CONTEXT|g" \
-        | sed "s|__PARALLEL__|$PARALLEL|g" \
-        | sed "s|__CACHE_RAM__|$CACHE_RAM|g" \
-        | sed "s|__CACHE_TYPE_K__|$CACHE_TYPE_K|g" \
-        | sed "s|__CACHE_TYPE_V__|$CACHE_TYPE_V|g" \
-        | sed "s|__KV_UNIFIED__|$KV_UNIFIED|g" \
-        | sed "s|__CHECKPOINT_MIN_STEP__|$CHECKPOINT_MIN_STEP|g" \
-        | sed "s|__CHECKPOINT_MAX__|$CHECKPOINT_MAX|g" \
-        | sed "s|__NGL__|$NGL|g" \
-        | sed "s|__FLASH_ATTN__|$FLASH_ATTN|g" \
-        | sed "s|__TEMP__|$TEMP|g" \
-        | sed "s|__TOP_P__|$TOP_P|g" \
-        | sed "s|__TOP_K__|$TOP_K|g" \
-        | sed "s|__HOST__|$HOST|g" \
-        | sed "s|__PORT__|$PORT|g" \
-        | sed "s|__API_KEY__|$API_KEY|g" \
-        | sed "s|__TIMEOUT__|$TIMEOUT|g" \
-        | sed "s|__THREADS__|$THREADS|g" \
-        | sed "s|__NO_MMAP__|$NO_MMAP|g" \
-        | sed "s|__DIO__|$DIO|g"
-}
-
+# ── Auto-generate tune if none existed ──────────────────────────────────────
+# First-launch tunes are YAML and are loaded through the allowlist parser above,
+# not sourced as shell. This keeps future shared tune files data-only.
 if [ "$HAS_MODEL_CONFIG" -eq 0 ] && [ "$SAVE_CONFIG" -eq 0 ]; then
-    mkdir -p "$MODEL_CONFIG_DIR"
-    MODEL_CONFIG_FILE="$MODEL_CONFIG_DIR/${selected_folder_name}.conf"
-    fill_config_template "Auto-generated from ${TOTAL_RAM_GB} GB system profile: $(date -Iseconds)" > "$MODEL_CONFIG_FILE"
-    echo "💾 Auto-saved config: model-configs/${selected_folder_name}.conf"
+    MODEL_CONFIG_FILE="$MODEL_CONFIG_DIR/${selected_folder_name}.yaml"
+    write_tune_yaml "$MODEL_CONFIG_FILE" "$selected_folder_name" "Auto-generated from ${TOTAL_RAM_GB} GB system profile: $(date -Iseconds)"
+    echo "💾 Auto-saved tune: model-configs/${selected_folder_name}.yaml"
 fi
 
-# ── Save per-model config if requested ───────────────────────────────────────
+# ── Save per-model tune if requested ─────────────────────────────────────────
 if [ "$SAVE_CONFIG" -eq 1 ]; then
-    mkdir -p "$MODEL_CONFIG_DIR"
-    fill_config_template "Generated: $(date -Iseconds)" > "$MODEL_CONFIG_FILE"
-    echo "💾 Saved model config: $MODEL_CONFIG_FILE"
+    if [ -z "${MODEL_CONFIG_FILE:-}" ]; then
+        MODEL_CONFIG_FILE="$MODEL_CONFIG_DIR/${selected_folder_name}.yaml"
+    fi
+    write_tune_yaml "$MODEL_CONFIG_FILE" "$(tune_label "$MODEL_CONFIG_FILE" 2>/dev/null || printf '%s' "$selected_folder_name")" "Saved: $(date -Iseconds)"
+    echo "💾 Saved model tune: $MODEL_CONFIG_FILE"
 fi
 
 # ── Deep logging proxy ──────────────────────────────────────────────────────
@@ -1274,7 +1458,7 @@ fi
 
 # ── Log this launch to history ─────────────────────────────────────────────
 _tune_log=""
-[[ -n "${MODEL_CONFIG_FILE:-}" ]] && _tune_log="$(grep -m1 '^# Tune:' "$MODEL_CONFIG_FILE" 2>/dev/null | sed 's/^# Tune: *//')"
+[[ -n "${MODEL_CONFIG_FILE:-}" ]] && _tune_log="$(tune_label "$MODEL_CONFIG_FILE")"
 _extras_log=""
 [[ "$NO_LOG" -eq 0 ]] && _extras_log+="--log "
 [[ "$NO_PROXY" -eq 0 ]] && _extras_log+="--proxy "

@@ -1,0 +1,45 @@
+kind: llama-launcher-tune
+version: 1
+name: "7-Flash"
+model: "GLM-4"
+metadata:
+  shareable: true
+  notes: |-
+    Per-model launch config for: DavidAU_GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF_GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q8_0.gguf
+    Auto-generated from 125 GB system profile: 2026-04-08T13:31:51+08:00
+    Edit these values and they'll be loaded automatically on next launch.
+    CLI flags (--context, --parallel) override these settings.
+    Uncomment to enable anti-repeat sampling.
+    DRY_MULTIPLIER=0.0
+    DRY_BASE=1.75
+    DRY_ALLOWED_LENGTH=2
+    DRY_PENALTY_LAST_N=-1
+    REPEAT_PENALTY=1.0
+    REPEAT_LAST_N=64
+    PRESENCE_PENALTY=0.0
+    FREQUENCY_PENALTY=0.0
+    REASONING=auto
+    REASONING_BUDGET=-1
+    Set JINJA=0 to disable --jinja (e.g. for Gemma 4 models)
+    JINJA=1
+    EXTRA_ARGS=""
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "30720"
+  CACHE_TYPE_K: "q8_0"
+  CACHE_TYPE_V: "q8_0"
+  CHECKPOINT_MAX: "64"
+  CONTEXT: "488576"
+  DIO: "1"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  NGL: "99"
+  NO_MMAP: "1"
+  PARALLEL: "2"
+  PORT: "40801"
+  TEMP: "0.3"
+  THREADS: "32"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

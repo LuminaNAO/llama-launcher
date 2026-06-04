@@ -1,0 +1,71 @@
+kind: llama-launcher-tune
+version: 1
+name: "192gb-rocm-q8-128k-v1"
+model: "Mistral-Large-Instruct-2411"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 192gb-rocm-q8-128k-v1
+    Per-model config for: Mistral-Large-Instruct-2411 (Q8_0, dense 123B)
+    Target: MI300X 192 GB VRAM (ROCm)
+    Architecture: Mistral Large 2 — Dense Transformer (GQA)
+    - 88 layers, 96 attention heads, 8 KV heads, head_dim=128
+    - hidden_size=12288, intermediate_size=28672
+    - Dense 123B parameters (all active every token)
+    - No sliding window (null)
+    - Context: 131072 native (128K)
+    - Vocab: 32768
+    - RoPE theta: 1,000,000
+    - Activation: SiLU, RMS norm eps: 1e-05
+    Chat template (V7 instruct):
+    <s>[SYSTEM_PROMPT] {system}[/SYSTEM_PROMPT][INST] {user}[/INST] {assistant}</s>
+    Note: whitespace-sensitive — jinja template handles this.
+    VRAM budget estimate (128K context, 1 slot, q8_0 KV cache):
+    Model weights (Q8_0, 4 splits):   ~122 GB
+    KV cache (88 layers × 8 KV heads × 128 dim × 2 × q8_0):
+    Per token: 88 × 8 × 128 × 2 × 1 byte = ~176 KB
+    128K tokens: ~22 GB
+    Compute buffers:                    ~3 GB
+    CACHE_RAM ceiling (RAM, spills to swap — see docs/CACHE-RAM.md):           4 GB
+    Checkpoints (6 × ~700 MiB est):   ~4 GB
+    Estimated total:                  ~155 GB
+    Headroom to 192 GB:               ~37 GB
+    No official sampling recommendations from Mistral. Using conservative
+    defaults for instruction-following: temp=0.3, top_p=0.9.
+    No sliding window — standard full attention throughout.
+    KV_UNIFIED enables shared prefix caching across requests.
+    88 dense layers = larger checkpoints than MoE models. Conservative max.
+    Conservative for instruction following. Increase temp for creative tasks.
+    Mistral Large 2 does not have native thinking/reasoning tags.
+    REASONING=auto
+    REASONING_BUDGET=-1
+    Clean slate — enable if loops observed.
+    DRY_MULTIPLIER=0.0
+    REPEAT_PENALTY=1.0
+    Mistral V7 instruct template — use jinja to honor it.
+    Whitespace-sensitive: do not use PEG parser.
+    Override chat template: the stock Mistral template raises an exception for
+    any role other than user/system/assistant. OpenClaw sends tool-result roles.
+    This template maps unknown roles to [INST] (treated as user context).
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "4096"
+  CACHE_TYPE_K: "q8_0"
+  CACHE_TYPE_V: "q8_0"
+  CHECKPOINT_MAX: "6"
+  CONTEXT: "131072"
+  DIO: "1"
+  EXTRA_ARGS: "--chat-template-file /path/to/llama-launcher/model-configs/mistral-large-permissive.jinja"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  JINJA: "1"
+  KV_UNIFIED: "1"
+  NGL: "99"
+  NO_MMAP: "1"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.3"
+  THREADS: "32"
+  TIMEOUT: "3600"
+  TOP_K: "40"
+  TOP_P: "0.9"

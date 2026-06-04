@@ -1,0 +1,71 @@
+kind: llama-launcher-tune
+version: 1
+name: "192gb-rocm-200k-v1"
+model: "MiniMax-M2"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 192gb-rocm-200k-v1
+    Per-model config for: MiniMax-M2.7-UD-Q4_K_M (Q4_K_M, MoE 256 experts / 8 active)
+    Target: MI300X 192 GB VRAM (ROCm)
+    Architecture: MiniMax M2 (minimax_m2) — Dense MoE
+    - 62 layers, all standard attention (no sliding window)
+    - 48 attention heads, 8 KV heads, head_dim=128
+    - 256 experts, 8 active per token (229B total, ~10B active)
+    - RoPE theta: 5,000,000 (rotary_dim=64)
+    - Multi-token prediction: 3 MTP modules (speculative)
+    - Max position embeddings: 196,608 (192K native)
+    - Context: targeting 200K (slightly beyond native via RoPE headroom)
+    - Vocab: 200,064
+    VRAM budget estimate (131K context, 2 slots):
+    Model weights (Q4_K_M):           ~140 GB
+    KV cache (62 layers × 8 KV heads × 128 dim × 2 × q8_0):
+    Per token: 62 × 8 × 128 × 2 × 1 byte = ~127 KB
+    131K × 2 slots: ~32.4 GB
+    Compute buffers:                    ~3 GB
+    CACHE_RAM ceiling (RAM, spills to swap — see docs/CACHE-RAM.md):          24 GB
+    Estimated total:                  ~199 GB (may over-subscribe slightly;
+    KV is allocated lazily so real usage depends on concurrent fill)
+    NOTE: Checkpoints (--ctx-checkpoints) only apply to SWA/recurrent/hybrid
+    models. MiniMax M2.7 is full attention — KV cache is the checkpoint.
+    Sampling: MiniMax official recommendation is temp=1.0, top_p=0.95, top_k=40
+    plus min_p=0.01 from unsloth guide. Conservative first tune.
+    Dedicated KV per slot — fills VRAM rather than leaving headroom unused.
+    3 slots × ~16.5 GB = ~49.5 GB KV, saturating the 192 GB card.
+    Not applicable — MiniMax M2.7 is full attention (no SWA/recurrent/hybrid).
+    Flags are accepted but ignored by the server.
+    CHECKPOINT_INTERVAL=8192
+    CHECKPOINT_MAX=8
+    MiniMax official: temp=1.0, top_p=0.95, top_k=40
+    Force thinking on with unlimited budget (-1). The model's chat template
+    supports <think> tags natively. Client requests may send lower budgets
+    (e.g. 15360) — this server-side setting acts as the default when clients
+    don't specify, but clients can still override per-request.
+    Clean slate — enable if loops observed.
+    DRY_MULTIPLIER=0.0
+    REPEAT_PENALTY=1.0
+    MiniMax has its own chat template — use jinja to honor it.
+    min_p recommended by unsloth guide
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "102400"
+  CACHE_TYPE_K: "q8_0"
+  CACHE_TYPE_V: "q8_0"
+  CONTEXT: "393216"
+  DIO: "1"
+  EXTRA_ARGS: "--min-p 0.01"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  JINJA: "1"
+  KV_UNIFIED: "0"
+  NGL: "99"
+  NO_MMAP: "1"
+  PARALLEL: "3"
+  PORT: "40801"
+  REASONING: "on"
+  REASONING_BUDGET: "-1"
+  TEMP: "1.0"
+  THREADS: "32"
+  TIMEOUT: "3600"
+  TOP_K: "40"
+  TOP_P: "0.95"

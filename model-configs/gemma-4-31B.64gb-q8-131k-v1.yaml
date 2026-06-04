@@ -1,0 +1,75 @@
+kind: llama-launcher-tune
+version: 1
+name: "64gb-q8-131k-v1"
+model: "gemma-4-31B"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 64gb-q8-131k-v1
+    Per-model config for: gemma-4-31B-it (Q8_0, dense 31B)
+    Target: 64 GB VRAM, ~50 GB hard ceiling
+    Architecture: Gemma 4 31B dense (NOT MoE)
+    - All 31B parameters active per token (vs 4B active on 26B MoE)
+    - Sliding Window Attention (same iSWA architecture as MoE variant)
+    - Context: 262144 native (capped to 131072 — agents auto-compact)
+    - Thinking model: uses <|channel>thought tags (peg-gemma4 template)
+    Lessons applied from MoE 26B v6 tuning:
+    - TEMP=1.0: Google-recommended. Low temps (0.3-0.5) cause severe repeat loops.
+    - DRY OFF: penalizes repeated JSON in tool calls, breaks tool_use emission.
+    - REASONING=on: ensures thinking phase is always populated.
+    - JINJA=0: avoids jinja parser bugs with Gemma 4 tool schemas.
+    - PARALLEL=1: avoids SWA checkpoint invalidation.
+    Memory budget estimate (131K, 1 slot):
+    Model weights (Q8_0):        ~31.0 GB
+    KV cache (1 slot × 131K):    ~2.0 GB  (dense has fewer KV heads than MoE)
+    CACHE_RAM ceiling (RAM, spills to swap — see docs/CACHE-RAM.md):      4.0 GB
+    Checkpoints (12 × ~200 MiB): ~2.4 GB
+    Compute buffers:              ~2.0 GB
+    Estimated total:             ~41.4 GB
+    Headroom to 50 GB limit:     ~8.6 GB
+    Use case: freeclaw coding agent backend
+    - Single slot to avoid SWA checkpoint invalidation
+    - Agents auto-compact at ~131K context
+    - Smarter than MoE (31B active vs 4B active) but slower per token
+    Known issues (as of 2026-04-13):
+    - Same Gemma 4 family bugs as MoE variant (see MoE v6 config)
+    - Slower generation than MoE (~15-20 tok/s vs ~43 tok/s estimated)
+    - bf16 variant is 58 GB — won't fit with any cache on 64 GB
+    Smaller prompt cache than MoE — less headroom with 31 GB weights.
+    Fewer checkpoints than MoE to stay within budget.
+    Google-recommended defaults. DO NOT lower temp — causes repeat loops.
+    Force thinking on: with many tools, Gemma 4 skips the thinking phase in
+    auto mode. Forcing it on ensures reasoning_content is always populated.
+    DRY OFF: breaks tool call emission by penalizing repeated JSON structure.
+    Not needed at temp=1.0 per Google recommendations.
+    DRY_MULTIPLIER=0.8
+    DRY_BASE=1.75
+    DRY_ALLOWED_LENGTH=2
+    DRY_PENALTY_LAST_N=512
+    REPEAT_PENALTY=1.05
+    REPEAT_LAST_N=256
+    Use peg-gemma4 native parser — avoids jinja bugs with tool schemas
+    EXTRA_ARGS=""
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "4096"
+  CACHE_TYPE_K: "q8_0"
+  CACHE_TYPE_V: "q8_0"
+  CHECKPOINT_MAX: "12"
+  CONTEXT: "131072"
+  DIO: "1"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  JINJA: "0"
+  KV_UNIFIED: "1"
+  NGL: "99"
+  NO_MMAP: "1"
+  PARALLEL: "1"
+  PORT: "40801"
+  REASONING: "on"
+  REASONING_BUDGET: "8192"
+  TEMP: "1.0"
+  THREADS: "32"
+  TIMEOUT: "3600"
+  TOP_K: "64"
+  TOP_P: "0.95"

@@ -1,0 +1,59 @@
+kind: llama-launcher-tune
+version: 1
+name: "24gb-q4km-131k-v1"
+model: "supergemma4-26b-uncensored"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 24gb-q4km-131k-v1
+    Per-model config for: supergemma4-26b-uncensored-fast-v2 (Q4_K_M, MoE 128/8)
+    Uncensored fine-tune by Jiunsong with neutral chat template baked in.
+    Target: 24 GB VRAM GPU, tight budget
+    Architecture: Gemma 4 MoE with Sliding Window Attention
+    - 30 layers: 25 SWA (window=1024) + 5 full attention
+    - 128 experts, 8 active per token (26B total, ~4B active)
+    - Context: 131072
+    - Tool calling: 100% pass through 120K with b8783+ parsing fix
+    Memory budget estimate (131K, 1 slot):
+    Model weights (Q4_K_M):      ~16.8 GB
+    KV cache (1 slot × 131K):     ~1.4 GB
+    CACHE_RAM ceiling (RAM, spills to swap — see docs/CACHE-RAM.md):      2.0 GB
+    Checkpoints (4 × ~180 MiB):  ~0.7 GB
+    Compute buffers:               ~2.0 GB
+    Estimated total:              ~22.9 GB
+    Headroom to 24 GB limit:      ~1.1 GB
+    PARALLEL=1: SWA checkpoint invalidation with >1 slot (#21468)
+    Same thinking format as base Gemma 4: <|channel>thought...<channel|>
+    DRY OFF: breaks tool call emission. Not needed at temp=1.0.
+    DRY_MULTIPLIER=0.8
+    DRY_BASE=1.75
+    DRY_ALLOWED_LENGTH=2
+    DRY_PENALTY_LAST_N=512
+    Model has neutral chat template baked in. JINJA=0 to use PEG parser
+    JINJA=1: required for this fine-tune's baked-in chat template.
+    Pre-b8783: PEG broke at ~37K, JINJA at ~45K. The upstream Gemma 4
+    parsing edge case fix (e21cdc11a) resolved this — now 100% pass through 120K.
+    EXTRA_ARGS=""
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "2048"
+  CACHE_TYPE_K: "q8_0"
+  CACHE_TYPE_V: "q8_0"
+  CHECKPOINT_MAX: "4"
+  CONTEXT: "131072"
+  DIO: "1"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  JINJA: "1"
+  KV_UNIFIED: "1"
+  NGL: "99"
+  NO_MMAP: "1"
+  PARALLEL: "1"
+  PORT: "40801"
+  REASONING: "on"
+  REASONING_BUDGET: "8192"
+  TEMP: "1.0"
+  THREADS: "32"
+  TIMEOUT: "3600"
+  TOP_K: "64"
+  TOP_P: "0.95"
