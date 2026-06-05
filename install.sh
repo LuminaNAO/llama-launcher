@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 TARGET="$SCRIPT_DIR/llama-server-launcher.sh"
 CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
-DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
+DEFAULT_MODELS_DIR="$HOME/llama-launcher/models"
 AUTHOR_BEST_PICKS_FILE="$SCRIPT_DIR/model-configs/author-best-picks.sh"
 
 if [[ -f "$AUTHOR_BEST_PICKS_FILE" ]]; then
@@ -276,8 +276,7 @@ setup_environment() {
         fi
     fi
 
-    local default_slots
-    default_slots="$(dirname "$models_dir")/llama-slots"
+    local default_slots="$HOME/llama-launcher/slots"
     if [[ -n "$current_slots" ]]; then
         echo ""
         echo "Slot save directory is already set:"
