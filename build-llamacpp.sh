@@ -30,7 +30,17 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+case "$SCRIPT_DIR" in
+    /usr/bin|/usr/local/bin|/bin)
+        ROOT_DIR="${LLAMA_LAUNCHER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/llama-launcher}"
+        PACKAGED_INSTALL=1
+        ;;
+    *)
+        ROOT_DIR="$SCRIPT_DIR"
+        PACKAGED_INSTALL=0
+        ;;
+esac
 DEFAULT_LLAMACPP_DIR="$(dirname "$ROOT_DIR")/llama.cpp"
 
 # ── Build type argument (required) ──────────────────────────────────────────
@@ -52,7 +62,7 @@ if [ -z "$BUILD_TYPE" ]; then
     exit 1
 fi
 
-BUILD_DIR="$ROOT_DIR/builds/$BUILD_TYPE"
+BUILD_DIR="${LLAMA_LAUNCHER_BUILDS_DIR:-$ROOT_DIR/builds}/$BUILD_TYPE"
 # Backend = prefix before the first dash, so e.g. "rocm-test" uses the rocm
 # toolchain/cmake flags but lands in a separate output dir.
 BACKEND="${BUILD_TYPE%%-*}"
@@ -71,29 +81,45 @@ if [ -n "${LLAMACPP_SRC:-}" ]; then
 elif [ -z "$BUILD_TAG" ] && [ -f "$DEFAULT_LLAMACPP_DIR/CMakeLists.txt" ]; then
     LLAMACPP_DIR="$DEFAULT_LLAMACPP_DIR"
 else
-    # Discover candidate llama.cpp source trees near the helper.
+    # Discover candidate llama.cpp source trees near the helper or, for
+    # packaged installs, near normal user checkout locations.
     # Patterns covered:
     #   ~/code/llama.cpp            (default sibling)
     #   ~/code/llama.cpp-*          (suffix style, e.g. llama.cpp-v4flash)
     #   ~/code/llama*/llama.cpp     (nested style, e.g. llama-mtp/llama.cpp)
     #   ~/code/llama*               (flat style, e.g. llama-mtp/ with CMakeLists at root)
-    parent_dir="$(dirname "$ROOT_DIR")"
+    search_roots=()
+    if [ "$PACKAGED_INSTALL" -eq 1 ]; then
+        search_roots+=("$PWD" "$(dirname "$PWD")" "$HOME/code" "$HOME/src" "$HOME")
+    else
+        search_roots+=("$(dirname "$ROOT_DIR")")
+    fi
+    parent_dir="${search_roots[0]}"
     candidates=()
-    for c in "$parent_dir"/llama.cpp "$parent_dir"/llama.cpp-* "$parent_dir"/llama*/llama.cpp "$parent_dir"/llama*; do
-        [ -f "$c/CMakeLists.txt" ] || continue
-        # Deduplicate (a glob can hit the same path twice)
-        c_real="$(realpath "$c" 2>/dev/null || echo "$c")"
-        seen=0
-        for s in "${candidates[@]}"; do
-            [ "$(realpath "$s" 2>/dev/null || echo "$s")" = "$c_real" ] && { seen=1; break; }
+    for root in "${search_roots[@]}"; do
+        [ -d "$root" ] || continue
+        for c in "$root" "$root"/llama.cpp "$root"/llama.cpp-* "$root"/llama-hdd.cpp "$root"/llama*/llama.cpp "$root"/llama*; do
+            [ -f "$c/CMakeLists.txt" ] || continue
+            # Deduplicate (a glob can hit the same path twice)
+            c_real="$(realpath "$c" 2>/dev/null || echo "$c")"
+            seen=0
+            for s in "${candidates[@]}"; do
+                [ "$(realpath "$s" 2>/dev/null || echo "$s")" = "$c_real" ] && { seen=1; break; }
+            done
+            [ "$seen" -eq 1 ] && continue
+            candidates+=("$c")
         done
-        [ "$seen" -eq 1 ] && continue
-        candidates+=("$c")
     done
 
     if [ ${#candidates[@]} -eq 0 ]; then
-        echo "❌ No llama.cpp source trees found near $parent_dir"
-        echo "   Either clone one (e.g. git clone https://github.com/ggml-org/llama.cpp.git $DEFAULT_LLAMACPP_DIR)"
+        echo "❌ No llama.cpp source trees found."
+        if [ "$PACKAGED_INSTALL" -eq 1 ]; then
+            echo "   Looked in: ${search_roots[*]}"
+            echo "   Either clone one (e.g. git clone https://github.com/ggml-org/llama.cpp.git ~/code/llama.cpp)"
+        else
+            echo "   Looked near: $parent_dir"
+            echo "   Either clone one (e.g. git clone https://github.com/ggml-org/llama.cpp.git $DEFAULT_LLAMACPP_DIR)"
+        fi
         echo "   or set LLAMACPP_SRC=/path/to/llama.cpp"
         exit 1
     fi

@@ -97,7 +97,14 @@ fi
 progname="$(basename "$0" 2>/dev/null || echo "")"
 if [[ "$progname" == *llama-launcher-log* ]] || [[ "${1:-}" == "log" ]]; then
     SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-    LOG_FILE="$SCRIPT_DIR/llama.log"
+    case "$SCRIPT_DIR" in
+        /usr/bin|/usr/local/bin|/bin)
+            LOG_FILE="${LLAMA_LAUNCHER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/llama-launcher}/llama.log"
+            ;;
+        *)
+            LOG_FILE="$SCRIPT_DIR/llama.log"
+            ;;
+    esac
     if [[ ! -f "$LOG_FILE" ]]; then
         echo "❌ No log file at $LOG_FILE"
         echo "   Run the launcher at least once with logging enabled"
@@ -153,13 +160,27 @@ while [[ $# -gt 0 ]]; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
-LLAMA_LAUNCHER_DIR="$SCRIPT_DIR"
-LAUNCH_HISTORY="$SCRIPT_DIR/.launch-history"
-LLAMA_LOG_FILE="$SCRIPT_DIR/llama.log"
-DEEP_LOG="$SCRIPT_DIR/llama-deep.log"
+case "$SCRIPT_DIR" in
+    /usr/bin|/usr/local/bin|/bin)
+        PACKAGED_INSTALL=1
+        LLAMA_LAUNCHER_DIR="${LLAMA_LAUNCHER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/llama-launcher}"
+        LLAMA_LAUNCHER_LIB_DIR="${LLAMA_LAUNCHER_LIB_DIR:-/usr/lib/llama-launcher}"
+        BUNDLED_MODEL_CONFIG_DIR="${LLAMA_LAUNCHER_MODEL_CONFIG_DIR:-/usr/share/llama-launcher/model-configs}"
+        ;;
+    *)
+        PACKAGED_INSTALL=0
+        LLAMA_LAUNCHER_DIR="$SCRIPT_DIR"
+        LLAMA_LAUNCHER_LIB_DIR="$SCRIPT_DIR"
+        BUNDLED_MODEL_CONFIG_DIR="$SCRIPT_DIR/model-configs"
+        ;;
+esac
+mkdir -p "$LLAMA_LAUNCHER_DIR"
+CONFIG_FILE="$LLAMA_LAUNCHER_DIR/.llama-launcher-config"
+LAUNCH_HISTORY="$LLAMA_LAUNCHER_DIR/.launch-history"
+LLAMA_LOG_FILE="$LLAMA_LAUNCHER_DIR/llama.log"
+DEEP_LOG="$LLAMA_LAUNCHER_DIR/llama-deep.log"
 DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
-AUTHOR_BEST_PICKS_FILE="$SCRIPT_DIR/model-configs/author-best-picks.sh"
+AUTHOR_BEST_PICKS_FILE="$BUNDLED_MODEL_CONFIG_DIR/author-best-picks.sh"
 
 if [[ -f "$AUTHOR_BEST_PICKS_FILE" ]]; then
     # shellcheck disable=SC1090
@@ -598,7 +619,7 @@ fi
 echo "📦 Model: $selected_model"
 
 # ── YAML tune helpers ────────────────────────────────────────────────────────
-MODEL_CONFIG_DIR="$SCRIPT_DIR/model-configs"
+MODEL_CONFIG_DIR="$LLAMA_LAUNCHER_DIR/model-configs"
 selected_folder_name="$(basename "$MODEL_FOLDER")"
 
 TUNE_KEYS=(
@@ -820,7 +841,7 @@ create_tune_interactive() {
     fi
     edit_tune_values || return 1
     write_tune_yaml "$file" "$tune_name" "Created interactively: $(date -Iseconds)"
-    echo "💾 Created tune: model-configs/$(basename "$file")"
+    echo "💾 Created tune: $file"
     MODEL_CONFIG_FILE="$file"
     HAS_MODEL_CONFIG=1
 }
@@ -844,7 +865,7 @@ edit_existing_tune_interactive() {
     load_tune "$file"
     edit_tune_values || return 1
     write_tune_yaml "$file" "$name" "Edited interactively: $(date -Iseconds)"
-    echo "💾 Updated tune: model-configs/$(basename "$file")"
+    echo "💾 Updated tune: $file"
     MODEL_CONFIG_FILE="$file"
     HAS_MODEL_CONFIG=1
 }
@@ -856,22 +877,25 @@ collect_tunes() {
     _specific_names=()
     _family_configs=()
     _family_names=()
-    local conf conf_base conf_model tune_label
+    local conf conf_base conf_model tune_label dir
     shopt -s nullglob
-    for conf in "$MODEL_CONFIG_DIR"/*.yaml "$MODEL_CONFIG_DIR"/*.yml; do
-        [ -f "$conf" ] || continue
-        conf_base="$(basename "$conf")"
-        conf_base="${conf_base%.yaml}"
-        conf_base="${conf_base%.yml}"
-        conf_model="${conf_base%%.*}"
-        tune_label="$(tune_label "$conf")"
-        if [[ "$selected_folder_name" == "$conf_model" ]]; then
-            _specific_configs+=("$conf")
-            _specific_names+=("$tune_label")
-        elif [[ "$selected_folder_name" == "$conf_model"* ]]; then
-            _family_configs+=("$conf")
-            _family_names+=("$tune_label")
-        fi
+    for dir in "$BUNDLED_MODEL_CONFIG_DIR" "$MODEL_CONFIG_DIR"; do
+        [ -d "$dir" ] || continue
+        for conf in "$dir"/*.yaml "$dir"/*.yml; do
+            [ -f "$conf" ] || continue
+            conf_base="$(basename "$conf")"
+            conf_base="${conf_base%.yaml}"
+            conf_base="${conf_base%.yml}"
+            conf_model="${conf_base%%.*}"
+            tune_label="$(tune_label "$conf")"
+            if [[ "$selected_folder_name" == "$conf_model" ]]; then
+                _specific_configs+=("$conf")
+                _specific_names+=("$tune_label")
+            elif [[ "$selected_folder_name" == "$conf_model"* ]]; then
+                _family_configs+=("$conf")
+                _family_names+=("$tune_label")
+            fi
+        done
     done
     shopt -u nullglob
     for i in "${!_specific_configs[@]}"; do
@@ -1002,11 +1026,14 @@ else
             tune_configs=()
             tune_names=()
             shopt -s nullglob
-            for conf in "$MODEL_CONFIG_DIR"/*.yaml "$MODEL_CONFIG_DIR"/*.yml; do
-                [ -f "$conf" ] || continue
-                tune_label="$(tune_label "$conf")"
-                tune_configs+=("$conf")
-                tune_names+=("$tune_label")
+            for dir in "$BUNDLED_MODEL_CONFIG_DIR" "$MODEL_CONFIG_DIR"; do
+                [ -d "$dir" ] || continue
+                for conf in "$dir"/*.yaml "$dir"/*.yml; do
+                    [ -f "$conf" ] || continue
+                    tune_label="$(tune_label "$conf")"
+                    tune_configs+=("$conf")
+                    tune_names+=("$tune_label")
+                done
             done
             shopt -u nullglob
             show_all_tunes=1
@@ -1237,7 +1264,7 @@ fi
 if [ "$HAS_MODEL_CONFIG" -eq 0 ] && [ "$SAVE_CONFIG" -eq 0 ]; then
     MODEL_CONFIG_FILE="$MODEL_CONFIG_DIR/${selected_folder_name}.yaml"
     write_tune_yaml "$MODEL_CONFIG_FILE" "$selected_folder_name" "Auto-generated from ${TOTAL_RAM_GB} GB system profile: $(date -Iseconds)"
-    echo "💾 Auto-saved tune: model-configs/${selected_folder_name}.yaml"
+    echo "💾 Auto-saved tune: $MODEL_CONFIG_FILE"
 fi
 
 # ── Save per-model tune if requested ─────────────────────────────────────────
@@ -1253,7 +1280,7 @@ fi
 # The proxy listens on PORT (public) and forwards to INTERNAL_PORT (llama-server).
 # Both request and response bodies are tee-d to llama-deep.log (in the repo dir).
 INTERNAL_PORT="${INTERNAL_PORT:-40802}"
-PROXY_SCRIPT="$SCRIPT_DIR/llama-deep-proxy.mjs"
+PROXY_SCRIPT="$LLAMA_LAUNCHER_LIB_DIR/llama-deep-proxy.mjs"
 
 # ── Port selection (CLI flags > interactive prompt > tune/default) ──────────
 if [ -n "$ARG_PORT" ]; then
