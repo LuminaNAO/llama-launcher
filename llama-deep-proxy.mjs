@@ -98,6 +98,8 @@ let slotMutex = Promise.resolve(); // Promise chain — await prior op before st
 let messageQueue = Promise.resolve(); // End-to-end /v1/messages queue when HDD cache is active
 let inFlightRequests = 0;          // for graceful shutdown drain
 const BRANCH_PREFIX_BYTES = 256 * 1024;
+const CROSS_BASE_MIN_LCP_BYTES = 64 * 1024;
+const CROSS_BASE_MIN_SIMILARITY = 0.5;
 // Tracks whether the slot is believed to hold real KV content. Set true after
 // a successful restore (n_restored > 0) or a 200 response from /v1/messages
 // (PP filled the slot). Set false after a failed restore — llama-server's
@@ -141,24 +143,6 @@ function deleteSlotFiles(slotId) {
   try { unlinkSync(bin); } catch {}
   try { unlinkSync(ckpt); } catch {}
   try { unlinkSync(meta); } catch {}
-}
-
-function pruneSameBaseSlots(baseId, keepSlotId) {
-  if (!slotCacheDir || !baseId || !keepSlotId) return;
-  let files;
-  try { files = readdirSync(slotCacheDir); } catch { return; }
-  const prefix = `${baseId}-`;
-  let pruned = 0;
-  for (const f of files) {
-    if (!f.endsWith(".bin")) continue;
-    const slotId = slotIdFromFilename(f);
-    if (slotId === keepSlotId || !slotId.startsWith(prefix)) continue;
-    deleteSlotFiles(slotId);
-    pruned++;
-  }
-  if (pruned > 0) {
-    slotLog(`pruneSameBaseSlots: removed ${pruned} old branch slot(s) for base ${baseId}, kept ${keepSlotId}.bin\n`, C_DIM);
-  }
 }
 
 function enqueueMessage(fn) {
@@ -358,6 +342,10 @@ function slotRestoreSucceeded(r) {
   };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ── Slot cache helpers ────────────────────────────────────────────────────
 function callSlotAction(action, filename, timeoutMs = 0) {
   return new Promise((resolve) => {
@@ -382,6 +370,23 @@ function callSlotAction(action, filename, timeoutMs = 0) {
     req.write(body);
     req.end();
   });
+}
+
+async function callSlotSaveWithRetry(filename, reason, timeoutMs = 0) {
+  const delays = reason === "shutdown" ? [0] : [0, 250, 1000, 2500];
+  let last = null;
+  for (let i = 0; i < delays.length; i++) {
+    if (delays[i] > 0) await sleep(delays[i]);
+    const r = await callSlotAction("save", filename, timeoutMs);
+    const save = slotSaveSucceeded(r);
+    last = { r, save };
+    if (save.ok || i === delays.length - 1) return last;
+    slotLog(
+      `HDD CACHE save retry pending (${reason}) ${filename}: status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten}\n`,
+      C_YELLOW,
+    );
+  }
+  return last;
 }
 
 function commonPrefixBytes(a, b) {
@@ -512,13 +517,82 @@ function findBestSameBaseParent(info) {
   return best ?? latestLegacy;
 }
 
+function findBestCrossBaseParent(info) {
+  if (!slotCacheDir || !info?.baseId || typeof info.branchPrefix !== "string") return null;
+  let best = null;
+  let bestRejected = null;
+  let files;
+  try { files = readdirSync(slotCacheDir); } catch { return null; }
+  for (const f of files) {
+    if (!f.endsWith(".bin")) continue;
+    const slotId = slotIdFromFilename(f);
+    if (slotId === info.sessionId) continue;
+    const meta = readSlotMeta(slotId);
+    if (meta?.baseId === info.baseId) continue;
+    if (!meta?.completed || meta.volatile || typeof meta.promptPrefix !== "string") continue;
+    const full = join(slotCacheDir, f);
+    let st;
+    try { st = statSync(full); } catch { continue; }
+    if (st.size <= 0) continue;
+
+    const lcp = commonPrefixBytes(meta.promptPrefix, info.branchPrefix);
+    const denom = Math.max(1, Math.min(meta.promptPrefix.length, info.branchPrefix.length));
+    const similarity = lcp / denom;
+    const candidate = {
+      filename: f,
+      slotId,
+      mtime: st.mtimeMs,
+      lcp,
+      similarity,
+      createdFrom: meta.createdFrom ?? null,
+      baseId: meta.baseId ?? sessionBase(slotId),
+    };
+    const betterThan = (a, b) => !b || a.lcp > b.lcp || (a.lcp === b.lcp && a.mtime > b.mtime);
+    if (lcp >= CROSS_BASE_MIN_LCP_BYTES && similarity >= CROSS_BASE_MIN_SIMILARITY) {
+      if (betterThan(candidate, best)) best = candidate;
+    } else if (lcp > 0 && betterThan(candidate, bestRejected)) {
+      bestRejected = candidate;
+    }
+  }
+  if (best) return best;
+  if (bestRejected) {
+    return {
+      ...bestRejected,
+      rejected: true,
+      rejectReason: `cross-base prefix too weak; require lcp>=${CROSS_BASE_MIN_LCP_BYTES} and similarity>=${CROSS_BASE_MIN_SIMILARITY}`,
+    };
+  }
+  return null;
+}
+
 function selectRestoreTarget(info) {
   const exact = `${info.sessionId}.bin`;
   if (existsSync(slotPath(exact))) {
     return { filename: exact, slotId: info.sessionId, kind: "exact" };
   }
   const parent = findBestSameBaseParent(info);
-  return parent ? { ...parent, kind: parent.legacy ? "legacy-parent" : "parent" } : null;
+  if (parent) return { ...parent, kind: parent.legacy ? "legacy-parent" : "parent" };
+  const crossBaseParent = findBestCrossBaseParent(info);
+  if (crossBaseParent && !crossBaseParent.rejected) {
+    return { ...crossBaseParent, kind: "cross-base-parent" };
+  }
+  return crossBaseParent ? { ...crossBaseParent, kind: "rejected-cross-base-parent" } : null;
+}
+
+function scoreLiveParent(info) {
+  if (!currentSession || !slotHasContent || !sameSessionBase(currentSession, info?.sessionId)) return null;
+  const parentInfo = currentRequestInfo;
+  if (!parentInfo || typeof parentInfo.branchPrefix !== "string" || typeof info?.branchPrefix !== "string") {
+    return { slotId: currentSession, lcp: 0, similarity: 0, missingMeta: true };
+  }
+  const lcp = commonPrefixBytes(parentInfo.branchPrefix, info.branchPrefix);
+  const denom = Math.max(1, Math.min(parentInfo.branchPrefix.length, info.branchPrefix.length));
+  return {
+    slotId: currentSession,
+    lcp,
+    similarity: lcp / denom,
+    missingMeta: false,
+  };
 }
 
 // Serialize slot save+restore through a Promise mutex. Concurrent callers
@@ -556,39 +630,81 @@ async function ensureSlotLoaded(info) {
         // LRU prune can wipe our restore target before we read it.
         pruneSlotCacheIfNeeded(`${currentSession}.bin`, protectIncomingFilename);
         hddBanner("save", `${currentSession}.bin`, "(writes .bin + .bin.ckpt)");
-        const r = await callSlotAction("save", `${currentSession}.bin`);
-        const save = slotSaveSucceeded(r);
+        const { r, save } = await callSlotSaveWithRetry(`${currentSession}.bin`, "switch");
         slotLog(
           `HDD CACHE save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten} checkpoint_sidecar=${currentSession}.bin.ckpt\n`,
           save.ok ? C_CYAN : C_RED,
         );
-        if (save.ok) {
-          slotDirtySinceSave = false;
-          pruneSameBaseSlots(currentRequestInfo?.baseId ?? sessionBase(currentSession), currentSession);
+        if (!save.ok) {
+          if (currentRequestInfo) {
+            writeSlotMeta(currentRequestInfo, {
+              completed: false,
+              volatile: true,
+              createdFrom: currentLoadedFrom,
+              saveReason: "switch",
+              nSaved: save.nSaved,
+              nWritten: save.nWritten,
+              failureReason: "switch-save-failed",
+            });
+          }
+          throw new Error(`refusing slot switch after failed save of ${currentSession}.bin`);
         }
+        if (currentRequestInfo) {
+          writeSlotMeta(currentRequestInfo, {
+            completed: true,
+            volatile: false,
+            createdFrom: currentLoadedFrom,
+            saveReason: "switch",
+            nSaved: save.nSaved,
+            nWritten: save.nWritten,
+          });
+        }
+        slotDirtySinceSave = false;
       }
     }
 
     // If the incoming request is a new branch of the same base conversation,
-    // the live slot is already the best prefix. Saving above persisted the
-    // old branch; restoring an older disk fallback here would throw away the
-    // freshest in-RAM checkpoints and cause avoidable replay.
-    if (!existsSync(slotPath(exactRestoreFilename)) && sameSessionBase(currentSession, newSessionId) && slotHasContent) {
+    // the live slot is often the cheapest parent. It is not always the best
+    // parent: OpenClaw can emit a later same-base request whose prompt diverges
+    // before the current live checkpoints. Compare the live prefix against
+    // persisted same-base parents and restore a better disk parent when one
+    // exists.
+    const liveParent = scoreLiveParent(info);
+    if (!existsSync(slotPath(exactRestoreFilename)) && liveParent) {
+      const diskParent = selectRestoreTarget(info);
+      const diskIsBetter =
+        diskParent &&
+        (diskParent.kind === "parent" || diskParent.kind === "cross-base-parent") &&
+        diskParent.slotId !== liveParent.slotId &&
+        diskParent.lcp > liveParent.lcp;
+
+      if (!diskIsBetter) {
+        const detail = liveParent.missingMeta
+          ? "live parent metadata unavailable"
+          : `lcp=${liveParent.lcp} similarity=${liveParent.similarity.toFixed(3)}`;
+        slotLog(
+          `\n=== HDD CACHE restore SKIPPED: ${newSessionId}.bin (copy-on-write from live same-base slot ${currentSession}.bin; ${detail})\n`,
+          liveParent.similarity >= 0.5 ? C_CYAN : C_YELLOW,
+        );
+        currentLoadedFrom = currentSession;
+        currentSession = newSessionId;
+        currentRequestInfo = info;
+        slotDirtySinceSave = false;
+        writeSlotMeta(info, {
+          completed: false,
+          volatile: true,
+          createdFrom: currentLoadedFrom,
+          restoreKind: "live-parent",
+          restoreLcp: liveParent.lcp,
+          restoreSimilarity: liveParent.similarity,
+        });
+        return;
+      }
+
       slotLog(
-        `\n=== HDD CACHE restore SKIPPED: ${newSessionId}.bin (copy-on-write from live same-base slot ${currentSession}.bin)\n`,
-        C_CYAN,
+        `\n=== HDD CACHE live parent bypassed: ${newSessionId}.bin live ${liveParent.slotId}.bin lcp=${liveParent.lcp} similarity=${liveParent.similarity.toFixed(3)}; disk ${diskParent.filename} lcp=${diskParent.lcp} similarity=${diskParent.similarity.toFixed(3)}\n`,
+        C_YELLOW,
       );
-      currentLoadedFrom = currentSession;
-      currentSession = newSessionId;
-      currentRequestInfo = info;
-      slotDirtySinceSave = false;
-      writeSlotMeta(info, {
-        completed: false,
-        volatile: true,
-        createdFrom: currentLoadedFrom,
-        restoreKind: "live-parent",
-      });
-      return;
     }
 
     const restoreTarget = selectRestoreTarget(info);
@@ -607,8 +723,31 @@ async function ensureSlotLoaded(info) {
       });
       return;
     }
+    if (restoreTarget.kind === "rejected-cross-base-parent") {
+      slotLog(
+        `\n=== HDD CACHE restore MISS: ${newSessionId}.bin (best cross-base candidate ${restoreTarget.filename} rejected: ${restoreTarget.rejectReason}; lcp=${restoreTarget.lcp} similarity=${restoreTarget.similarity.toFixed(3)})\n`,
+        C_YELLOW,
+      );
+      slotHasContent = false;
+      slotDirtySinceSave = false;
+      currentSession = newSessionId;
+      currentRequestInfo = info;
+      currentLoadedFrom = null;
+      writeSlotMeta(info, {
+        completed: false,
+        volatile: true,
+        createdFrom: null,
+        restoreKind: "miss",
+        rejectedParent: restoreTarget.slotId,
+        rejectedParentKind: "cross-base",
+        rejectedParentLcp: restoreTarget.lcp,
+        rejectedParentSimilarity: restoreTarget.similarity,
+        rejectedParentReason: restoreTarget.rejectReason,
+      });
+      return;
+    }
     if (restoreTarget.kind !== "exact") {
-      const detail = restoreTarget.kind === "parent"
+      const detail = restoreTarget.kind === "parent" || restoreTarget.kind === "cross-base-parent"
         ? `lcp=${restoreTarget.lcp} similarity=${restoreTarget.similarity.toFixed(3)}`
         : "legacy metadata missing";
       slotLog(
@@ -669,8 +808,7 @@ async function saveCurrentSlot(reason, timeoutMs = 0) {
     ensureSlotCacheDir();
     pruneSlotCacheIfNeeded(`${currentSession}.bin`);
     hddBanner(`save (${reason})`, `${currentSession}.bin`, "(writes .bin + .bin.ckpt)");
-    const r = await callSlotAction("save", `${currentSession}.bin`, timeoutMs);
-    const save = slotSaveSucceeded(r);
+    const { r, save } = await callSlotSaveWithRetry(`${currentSession}.bin`, reason, timeoutMs);
     slotLog(
       `HDD CACHE save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten} checkpoint_sidecar=${currentSession}.bin.ckpt\n`,
       save.ok ? C_CYAN : C_RED,
@@ -687,7 +825,6 @@ async function saveCurrentSlot(reason, timeoutMs = 0) {
     }
     if (save.ok) {
       slotDirtySinceSave = false;
-      pruneSameBaseSlots(currentRequestInfo?.baseId ?? sessionBase(currentSession), currentSession);
     }
   } finally {
     release();
@@ -805,10 +942,22 @@ async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessio
     if (sessionInfo && slotCacheDir) await ensureSlotLoaded(sessionInfo);
   } catch (e) {
     log.write(`\n!!! SLOT mgmt error ${tag}: ${e.message}\n`);
+    slotLog(`\n!!! HDD CACHE request blocked: ${e.message}\n`, C_RED);
     if (sessionId && slotCacheDir) {
-      currentSession = sessionId;
-      slotHasContent = false;
+      if (currentRequestInfo) {
+        writeSlotMeta(currentRequestInfo, {
+          completed: false,
+          volatile: true,
+          failureReason: "slot-management-error",
+        });
+      }
     }
+    if (!clientRes.headersSent) {
+      try { clientRes.writeHead(503, { "Content-Type": "text/plain" }); } catch {}
+    }
+    try { clientRes.end(`HDD cache slot management failed: ${e.message}\n`); } catch {}
+    finalize();
+    return;
   }
 
   // From this point until a complete 200 response, the slot is volatile:
