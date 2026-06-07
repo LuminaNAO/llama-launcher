@@ -182,6 +182,10 @@ DEEP_LOG="$LLAMA_LAUNCHER_DIR/llama-deep.log"
 DEFAULT_MODELS_DIR="$HOME/llama-launcher/models"
 DEFAULT_SLOTS_DIR="$HOME/llama-launcher/slots"
 AUTHOR_BEST_PICKS_FILE="$BUNDLED_MODEL_CONFIG_DIR/author-best-picks.sh"
+DOWNLOAD_MODEL_SCRIPT="${LLAMA_LAUNCHER_DOWNLOAD_MODEL:-$LLAMA_LAUNCHER_LIB_DIR/download-model.sh}"
+if [[ ! -x "$DOWNLOAD_MODEL_SCRIPT" && -x "$SCRIPT_DIR/download-model.sh" ]]; then
+    DOWNLOAD_MODEL_SCRIPT="$SCRIPT_DIR/download-model.sh"
+fi
 
 if [[ -f "$AUTHOR_BEST_PICKS_FILE" ]]; then
     # shellcheck disable=SC1090
@@ -532,6 +536,97 @@ else
         done
     }
 
+    download_model_then_rescan() {
+        local repo="$1"
+        shift
+
+        if [[ ! -x "$DOWNLOAD_MODEL_SCRIPT" ]]; then
+            echo "❌ download-model.sh not found or not executable: $DOWNLOAD_MODEL_SCRIPT"
+            return 1
+        fi
+
+        mkdir -p "$MODELS_DIR"
+        config_set LLAMACPP_MODELS_DIR "$MODELS_DIR"
+        export LLAMACPP_MODELS_DIR="$MODELS_DIR"
+
+        "$DOWNLOAD_MODEL_SCRIPT" "$@" "$repo" || return 1
+        scan_model_folders "$MODELS_DIR"
+    }
+
+    offer_model_download_or_path() {
+        local heading="$1"
+        local new_path hf_input
+
+        while [ ${#model_folders[@]} -eq 0 ]; do
+            echo "$heading"
+            echo ""
+            echo "Models directory: $MODELS_DIR"
+            echo ""
+            if [[ -n "${AUTHOR_BEST_PICK_REPO:-}" && -n "${AUTHOR_BEST_PICK_GGUF:-}" ]]; then
+                echo "  1) Download author best pick"
+                echo "     ${AUTHOR_BEST_PICK_NAME:-$AUTHOR_BEST_PICK_REPO}"
+                echo "     $AUTHOR_BEST_PICK_GGUF"
+            else
+                echo "  1) Download author best pick (unavailable)"
+            fi
+            echo "  2) Paste Hugging Face model link or owner/repo"
+            echo "  3) Choose a different models directory"
+            echo "  0) Quit"
+            echo ""
+            read -rp "Select option: " empty_model_choice
+
+            case "$empty_model_choice" in
+                1)
+                    if [[ -z "${AUTHOR_BEST_PICK_REPO:-}" || -z "${AUTHOR_BEST_PICK_GGUF:-}" ]]; then
+                        echo "❌ Author best-pick metadata is not available."
+                        echo ""
+                        continue
+                    fi
+                    download_model_then_rescan "$AUTHOR_BEST_PICK_REPO" --filename "$AUTHOR_BEST_PICK_GGUF" || true
+                    ;;
+                2)
+                    read -rp "Hugging Face URL or owner/repo: " hf_input
+                    hf_input="${hf_input//[$'\t\r\n']}"
+                    if [[ -z "$hf_input" ]]; then
+                        echo "❌ No Hugging Face repo entered."
+                        echo ""
+                        continue
+                    fi
+                    download_model_then_rescan "$hf_input" || true
+                    ;;
+                3)
+                    read -rp "Enter path to models directory: " new_path
+                    new_path="${new_path/#\~/$HOME}"
+                    if [[ -z "$new_path" ]]; then
+                        echo "❌ No path entered."
+                        echo ""
+                        continue
+                    fi
+                    MODELS_DIR="${new_path%/}"
+                    mkdir -p "$MODELS_DIR"
+                    config_set LLAMACPP_MODELS_DIR "$MODELS_DIR"
+                    LLAMACPP_MODELS_DIR="$MODELS_DIR"
+                    echo "✅ Path saved to $CONFIG_FILE for next launch"
+                    echo ""
+                    scan_model_folders "$MODELS_DIR"
+                    ;;
+                0|"")
+                    echo "No model selected."
+                    exit 1
+                    ;;
+                *)
+                    echo "❌ Invalid option: $empty_model_choice"
+                    echo ""
+                    ;;
+            esac
+
+            if [ ${#model_folders[@]} -eq 0 ]; then
+                echo "❌ No model folders found in $MODELS_DIR"
+                echo ""
+            fi
+        done
+    }
+
     scan_model_folders "$MODELS_DIR"
 
     # If no model folders found, check if dir exists
@@ -543,29 +638,26 @@ else
             if [[ "$create_choice" == [yY]* ]]; then
                 mkdir -p "$MODELS_DIR"
                 echo "✅ Created $MODELS_DIR"
-                echo "   Download models here, then run llama-launcher again."
                 echo ""
-                exit 0
+                offer_model_download_or_path "No models are installed yet."
             else
                 echo ""
                 read -rp "Enter path to models directory: " new_path
+                new_path="${new_path/#\~/$HOME}"
                 config_set LLAMACPP_MODELS_DIR "$new_path"
                 LLAMACPP_MODELS_DIR="$new_path"
                 echo "✅ Path saved to $CONFIG_FILE for next launch"
                 echo ""
                 MODELS_DIR="$new_path"
                 scan_model_folders "$MODELS_DIR"
+                if [ ${#model_folders[@]} -eq 0 ]; then
+                    offer_model_download_or_path "No models are installed yet."
+                fi
             fi
         else
             echo "❌ No model folders found at $MODELS_DIR (directory is empty)"
             echo ""
-            read -rp "Enter path to models directory: " new_path
-            config_set LLAMACPP_MODELS_DIR "$new_path"
-            LLAMACPP_MODELS_DIR="$new_path"
-            echo "✅ Path saved to $CONFIG_FILE for next launch"
-            echo ""
-            MODELS_DIR="$new_path"
-            scan_model_folders "$MODELS_DIR"
+            offer_model_download_or_path "No models are installed yet."
         fi
     fi
 

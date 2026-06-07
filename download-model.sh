@@ -19,9 +19,19 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
-DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+case "$SCRIPT_DIR" in
+    /usr/bin|/usr/local/bin|/bin|/usr/lib/llama-launcher)
+        LLAMA_LAUNCHER_DIR="${LLAMA_LAUNCHER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/llama-launcher}"
+        DEFAULT_MODELS_DIR="$HOME/llama-launcher/models"
+        ;;
+    *)
+        LLAMA_LAUNCHER_DIR="$SCRIPT_DIR"
+        DEFAULT_MODELS_DIR="$HOME/llama-launcher/models"
+        ;;
+esac
+mkdir -p "$LLAMA_LAUNCHER_DIR"
+CONFIG_FILE="$LLAMA_LAUNCHER_DIR/.llama-launcher-config"
 TMPDIR="${TMPDIR:-/tmp}"
 PARSE_FILE="$(mktemp "$TMPDIR/download-model.XXXXXX.json")"
 trap 'rm -f "$PARSE_FILE"' EXIT
@@ -135,7 +145,7 @@ if [ ! -d "$MODELS_DIR" ]; then
     echo ""
     echo "  1) /usr/local/share/llama.cpp/models  (system-wide, needs sudo)"
     echo "  2) $HOME/.local/share/llama.cpp/models (user-local)"
-    echo "  3) $SCRIPT_DIR/models                  (project-local)"
+    echo "  3) $DEFAULT_MODELS_DIR                 (llama-launcher default)"
     echo "  4) Enter custom path"
     echo ""
     printf "Choice [1-4]: "
@@ -143,7 +153,7 @@ if [ ! -d "$MODELS_DIR" ]; then
     case "$dir_choice" in
         1) MODELS_DIR="/usr/local/share/llama.cpp/models" ;;
         2) MODELS_DIR="$HOME/.local/share/llama.cpp/models" ;;
-        3) MODELS_DIR="$SCRIPT_DIR/models" ;;
+        3) MODELS_DIR="$DEFAULT_MODELS_DIR" ;;
         4)
             printf "Enter path: "
             read -r custom_dir
