@@ -1032,7 +1032,11 @@ model_config_search_dirs() {
         fi
     fi
     for dir in \
+        "$cache_root"/yay/llama-launcher*/model-configs \
+        "$cache_root"/yay/llama-launcher*/src/model-configs \
         "$cache_root"/yay/llama-launcher*/src/*/model-configs \
+        "$cache_root"/paru/clone/llama-launcher*/model-configs \
+        "$cache_root"/paru/clone/llama-launcher*/src/model-configs \
         "$cache_root"/paru/clone/llama-launcher*/src/*/model-configs \
         "$BUNDLED_MODEL_CONFIG_DIR" \
         "$MODEL_CONFIG_DIR" \

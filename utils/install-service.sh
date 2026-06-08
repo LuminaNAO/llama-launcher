@@ -378,7 +378,11 @@ tune_search_dirs() {
         fi
     fi
     for dir in \
+        "$cache_root"/yay/llama-launcher*/model-configs \
+        "$cache_root"/yay/llama-launcher*/src/model-configs \
         "$cache_root"/yay/llama-launcher*/src/*/model-configs \
+        "$cache_root"/paru/clone/llama-launcher*/model-configs \
+        "$cache_root"/paru/clone/llama-launcher*/src/model-configs \
         "$cache_root"/paru/clone/llama-launcher*/src/*/model-configs \
         "$MODEL_CONFIG_DIR"; do
         [[ -d "$dir" ]] || continue
