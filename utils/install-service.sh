@@ -366,23 +366,76 @@ _specific_names=()
 _family_configs=()
 _family_names=()
 
-shopt -s nullglob
-for conf in "$MODEL_CONFIG_DIR"/*.yaml "$MODEL_CONFIG_DIR"/*.yml; do
-    [ -f "$conf" ] || continue
-    conf_base="$(basename "$conf")"
-    conf_base="${conf_base%.yaml}"
-    conf_base="${conf_base%.yml}"
-    conf_model="${conf_base%%.*}"
-    if [[ "$selected_folder_name" == "$conf_model" ]]; then
-        label="$(tune_label "$conf")"
-        _specific_configs+=("$conf")
-        _specific_names+=("$label")
-    elif [[ "$selected_folder_name" == "$conf_model"* ]]; then
-        label="$(tune_label "$conf")"
-        _family_configs+=("$conf")
-        _family_names+=("$label")
+tune_search_dirs() {
+    local seen=":"
+    local dir
+    local cache_root="${XDG_CACHE_HOME:-$HOME/.cache}"
+    if [ -n "${LLAMA_LAUNCHER_REPO_DIR:-}" ]; then
+        dir="$LLAMA_LAUNCHER_REPO_DIR/model-configs"
+        if [[ -d "$dir" && ":$seen:" != *":$dir:"* ]]; then
+            seen="${seen}${dir}:"
+            printf '%s\0' "$dir"
+        fi
     fi
-done
+    for dir in \
+        "$cache_root"/yay/llama-launcher*/src/*/model-configs \
+        "$cache_root"/paru/clone/llama-launcher*/src/*/model-configs \
+        "$MODEL_CONFIG_DIR"; do
+        [[ -d "$dir" ]] || continue
+        [[ ":$seen:" == *":$dir:"* ]] && continue
+        seen="${seen}${dir}:"
+        printf '%s\0' "$dir"
+    done
+}
+
+tune_match_kind() {
+    local conf="$1"
+    local stem tune_model
+    stem="$(basename "$conf")"
+    stem="${stem%.yaml}"
+    stem="${stem%.yml}"
+
+    if [[ "$stem" == "$selected_folder_name" || "$stem" == "$selected_folder_name".* ]]; then
+        printf '%s\n' specific
+        return 0
+    fi
+
+    tune_model="$(tune_yq "$conf" '.model // ""' 2>/dev/null || true)"
+    if [[ "$tune_model" == "$selected_folder_name" ]]; then
+        printf '%s\n' specific
+        return 0
+    fi
+
+    if [[ -n "$tune_model" && "$selected_folder_name" == "$tune_model"* ]]; then
+        printf '%s\n' family
+        return 0
+    fi
+
+    if [[ "$stem" != *.* && "$selected_folder_name" == "$stem"* ]]; then
+        printf '%s\n' family
+        return 0
+    fi
+
+    return 1
+}
+
+shopt -s nullglob
+while IFS= read -r -d '' dir; do
+    for conf in "$dir"/*.yaml "$dir"/*.yml; do
+        [ -f "$conf" ] || continue
+        match_kind="$(tune_match_kind "$conf" || true)"
+        [ -n "$match_kind" ] || continue
+        if [ "$match_kind" = "specific" ]; then
+            label="$(tune_label "$conf")"
+            _specific_configs+=("$conf")
+            _specific_names+=("$label")
+        elif [ "$match_kind" = "family" ]; then
+            label="$(tune_label "$conf")"
+            _family_configs+=("$conf")
+            _family_names+=("$label")
+        fi
+    done
+done < <(tune_search_dirs)
 shopt -u nullglob
 for i in "${!_specific_configs[@]}"; do
     tune_configs+=("${_specific_configs[$i]}")
