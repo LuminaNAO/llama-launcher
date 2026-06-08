@@ -182,9 +182,30 @@ DEEP_LOG="$LLAMA_LAUNCHER_DIR/llama-deep.log"
 MODEL_CONFIG_DIR="$LLAMA_LAUNCHER_DIR/model-configs"
 DEFAULT_MODELS_DIR="$HOME/llama-launcher/models"
 DEFAULT_SLOTS_DIR="$HOME/llama-launcher/slots"
-DOWNLOAD_MODEL_SCRIPT="${LLAMA_LAUNCHER_DOWNLOAD_MODEL:-$LLAMA_LAUNCHER_LIB_DIR/download-model.sh}"
-if [[ ! -x "$DOWNLOAD_MODEL_SCRIPT" && -x "$SCRIPT_DIR/download-model.sh" ]]; then
-    DOWNLOAD_MODEL_SCRIPT="$SCRIPT_DIR/download-model.sh"
+DOWNLOAD_MODEL_SCRIPT="${LLAMA_LAUNCHER_DOWNLOAD_MODEL:-}"
+if [[ -z "$DOWNLOAD_MODEL_SCRIPT" || ! -x "$DOWNLOAD_MODEL_SCRIPT" ]]; then
+    DOWNLOAD_MODEL_SCRIPT=""
+    for _download_model_candidate in \
+        "$LLAMA_LAUNCHER_LIB_DIR/download-model.sh" \
+        "$LLAMA_LAUNCHER_DIR/download-model.sh" \
+        "$SCRIPT_DIR/download-model.sh" \
+        "$HOME/.local/bin/llama-download-model" \
+        "$HOME/.local/bin/download-model.sh"; do
+        if [[ -x "$_download_model_candidate" ]]; then
+            DOWNLOAD_MODEL_SCRIPT="$_download_model_candidate"
+            break
+        fi
+    done
+    unset _download_model_candidate
+fi
+if [[ -z "$DOWNLOAD_MODEL_SCRIPT" ]]; then
+    DOWNLOAD_MODEL_SCRIPT="$(command -v llama-download-model 2>/dev/null || true)"
+fi
+if [[ -z "$DOWNLOAD_MODEL_SCRIPT" ]]; then
+    DOWNLOAD_MODEL_SCRIPT="$(command -v download-model.sh 2>/dev/null || true)"
+fi
+if [[ -z "$DOWNLOAD_MODEL_SCRIPT" ]]; then
+    DOWNLOAD_MODEL_SCRIPT="$LLAMA_LAUNCHER_LIB_DIR/download-model.sh"
 fi
 
 AUTHOR_BEST_PICKS_FILE=""
@@ -580,9 +601,7 @@ else
             echo "Models directory: $MODELS_DIR"
             echo ""
             if [[ -n "${AUTHOR_BEST_PICK_REPO:-}" && -n "${AUTHOR_BEST_PICK_GGUF:-}" ]]; then
-                echo "  1) Download author best pick"
-                echo "     ${AUTHOR_BEST_PICK_NAME:-$AUTHOR_BEST_PICK_REPO}"
-                echo "     $AUTHOR_BEST_PICK_GGUF"
+                echo "  1) Download author best pick: ${AUTHOR_BEST_PICK_NAME:-$AUTHOR_BEST_PICK_REPO} ($AUTHOR_BEST_PICK_GGUF)"
             else
                 echo "  1) Download author best pick (unavailable)"
             fi
