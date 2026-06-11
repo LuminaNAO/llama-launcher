@@ -1342,6 +1342,14 @@ case "$HDD_CACHE_MODE" in
         ;;
 esac
 
+if [ -n "${SLOT_SAVE_PATH:-}" ]; then
+    if ! [[ "$PARALLEL" =~ ^[0-9]+$ ]] || [ "$PARALLEL" -ne 1 ]; then
+        echo "❌ HDD cache is currently single-slot only, but PARALLEL=$PARALLEL."
+        echo "   Use --parallel 1 with HDD cache, or --no-hdd-cache to preserve multi-slot scheduling/checkpoints."
+        exit 1
+    fi
+fi
+
 # ── Interactive logging-mode prompt (final interactive choice) ──────────────
 # Only fires when no logging flag was passed on CLI / re-applied from history.
 # Default = preset 3 (proxy + log) since it's the right answer for almost any
@@ -1434,7 +1442,7 @@ if [ "$NO_PROXY" -eq 0 ]; then
         EFFECTIVE_DEEP_LOG="$DEEP_LOG"
         echo "ℹ️  Deep log enabled (--deep-log) — bodies persisted to $DEEP_LOG"
     fi
-    PROXY_ARGS=("$PORT" "$INTERNAL_PORT" "$EFFECTIVE_DEEP_LOG")
+    PROXY_ARGS=("$PORT" "$INTERNAL_PORT" "$EFFECTIVE_DEEP_LOG" --server-parallel "$PARALLEL")
     if [ "$NO_LOG" -eq 0 ]; then
         PROXY_ARGS+=(--llama-log-file "$LLAMA_LOG_FILE")
     fi

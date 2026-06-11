@@ -538,6 +538,14 @@ case "$hdd_sel" in
     3) SLOT_SAVE_PATH="" ;;
 esac
 
+if [ -n "$SLOT_SAVE_PATH" ]; then
+    if ! [[ "$PARALLEL" =~ ^[0-9]+$ ]] || [ "$PARALLEL" -ne 1 ]; then
+        echo "ERROR: HDD cache is currently single-slot only, but PARALLEL=$PARALLEL."
+        echo "       Choose a PARALLEL=1 tune, or disable HDD cache to preserve multi-slot scheduling/checkpoints."
+        exit 1
+    fi
+fi
+
 NO_PROXY=0
 NO_DEEP_LOG=1
 if [ -n "$SLOT_SAVE_PATH" ]; then
@@ -602,6 +610,7 @@ API_KEY=$(quote_sh "$API_KEY")
 EFFECTIVE_SLOT_SAVE_PATH=$(quote_sh "$EFFECTIVE_SLOT_SAVE_PATH")
 MIN_FREE_GB=$MIN_FREE_GB
 MAX_TOTAL_SLOTS_GB=$MAX_TOTAL_SLOTS_GB
+PARALLEL=$PARALLEL
 
 PROXY_PID=""
 cleanup() {
@@ -619,7 +628,7 @@ if [ "\$NO_PROXY" -eq 0 ]; then
     else
         proxy_args+=("/dev/null")
     fi
-    proxy_args+=(--llama-log-file "\$LOG_FILE" --api-key "\$API_KEY")
+    proxy_args+=(--llama-log-file "\$LOG_FILE" --api-key "\$API_KEY" --server-parallel "\$PARALLEL")
     if [ -n "\$EFFECTIVE_SLOT_SAVE_PATH" ]; then
         mkdir -p "\$EFFECTIVE_SLOT_SAVE_PATH"
         proxy_args+=(--slot-cache-dir "\$EFFECTIVE_SLOT_SAVE_PATH" --min-free-gb "\$MIN_FREE_GB" --max-total-slots-gb "\$MAX_TOTAL_SLOTS_GB")

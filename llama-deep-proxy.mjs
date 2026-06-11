@@ -8,6 +8,7 @@
 //   node llama-deep-proxy.mjs <listen-port> <backend-port> [log-file]
 //      [--slot-cache-dir <dir>] [--api-key <key>]
 //      [--min-free-gb N] [--max-total-slots-gb N]
+//      [--server-parallel N]
 //      [--llama-log-file <path>] [--stdout-is-llama-log]
 //
 // Behavior:
@@ -21,9 +22,8 @@
 //     all sibling model slot dirs below --max-total-slots-gb (default 200).
 //     Oldest .bin (with its .bin.ckpt sidecar) is evicted first; the
 //     session about to be saved is excluded from candidates.
-//   - Concurrent /v1/messages are serialized through a Promise mutex on the
-//     slot-mgmt critical section. The actual request forwarding is not
-//     serialized — backend handles that via its own slot scheduling.
+//   - With --slot-cache-dir, /v1/messages are serialized end-to-end because
+//     slot save/restore is single-slot and operates on llama-server slot 0.
 //   - Backpressure honored on both directions (important for slow downstream
 //     clients like SSH-tunneled openclaw).
 //   - Client/upstream socket lifecycle handled defensively: aborts and
@@ -56,6 +56,7 @@ let slotCacheDir = null;
 let apiKey = null;
 let minFreeGB = 100;
 let maxTotalSlotsGB = 200;
+let serverParallel = 1;
 let llamaLogFile = null;
 let stdoutIsLlamaLog = false;
 for (let i = 0; i < args.length; i++) {
@@ -63,6 +64,7 @@ for (let i = 0; i < args.length; i++) {
   if (args[i] === "--api-key") apiKey = args[i + 1];
   if (args[i] === "--min-free-gb") minFreeGB = Number(args[i + 1]);
   if (args[i] === "--max-total-slots-gb") maxTotalSlotsGB = Number(args[i + 1]);
+  if (args[i] === "--server-parallel") serverParallel = Number(args[i + 1]);
   if (args[i] === "--llama-log-file") llamaLogFile = args[i + 1];
   if (args[i] === "--stdout-is-llama-log") stdoutIsLlamaLog = true;
 }
@@ -73,6 +75,11 @@ if (!listenPort || !backendPort) {
 }
 
 if (slotCacheDir) {
+  if (serverParallel !== 1) {
+    console.error(`ERROR: --slot-cache-dir is single-slot only, but server parallel=${serverParallel}.`);
+    console.error("Disable HDD cache or launch with --parallel 1 to avoid wiping checkpoints on slot 0.");
+    process.exit(1);
+  }
   if (!existsSync(slotCacheDir)) mkdirSync(slotCacheDir, { recursive: true });
   if (!slotCacheDir.endsWith("/")) slotCacheDir += "/";
 }
@@ -125,6 +132,33 @@ function metaFilenameForSlotId(slotId) {
 
 function metaPathForSlotId(slotId) {
   return slotPath(metaFilenameForSlotId(slotId));
+}
+
+function deleteSlotFiles(slotId) {
+  const bin = slotPath(`${slotId}.bin`);
+  const ckpt = `${bin}.ckpt`;
+  const meta = metaPathForSlotId(slotId);
+  try { unlinkSync(bin); } catch {}
+  try { unlinkSync(ckpt); } catch {}
+  try { unlinkSync(meta); } catch {}
+}
+
+function pruneSameBaseSlots(baseId, keepSlotId) {
+  if (!slotCacheDir || !baseId || !keepSlotId) return;
+  let files;
+  try { files = readdirSync(slotCacheDir); } catch { return; }
+  const prefix = `${baseId}-`;
+  let pruned = 0;
+  for (const f of files) {
+    if (!f.endsWith(".bin")) continue;
+    const slotId = slotIdFromFilename(f);
+    if (slotId === keepSlotId || !slotId.startsWith(prefix)) continue;
+    deleteSlotFiles(slotId);
+    pruned++;
+  }
+  if (pruned > 0) {
+    slotLog(`pruneSameBaseSlots: removed ${pruned} old branch slot(s) for base ${baseId}, kept ${keepSlotId}.bin\n`, C_DIM);
+  }
 }
 
 function enqueueMessage(fn) {
@@ -528,7 +562,10 @@ async function ensureSlotLoaded(info) {
           `HDD CACHE save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten} checkpoint_sidecar=${currentSession}.bin.ckpt\n`,
           save.ok ? C_CYAN : C_RED,
         );
-        if (save.ok) slotDirtySinceSave = false;
+        if (save.ok) {
+          slotDirtySinceSave = false;
+          pruneSameBaseSlots(currentRequestInfo?.baseId ?? sessionBase(currentSession), currentSession);
+        }
       }
     }
 
@@ -648,7 +685,10 @@ async function saveCurrentSlot(reason, timeoutMs = 0) {
         nWritten: save.nWritten,
       });
     }
-    if (save.ok) slotDirtySinceSave = false;
+    if (save.ok) {
+      slotDirtySinceSave = false;
+      pruneSameBaseSlots(currentRequestInfo?.baseId ?? sessionBase(currentSession), currentSession);
+    }
   } finally {
     release();
   }
