@@ -31,6 +31,8 @@ Scripts resolve their own location via `readlink -f`, so the launcher can be sym
 
 The installer is interactive. It checks `LLAMACPP_MODELS_DIR` and `LLAMACPP_SLOT_SAVE_PATH`, scans common GGUF locations including the Hugging Face cache, suggests defaults, creates missing directories when approved, and saves the result to `.llama-launcher-config`.
 
+On first install it also offers the author best pick from `model-configs/author-best-picks.sh`. The current pick is `Qwen3.6-27B-MTP.64gb-q4-140k-coding-v1.conf` with `Qwen3.6-27B-UD-Q4_K_XL.gguf`, downloaded through `download-model.sh` when approved.
+
 It symlinks `llama-launcher` into `/usr/local/bin` (if root) or `~/.local/bin` (otherwise), then installs a managed shell startup block for bash, zsh, or fish so `PATH` and the launcher environment are available in new shells.
 
 ## Scripts
@@ -79,7 +81,7 @@ Transparent HTTP proxy that tees request/response bodies to a log (default `~/ll
 
 ### `download-model.sh <hf-url-or-repo>`
 
-Interactive GGUF downloader from HuggingFace with quant selection. Reads `HF_TOKEN` or `~/.cache/huggingface/token`.
+Interactive GGUF downloader from HuggingFace with quant selection. Reads `HF_TOKEN` or `~/.cache/huggingface/token`. Use `--filename <gguf-name>` to preselect a specific GGUF while still showing the download summary and confirmation.
 
 ### `utils/install-service.sh [--seed N] [--uninstall] [--system]`
 
