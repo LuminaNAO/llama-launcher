@@ -22,9 +22,38 @@
 #   --no-log         (deprecated, no-op; logging is now off by default)
 #   --save           Save effective launch settings as a per-model config
 #
+# Subcommands:
+#   stop             Gracefully stop a running llama-server (and deep proxy)
+#
 # Per-model configs are stored in model-configs/<model-name>.conf and
 # automatically loaded when that model is selected. CLI flags override
 # saved configs. Use --save to persist tuned settings.
+
+# ── Subcommand: stop ────────────────────────────────────────────────────────
+if [[ "${1:-}" == "stop" ]]; then
+    stopped=0
+    for pat in "bin/llama-server" "llama-deep-proxy.mjs"; do
+        pids="$(pgrep -f "$pat" || true)"
+        if [[ -n "$pids" ]]; then
+            echo "🛑 SIGINT -> $pat (pids: $pids)"
+            # shellcheck disable=SC2086
+            kill -INT $pids
+            stopped=1
+        fi
+    done
+    if [[ "$stopped" -eq 0 ]]; then
+        echo "ℹ️  No running llama-server or deep proxy found."
+        exit 0
+    fi
+    # Wait up to 10s for clean exit, then escalate to SIGTERM
+    for _ in $(seq 1 20); do
+        sleep 0.5
+        pgrep -f "bin/llama-server|llama-deep-proxy.mjs" >/dev/null || { echo "✅ Stopped."; exit 0; }
+    done
+    echo "⚠️  Still running after 10s — sending SIGTERM."
+    pkill -TERM -f "bin/llama-server|llama-deep-proxy.mjs" || true
+    exit 0
+fi
 
 SEED=1320
 CONTEXT_OVERRIDE=""
@@ -62,9 +91,9 @@ LAUNCH_HISTORY="$SCRIPT_DIR/.launch-history"
 if [[ -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && -z "$ARG_TUNE" && -f "$LAUNCH_HISTORY" ]]; then
     # Read up to 5 most recent unique launches (newest first)
     recent=()
-    while IFS=$'\t' read -r ts build model tune; do
+    while IFS=$'\t' read -r ts build model tune extras; do
         entry="${build}${model}${tune}"
-        # Deduplicate
+        # Deduplicate (latest flags win for a given build+model+tune)
         dup=0
         for r in "${recent[@]}"; do
             [[ "$r" == "$entry" ]] && { dup=1; break; }
@@ -74,6 +103,7 @@ if [[ -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && -z "$ARG_TUNE" && -f "$LAU
         recent_build+=("$build")
         recent_model+=("$model")
         recent_tune+=("$tune")
+        recent_extras+=("$extras")
         [[ ${#recent[@]} -ge 5 ]] && break
     done < <(tac "$LAUNCH_HISTORY")
 
@@ -82,7 +112,9 @@ if [[ -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && -z "$ARG_TUNE" && -f "$LAU
         for i in "${!recent[@]}"; do
             tune_display="${recent_tune[$i]}"
             [[ -z "$tune_display" ]] && tune_display="(no tune)"
-            printf "  %d) %-12s  %-40s  %s\n" $((i+1)) "${recent_build[$i]}" "$(basename "${recent_model[$i]}")" "$tune_display"
+            extras_display="${recent_extras[$i]}"
+            [[ -n "$extras_display" ]] && extras_display="  [$extras_display]"
+            printf "  %d) %-12s  %-40s  %s%s\n" $((i+1)) "${recent_build[$i]}" "$(basename "${recent_model[$i]}")" "$tune_display" "$extras_display"
         done
         echo "  0) New launch"
         echo ""
@@ -93,8 +125,12 @@ if [[ -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && -z "$ARG_TUNE" && -f "$LAU
             ARG_BUILD_TYPE="${recent_build[$idx]}"
             ARG_MODEL_PATH="${recent_model[$idx]}"
             [[ -n "${recent_tune[$idx]}" ]] && ARG_TUNE="${recent_tune[$idx]}"
+            # Apply saved flag state (only explicit opt-ins)
+            extras="${recent_extras[$idx]}"
+            [[ " $extras " == *" --log "* ]] && NO_LOG=0
+            [[ " $extras " == *" --proxy "* ]] && NO_PROXY=0
             echo ""
-            echo "🔄 Relaunching: $ARG_BUILD_TYPE / $(basename "$ARG_MODEL_PATH") / ${ARG_TUNE:-(no tune)}"
+            echo "🔄 Relaunching: $ARG_BUILD_TYPE / $(basename "$ARG_MODEL_PATH") / ${ARG_TUNE:-(no tune)}${extras:+  [$extras]}"
             echo ""
         fi
     fi
@@ -788,7 +824,11 @@ fi
 # ── Log this launch to history ─────────────────────────────────────────────
 _tune_log=""
 [[ -n "${MODEL_CONFIG_FILE:-}" ]] && _tune_log="$(grep -m1 '^# Tune:' "$MODEL_CONFIG_FILE" 2>/dev/null | sed 's/^# Tune: *//')"
-printf '%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$BUILD_TYPE" "$model_path" "$_tune_log" >> "$LAUNCH_HISTORY"
+_extras_log=""
+[[ "$NO_LOG" -eq 0 ]] && _extras_log+="--log "
+[[ "$NO_PROXY" -eq 0 ]] && _extras_log+="--proxy "
+_extras_log="${_extras_log% }"
+printf '%s\t%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$BUILD_TYPE" "$model_path" "$_tune_log" "$_extras_log" >> "$LAUNCH_HISTORY"
 
 # ── Launch llama-server ─────────────────────────────────────────────────────
 LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
