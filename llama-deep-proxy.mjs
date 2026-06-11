@@ -472,7 +472,6 @@ function findBestSameBaseParent(info) {
   const prefix = `${base}-`;
   const exact = `${info.sessionId}.bin`;
   let best = null;
-  let latestLegacy = null;
   let files;
   try { files = readdirSync(slotCacheDir); } catch { return null; }
   for (const f of files) {
@@ -510,11 +509,9 @@ function findBestSameBaseParent(info) {
       ) {
         best = candidate;
       }
-    } else if (!latestLegacy || mtime > latestLegacy.mtime) {
-      latestLegacy = { filename: f, slotId, mtime, lcp: 0, similarity: 0, legacy: true };
     }
   }
-  return best ?? latestLegacy;
+  return best;
 }
 
 function findBestCrossBaseParent(info) {
@@ -572,11 +569,7 @@ function selectRestoreTarget(info) {
   }
   const parent = findBestSameBaseParent(info);
   if (parent) return { ...parent, kind: parent.legacy ? "legacy-parent" : "parent" };
-  const crossBaseParent = findBestCrossBaseParent(info);
-  if (crossBaseParent && !crossBaseParent.rejected) {
-    return { ...crossBaseParent, kind: "cross-base-parent" };
-  }
-  return crossBaseParent ? { ...crossBaseParent, kind: "rejected-cross-base-parent" } : null;
+  return null;
 }
 
 function scoreLiveParent(info) {
