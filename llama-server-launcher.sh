@@ -49,17 +49,57 @@ echo ""
 echo "🚀 Starting llama-server with model: $selected_model"
 echo ""
 
+## Run llama-server with the selected model
+#export ROCBLAS_USE_HIPBLASLT=1
+#export GGML_HIP_FORCE_MMQ=1
+#export HSA_XNACK=1
+#export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
+#"$LLAMACPP_SERVER_PATH" \
+#  -m "$model_path" \
+#  -ngl 99 \
+#  -c 122144 \
+#  -fa on \
+#  --temp 0.6 \
+#  --top-p 0.95 \
+#  --top-k 20 \
+#  --threads $(nproc) \
+#  --no-mmap \
+#  --timeout 3600 \
+#  --host 0.0.0.0 \
+#  --port 40801 \
+#  --api-key ollama-local \
+#  --jinja \
+#  --swa-full &>> $HOME/llama.log
+
+## Optimal environment for RDNA 3.5 / Strix Halo
+#export ROCBLAS_USE_HIPBLASLT=1
+#export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=0 # Disable experimental for stability
+#
+#"$LLAMACPP_SERVER_PATH" \
+#  -m "$model_path" \
+#  -ngl 99 \
+#  -c 122144 \
+#  -fa on \
+#  --temp 0.6 \
+#  --top-p 0.95 \
+#  --top-k 20 \
+#  --threads 16 \
+#  --no-mmap \
+#  --host 0.0.0.0 \
+#  --port 40801 \
+#  --api-key ollama-local \
+#  --jinja \
+#  --no-warmup &>> $HOME/llama.log
+
 # Run llama-server with the selected model
 export ROCBLAS_USE_HIPBLASLT=1
-export GGML_HIP_FORCE_MMQ=1
 export HSA_XNACK=1
-export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
 "$LLAMACPP_SERVER_PATH" \
   -m "$model_path" \
   -ngl 99 \
   -c 122144 \
   -fa on \
-  --temp 0.6 \
+  --temp 0.8 \
   --top-p 0.95 \
   --top-k 20 \
   --threads $(nproc) \
@@ -69,4 +109,4 @@ export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
   --port 40801 \
   --api-key ollama-local \
   --jinja \
-  --swa-full &> $HOME/llama.log
+  --swa-full &>> $HOME/llama.log
