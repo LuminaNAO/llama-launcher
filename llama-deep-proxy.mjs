@@ -339,7 +339,12 @@ function callSlotAction(action, filename, timeoutMs = 0) {
       "Content-Length": Buffer.byteLength(body),
     };
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-    const req = httpRequest({ hostname: "127.0.0.1", port: backendPort, path, method: "POST", headers }, (res) => {
+    // agent: false — a fresh connection per slot action. Node's default
+    // agent keep-alives sockets, and llama-server closes idle connections;
+    // a stale reused socket makes the first action after a quiet period
+    // fail with status=0. Retries mask that on switches, but the shutdown
+    // save gets a single attempt and must not gamble on a dead socket.
+    const req = httpRequest({ hostname: "127.0.0.1", port: backendPort, path, method: "POST", headers, agent: false }, (res) => {
       let respBody = "";
       res.on("data", (c) => respBody += c);
       res.on("end", () => resolve({ status: res.statusCode, body: respBody }));
@@ -1231,6 +1236,7 @@ async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessio
       path: clientReq.url,
       method: clientReq.method,
       headers: fwdHeaders,
+      agent: false, // no keep-alive reuse — see callSlotAction
     }, (proxyRes) => {
       pipeResponse(tag, proxyRes, clientRes, async (result) => {
         // Only a complete 200 response means the loaded slot now contains
@@ -1350,6 +1356,7 @@ async function handleRequest(clientReq, clientRes) {
     path: clientReq.url,
     method: clientReq.method,
     headers: fwdHeaders,
+    agent: false, // no keep-alive reuse — see callSlotAction
   }, (proxyRes) => {
     pipeResponse(tag, proxyRes, clientRes, finalize);
   });
