@@ -1,47 +1,5 @@
 # TODO
 
-## Per-model namespacing for SLOT_SAVE_PATH
-
-Slot save files are model-specific KV cache bytes. A file saved while running
-Gemma cannot be restored when MiniMax (or any other model) is loaded —
-llama-server returns `400 invalid slot save file`. Currently all tunes that
-opt in to slot save share one flat directory `/mnt/storage/llama-slots/`,
-so every model switch leaves stale files that the next session can't use,
-and produces noisy 400s on every restore attempt.
-
-### Fix
-
-Auto-suffix `SLOT_SAVE_PATH` with the model folder name in
-`llama-server-launcher.sh`. Conceptually:
-
-```bash
-EFFECTIVE_SLOT_SAVE_PATH="$SLOT_SAVE_PATH/$(basename "$MODEL_FOLDER")"
-mkdir -p "$EFFECTIVE_SLOT_SAVE_PATH"
-# pass to both --slot-save-path (server) and --slot-cache-dir (proxy)
-```
-
-Tunes still set `SLOT_SAVE_PATH=/mnt/storage/llama-slots` as the *root*;
-the launcher namespaces it. Different models get isolated cache pools,
-swapping models doesn't pollute caches, and no one ever sees a 400 from a
-stale-from-other-model file.
-
-### Steps
-
-1. [ ] Add `EFFECTIVE_SLOT_SAVE_PATH` derivation in launcher (~line 845).
-2. [ ] Update `slot-tools.sh` to walk per-model subdirs in `list`.
-3. [ ] Migration: move existing flat files into a default `unknown/` dir
-   on first launch after the change, so nothing surprises the user.
-4. [ ] Document the namespace scheme in the SLOT_SAVE_PATH comment in
-   the MiniMax tune file.
-
-### Context
-
-Discovered 2026-04-26 mid-test when switching from Gemma test tune back to
-MiniMax: every restore attempt returned 400 because the slot files on disk
-were Gemma's KV bytes. The 400 is the *safe* failure — server refuses to
-reinterpret incompatible bytes — but it makes the slot dir useless for
-multi-model workflows.
-
 ## Enable --mlock to prevent swap thrashing
 
 llama-server should use `--mlock` to pin memory pages and prevent the kernel
