@@ -12,8 +12,9 @@ LABEL="${1:?Usage: benchmark.sh <label>}"
 API_KEY="${API_KEY:-ollama-local}"
 BASE_URL="${BASE_URL:-http://localhost:40801}"
 MAX_CTX="${MAX_CTX:-128000}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RESULTS_DIR="$SCRIPT_DIR/benchmark-results"
+UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$UTIL_DIR")"
+RESULTS_DIR="$UTIL_DIR/benchmark-results"
 RESULTS_FILE="$RESULTS_DIR/bench-${LABEL}-$(date +%Y%m%d-%H%M%S).jsonl"
 TMPDIR_BENCH=$(mktemp -d)
 trap "rm -rf $TMPDIR_BENCH" EXIT

@@ -12,8 +12,9 @@ code/
 └── llama-launcher/
     ├── builds/<backend>/{bin,lib}/   # built artifacts
     ├── model-configs/                # per-model tunes (*.conf)
-    ├── benchmark-results/            # JSONL/TXT results
-    ├── build.sh
+    ├── utils/                        # maintenance, benchmarking, service tools
+    │   ├── benchmark-results/        # JSONL/TXT results
+    │   └── stress-tests/             # specialized load/stress scripts
     ├── llama-server-launcher.sh
     └── ...
 ```
@@ -30,7 +31,7 @@ Symlinks `llama-launcher` into `/usr/local/bin` (if root) or `~/.local/bin` (oth
 
 ## Scripts
 
-### `build.sh <rocm|vulkan|cuda> [gpu-arch]`
+### `utils/build.sh <rocm|vulkan|cuda> [gpu-arch]`
 
 Builds llama.cpp into `builds/<backend>/`. GPU arch (gfx target or CUDA compute cap) is auto-detected via `rocminfo` / `nvidia-smi` and can be overridden.
 
@@ -74,15 +75,15 @@ Transparent HTTP proxy that tees request/response bodies to a log (default `~/ll
 
 Interactive GGUF downloader from HuggingFace with quant selection. Reads `HF_TOKEN` or `~/.cache/huggingface/token`.
 
-### `install-service.sh [--seed N] [--uninstall]`
+### `utils/install-service.sh [--seed N] [--uninstall]`
 
 Installs `llama-server` as a systemd unit. Reads `LLAMACPP_BUILD_TYPE` (default `rocm`) to select the backend binary.
 
-### `ssh-tunnel.sh [remote] [--port N] [--api-key K] [--status|--stop]`
+### `utils/ssh-tunnel.sh [remote] [--port N] [--api-key K] [--status|--stop]`
 
 Manage an SSH tunnel to a remote `llama-server`. History in `.tunnel-history`.
 
-### `mlock-fixer.sh`
+### `utils/mlock-fixer.sh`
 
 Raises `memlock` in `/etc/security/limits.conf` so `llama-server --mlock` doesn't swap. Requires re-login.
 
@@ -94,15 +95,14 @@ Raises `memlock` in `/etc/security/limits.conf` so `llama-server --mlock` doesn'
 
 | Script | Purpose |
 |--------|---------|
-| `benchmark.sh <label>` | Inference benchmarks across context sizes against `localhost:40801`. Writes `benchmark-results/bench-<label>-<ts>.jsonl`. |
-| `bench-batch-sizes.sh` | Sweep `-b` values, restart server between runs, log GTT. |
-| `benchmark-backends.sh [model]` | Compare vulkan / rocm / rocm-gfx1100 via `llama-bench`. |
-| `load-test.sh` | Fire concurrent diverse requests, monitor slot usage. |
-| `soak-test-v3b.sh` | 1-hour soak test under concurrent high-context load. |
-| `vram-stress-test.sh` | Peak VRAM/GTT measurement across all slots. |
-| `tune-gemma4-v3.sh` | Sweep v3a/v3b/v3c tunes, report best under VRAM limit. |
+| `utils/benchmark.sh <label>` | Inference benchmarks across context sizes against `localhost:40801`. Writes `utils/benchmark-results/bench-<label>-<ts>.jsonl`. |
+| `utils/bench-batch-sizes.sh` | Sweep `-b` values, restart server between runs, log GTT. |
+| `utils/benchmark-backends.sh [model]` | Compare vulkan / rocm / rocm-gfx1100 via `llama-bench`. |
+| `utils/load-test.sh` | Fire concurrent diverse requests, monitor slot usage. |
+| `utils/soak-test-v3b.sh` | 1-hour soak test under concurrent high-context load. |
+| `utils/vram-stress-test.sh` | Peak VRAM/GTT measurement across all slots. |
 
-See `BENCHMARK-RESULTS.md` for recorded results.
+See `utils/BENCHMARK-RESULTS.md` for recorded results.
 
 ## Requirements
 

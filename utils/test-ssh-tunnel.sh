@@ -5,9 +5,10 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TUNNEL_SCRIPT="$SCRIPT_DIR/ssh-tunnel.sh"
-HISTORY_FILE="$SCRIPT_DIR/.tunnel-history"
+UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$UTIL_DIR")"
+TUNNEL_SCRIPT="$UTIL_DIR/ssh-tunnel.sh"
+HISTORY_FILE="$ROOT_DIR/.tunnel-history"
 HISTORY_BACKUP=""
 
 # Real remote for live tests — set via env or default

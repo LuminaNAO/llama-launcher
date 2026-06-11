@@ -22,8 +22,9 @@ API_KEY="ollama-local"
 REMOTE=""
 ACTION=""
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TUNNEL_HISTORY="$SCRIPT_DIR/.tunnel-history"
+UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$UTIL_DIR")"
+TUNNEL_HISTORY="$ROOT_DIR/.tunnel-history"
 TUNNEL_PIDFILE="/tmp/llama-tunnel-${PORT}.pid"
 TUNNEL_REMOTEFILE="/tmp/llama-tunnel-${PORT}.remote"
 

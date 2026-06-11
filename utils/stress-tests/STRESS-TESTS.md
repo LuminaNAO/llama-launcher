@@ -10,10 +10,10 @@ payloads, then firing them back-to-back to minimize GPU idle time.
 
 ```bash
 # Default levels (baseline through 120K)
-./stress-tests/tool-call-stress.sh 40802 ollama-local
+./utils/stress-tests/tool-call-stress.sh 40802 ollama-local
 
 # Custom levels
-./stress-tests/tool-call-stress.sh 40802 ollama-local 0 50000 100000 120000
+./utils/stress-tests/tool-call-stress.sh 40802 ollama-local 0 50000 100000 120000
 ```
 
 **What it tests:**
@@ -35,16 +35,16 @@ Monitors GPU utilization during tests to identify idle periods.
 
 ```bash
 # Start background monitor
-./stress-tests/gpu-monitor.sh start /tmp/gpu-util.log 2
+./utils/stress-tests/gpu-monitor.sh start /tmp/gpu-util.log 2
 
 # Run your tests...
 
 # Stop and analyze
-./stress-tests/gpu-monitor.sh stop
-./stress-tests/gpu-monitor.sh report /tmp/gpu-util.log
+./utils/stress-tests/gpu-monitor.sh stop
+./utils/stress-tests/gpu-monitor.sh report /tmp/gpu-util.log
 
 # Or foreground mode
-./stress-tests/gpu-monitor.sh 1 /tmp/gpu.log
+./utils/stress-tests/gpu-monitor.sh 1 /tmp/gpu.log
 ```
 
 Supports both ROCm (rocm-smi) and NVIDIA (nvidia-smi) GPUs.

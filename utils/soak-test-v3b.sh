@@ -5,14 +5,15 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$UTIL_DIR")"
 API_KEY="ollama-local"
 BASE_URL="http://localhost:40801"
 DURATION_SECS=3600  # 1 hour
 GTT_SYSFS="/sys/class/drm/card1/device/mem_info_gtt_used"
 VRAM_SYSFS="/sys/class/drm/card1/device/mem_info_vram_used"
 
-RESULT_DIR="$SCRIPT_DIR/benchmark-results"
+RESULT_DIR="$UTIL_DIR/benchmark-results"
 mkdir -p "$RESULT_DIR"
 RESULT_FILE="$RESULT_DIR/soak-v3b-$(date +%Y%m%d-%H%M%S).log"
 GTT_TRACE="$RESULT_DIR/soak-v3b-gtt-trace-$(date +%Y%m%d-%H%M%S).csv"

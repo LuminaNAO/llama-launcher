@@ -4,10 +4,11 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$UTIL_DIR")"
 MODEL="/mnt/storage/models/Qwen3.5-35B-A3B-H-v2-Q8_0.gguf"
 BUILD="vulkan"
-RESULTS_DIR="$SCRIPT_DIR/benchmark-results"
+RESULTS_DIR="$UTIL_DIR/benchmark-results"
 SUMMARY_FILE="$RESULTS_DIR/batch-size-summary-$(date +%Y%m%d-%H%M%S).txt"
 
 GTT_SYSFS=$(ls /sys/class/drm/card*/device/mem_info_gtt_used 2>/dev/null | head -1)
@@ -45,7 +46,7 @@ for BATCH_SIZE in 512 1024 2048 4096 8192; do
 
     # Build the launch command — inject -b via EXTRA_ARGS
     export EXTRA_ARGS="-b $BATCH_SIZE"
-    nohup bash "$SCRIPT_DIR/llama-server-launcher.sh" \
+    nohup bash "$ROOT_DIR/llama-server-launcher.sh" \
         --build "$BUILD" \
         --model "$MODEL" \
         > /dev/null 2>&1 &
@@ -74,7 +75,7 @@ for BATCH_SIZE in 512 1024 2048 4096 8192; do
     # Run benchmark
     LABEL="vulkan-b${BATCH_SIZE}"
     echo "  Running benchmark..." | tee -a "$SUMMARY_FILE"
-    bash "$SCRIPT_DIR/benchmark.sh" "$LABEL" 2>&1 | tee -a "$SUMMARY_FILE"
+    bash "$UTIL_DIR/benchmark.sh" "$LABEL" 2>&1 | tee -a "$SUMMARY_FILE"
 
     POST_GTT=$(get_gtt_mb)
     echo "  Post-benchmark GTT: ${POST_GTT} MB (delta: +$((POST_GTT - IDLE_GTT)) MB from idle)" | tee -a "$SUMMARY_FILE"

@@ -161,4 +161,4 @@ Leave at default (2048).
 
 ## Raw Data
 
-Benchmark results are in `benchmark-results/` as JSONL files.
+Benchmark results are in `utils/benchmark-results/` as JSONL files.

@@ -22,8 +22,9 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RESULTS_DIR="$SCRIPT_DIR/benchmark-results"
+UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$UTIL_DIR")"
+RESULTS_DIR="$UTIL_DIR/benchmark-results"
 mkdir -p "$RESULTS_DIR"
 
 # Defaults
@@ -266,7 +267,7 @@ if [ "$SKIP_LAUNCH" -eq 0 ]; then
     kill_server
 
     > "$HOME/llama.log"
-    nohup bash "$SCRIPT_DIR/llama-server-launcher.sh" \
+    nohup bash "$ROOT_DIR/llama-server-launcher.sh" \
         --build "$BUILD_TYPE" \
         --model "$MODEL_PATH" \
         --tune "$TUNE_NAME" \
