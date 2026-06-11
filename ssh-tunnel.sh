@@ -27,7 +27,7 @@ TUNNEL_HISTORY="$SCRIPT_DIR/.tunnel-history"
 TUNNEL_PIDFILE="/tmp/llama-tunnel-${PORT}.pid"
 TUNNEL_REMOTEFILE="/tmp/llama-tunnel-${PORT}.remote"
 
-SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ServerAliveCountMax=3"
+SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ControlMaster=auto -o ControlPath=/tmp/ssh-tunnel-%r@%h:%p -o ControlPersist=600"
 
 # ── Parse args ──────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -101,11 +101,13 @@ check_local_health() {
 }
 
 check_remote_ssh() {
-    ssh $SSH_OPTS -o ConnectTimeout=5 -o BatchMode=yes "$1" 'echo ok' 2>/dev/null | grep -q ok
+    # No BatchMode — allow passphrase prompts. ControlMaster ensures one
+    # unlock covers subsequent calls.
+    ssh $SSH_OPTS -o ConnectTimeout=10 "$1" 'echo ok' 2>/dev/null | grep -q ok
 }
 
 check_remote_llama() {
-    ssh $SSH_OPTS -o ConnectTimeout=5 "$1" \
+    ssh $SSH_OPTS -o ConnectTimeout=10 "$1" \
         "curl -sf --max-time 3 -H 'Authorization: Bearer ${API_KEY}' http://127.0.0.1:${PORT}/health" 2>/dev/null | grep -q '"status"'
 }
 
@@ -284,8 +286,10 @@ fi
 # ── Pre-flight checks ──────────────────────────────────────────────────────
 echo ""
 echo "Checking SSH connectivity to ${REMOTE}..."
+echo "  (enter your SSH key passphrase if prompted — it will be cached for subsequent calls)"
 if ! check_remote_ssh "$REMOTE"; then
     echo "Error: cannot reach ${REMOTE} via SSH." >&2
+    echo "Hint: if this host needs a key passphrase, run 'ssh-add' first, or try 'ssh ${REMOTE}' manually to confirm connectivity." >&2
     exit 1
 fi
 echo "  SSH: ok"
