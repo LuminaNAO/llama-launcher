@@ -1,0 +1,6 @@
+{"type": "header", "label": "local-q4w-q4kv-mtp", "model": "Qwen3.6-27B-UD-Q4_K_XL.gguf", "timestamp": "2026-05-15T10:42:18+08:00"}
+{"test": "short-gen50", "target_ctx": 0, "actual_prompt_tokens": 25, "gen_tokens": 50, "prompt_tok_s": 75.02, "gen_tok_s": 21.63, "prompt_ms": 333, "gen_ms": 2312}
+{"test": "short-gen200", "target_ctx": 0, "actual_prompt_tokens": 25, "gen_tokens": 200, "prompt_tok_s": 78.57, "gen_tok_s": 19.9, "prompt_ms": 318, "gen_ms": 10053}
+{"test": "short-gen500", "target_ctx": 0, "actual_prompt_tokens": 25, "gen_tokens": 500, "prompt_tok_s": 78.25, "gen_tok_s": 20.51, "prompt_ms": 319, "gen_ms": 24383}
+{"test": "med4k-gen200", "target_ctx": 4000, "actual_prompt_tokens": 3261, "gen_tokens": 200, "prompt_tok_s": 289.96, "gen_tok_s": 19.54, "prompt_ms": 11246, "gen_ms": 10237}
+{"test": "med4k-gen500", "target_ctx": 4000, "actual_prompt_tokens": 4, "gen_tokens": 500, "prompt_tok_s": 28.46, "gen_tok_s": 18.83, "prompt_ms": 141, "gen_ms": 26559}

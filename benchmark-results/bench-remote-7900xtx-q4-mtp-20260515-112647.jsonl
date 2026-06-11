@@ -1,0 +1,4 @@
+{"type": "header", "label": "remote-7900xtx-q4-mtp", "model": "Qwen3.6-27B-UD-Q4_K_XL.gguf", "timestamp": "2026-05-15T11:26:48+08:00"}
+{"test": "short-gen50", "target_ctx": 0, "actual_prompt_tokens": 25, "gen_tokens": 50, "prompt_tok_s": 159.51, "gen_tok_s": 57.71, "prompt_ms": 157, "gen_ms": 866}
+{"test": "short-gen200", "target_ctx": 0, "actual_prompt_tokens": 25, "gen_tokens": 200, "prompt_tok_s": 169.04, "gen_tok_s": 51.97, "prompt_ms": 148, "gen_ms": 3848}
+{"test": "short-gen500", "target_ctx": 0, "actual_prompt_tokens": 25, "gen_tokens": 500, "prompt_tok_s": 168.77, "gen_tok_s": 52.33, "prompt_ms": 148, "gen_ms": 9555}
