@@ -628,6 +628,13 @@ API_KEY="${API_KEY:-ollama-local}"
 KV_UNIFIED="${KV_UNIFIED:-1}"
 FLASH_ATTN="${FLASH_ATTN:-1}"
 
+# If CACHE_RAM=0 and SLOT_SAVE_PATH is set, prefer disk-backed slots and
+# disable in-memory checkpoints unless explicitly overridden with non-zero.
+if [ "${CACHE_RAM:-}" = "0" ] && [ -n "${SLOT_SAVE_PATH:-}" ]; then
+    CHECKPOINT_INTERVAL=0
+    CHECKPOINT_MAX=0
+fi
+
 # ── Reasoning / thinking (auto by default) ──────────────────────────────────
 REASONING="${REASONING:-auto}"
 REASONING_BUDGET="${REASONING_BUDGET:--1}"
