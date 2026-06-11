@@ -170,4 +170,4 @@ esac
   --port 40801 \
   --api-key ollama-local \
   --jinja \
-  --swa-full 2>&1 | tee -a $HOME/llama.log
+  --swa-full 2>&1 | tee -a "$SCRIPT_DIR/llama.log"
