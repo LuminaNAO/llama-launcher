@@ -13,8 +13,12 @@ when 22.5 GB was in swap).
    `~/code/framework-server-setup/scripts/elevate-memlock.sh --all`.
    PENDING on `framed`.
 2. [x] Re-login. buildhost verified: `ulimit -l` prints `unlimited`.
-3. [ ] Add `--mlock` to the llama-server launch args in `llama-server-launcher.sh`.
-4. [ ] Verify with `grep VmLck /proc/$(pgrep -f llama-server)/status`.
+3. [x] Add `--mlock` to the llama-server launch args in `llama-server-launcher.sh`.
+   Already present: the launcher auto-enables `--mlock` when `ulimit -l`
+   is unlimited (see `MLOCK_FLAG` logic ~line 634).
+4. [ ] Verify at next launch: look for "🔒 mlock: enabled" in startup output,
+   then `grep VmLck /proc/$(pgrep -f llama-server)/status` should show
+   ~model size pinned.
 
 ### Context
 
