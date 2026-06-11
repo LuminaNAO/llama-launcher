@@ -18,6 +18,9 @@
 #   --parallel <N>   Override number of parallel slots
 #   --port <N>       Public port (default: from tune or 40801)
 #   --internal-port <N>  llama-server port behind the proxy (default: 40802)
+#   --hdd-cache      Enable disk-backed slot cache for this launch; forces
+#                    CACHE_RAM=0 and uses tune/default SLOT_SAVE_PATH
+#   --no-hdd-cache   Disable disk-backed slot cache for this launch
 #   --proxy          Enable the proxy (default: off). Required for slot
 #                    save/restore. Slot mgmt lines log to console.
 #   --log            Tee server stdout/stderr to ~/llama.log (default: off)
@@ -84,6 +87,8 @@ NO_DEEP_LOG=1
 ARG_PORT=""
 ARG_INTERNAL_PORT=""
 PORT_FLAGS_TOUCHED=0
+HDD_CACHE_MODE="default"
+HDD_CACHE_TOUCHED=0
 LOG_FLAGS_TOUCHED=0  # tracks whether any of --proxy/--log/--deep-log was passed on CLI;
                      # used to decide whether to show the interactive logging-mode prompt
 while [[ $# -gt 0 ]]; do
@@ -97,6 +102,8 @@ while [[ $# -gt 0 ]]; do
         --tune) ARG_TUNE="$2"; shift 2 ;;
         --port) ARG_PORT="$2"; PORT_FLAGS_TOUCHED=1; shift 2 ;;
         --internal-port) ARG_INTERNAL_PORT="$2"; PORT_FLAGS_TOUCHED=1; shift 2 ;;
+        --hdd-cache) HDD_CACHE_MODE="on"; HDD_CACHE_TOUCHED=1; shift ;;
+        --no-hdd-cache) HDD_CACHE_MODE="off"; HDD_CACHE_TOUCHED=1; shift ;;
         --proxy) NO_PROXY=0; LOG_FLAGS_TOUCHED=1; shift ;;
         --log) NO_LOG=0; LOG_FLAGS_TOUCHED=1; shift ;;
         --deep-log) NO_DEEP_LOG=0; LOG_FLAGS_TOUCHED=1; shift ;;
@@ -154,6 +161,8 @@ if [[ -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && -z "$ARG_TUNE" && -f "$LAU
             [[ " $extras " == *" --log "* ]] && NO_LOG=0
             [[ " $extras " == *" --proxy "* ]] && NO_PROXY=0
             [[ " $extras " == *" --deep-log "* ]] && NO_DEEP_LOG=0
+            [[ " $extras " == *" --hdd-cache "* ]] && { HDD_CACHE_MODE="on"; HDD_CACHE_TOUCHED=1; }
+            [[ " $extras " == *" --no-hdd-cache "* ]] && { HDD_CACHE_MODE="off"; HDD_CACHE_TOUCHED=1; }
             echo ""
             echo "🔄 Relaunching: $ARG_BUILD_TYPE / $(basename "$ARG_MODEL_PATH") / ${ARG_TUNE:-(no tune)}${extras:+  [$extras]}"
             echo ""
@@ -627,13 +636,7 @@ PORT="${PORT:-40801}"
 API_KEY="${API_KEY:-ollama-local}"
 KV_UNIFIED="${KV_UNIFIED:-1}"
 FLASH_ATTN="${FLASH_ATTN:-1}"
-
-# If CACHE_RAM=0 and SLOT_SAVE_PATH is set, prefer disk-backed slots and
-# disable in-memory checkpoints unless explicitly overridden with non-zero.
-if [ "${CACHE_RAM:-}" = "0" ] && [ -n "${SLOT_SAVE_PATH:-}" ]; then
-    CHECKPOINT_INTERVAL=0
-    CHECKPOINT_MAX=0
-fi
+LOG_COLORS="${LOG_COLORS:-1}"
 
 # ── Reasoning / thinking (auto by default) ──────────────────────────────────
 REASONING="${REASONING:-auto}"
@@ -744,6 +747,7 @@ DIO=__DIO__
 # JINJA=1
 
 # ── Extra ───────────────────────────────────────────────────────────────────
+# LOG_COLORS=1
 # Append arbitrary flags to the server command:
 # EXTRA_ARGS="--flag value"
 CONFTEMPLATE
@@ -796,7 +800,94 @@ INTERNAL_PORT="${INTERNAL_PORT:-40802}"
 DEEP_LOG="$HOME/llama-deep.log"
 PROXY_SCRIPT="$SCRIPT_DIR/llama-deep-proxy.mjs"
 
-# ── Interactive logging-mode prompt ─────────────────────────────────────────
+# ── Port selection (CLI flags > interactive prompt > tune/default) ──────────
+if [ -n "$ARG_PORT" ]; then
+    PORT="$ARG_PORT"
+fi
+if [ -n "$ARG_INTERNAL_PORT" ]; then
+    INTERNAL_PORT="$ARG_INTERNAL_PORT"
+fi
+if [ "$PORT_FLAGS_TOUCHED" -eq 0 ]; then
+    echo ""
+    echo "🔌 Ports (or pass --port / --internal-port on CLI to skip):"
+    read -rp "   Public port [default=$PORT]: " _port_in
+    if [ -n "$_port_in" ]; then
+        if [[ "$_port_in" =~ ^[0-9]+$ ]] && [ "$_port_in" -ge 1 ] && [ "$_port_in" -le 65535 ]; then
+            PORT="$_port_in"
+        else
+            echo "   ⚠️  invalid port '$_port_in' — keeping $PORT"
+        fi
+    fi
+    _default_internal="${INTERNAL_PORT:-40802}"
+    read -rp "   Internal port if proxy is on [default=$_default_internal]: " _iport_in
+    if [ -n "$_iport_in" ]; then
+        if [[ "$_iport_in" =~ ^[0-9]+$ ]] && [ "$_iport_in" -ge 1 ] && [ "$_iport_in" -le 65535 ]; then
+            INTERNAL_PORT="$_iport_in"
+        else
+            echo "   ⚠️  invalid port '$_iport_in' — keeping $_default_internal"
+            INTERNAL_PORT="$_default_internal"
+        fi
+    fi
+fi
+
+# ── HDD cache policy (penultimate interactive choice) ───────────────────────
+_tune_cache_ram="${CACHE_RAM:-}"
+_tune_slot_save_path="${SLOT_SAVE_PATH:-}"
+_default_slot_save_path="${LLAMACPP_SLOT_SAVE_PATH:-}"
+if [ -z "$_default_slot_save_path" ]; then
+    if [ -n "${MODELS_DIR:-}" ]; then
+        _default_slot_save_path="$(dirname "$MODELS_DIR")/llama-slots"
+    else
+        _default_slot_save_path="/usr/local/share/llama.cpp/llama-slots"
+    fi
+fi
+
+if [ "$LOG_FLAGS_TOUCHED" -eq 0 ] && [ "$HDD_CACHE_TOUCHED" -eq 0 ]; then
+    _tune_hdd_display="off"
+    [ -n "$_tune_slot_save_path" ] && _tune_hdd_display="on ($_tune_slot_save_path)"
+    echo ""
+    echo "💾 HDD cache:"
+    echo "   1) Tune default     CACHE_RAM=${_tune_cache_ram:-unset}, HDD=$_tune_hdd_display"
+    echo "   2) Enable HDD       use ${_tune_slot_save_path:-$_default_slot_save_path}, force CACHE_RAM=0"
+    echo "   3) Disable HDD      no slot save/restore; keep CACHE_RAM=${_tune_cache_ram:-unset}"
+    read -rp "Choice [1-3, default=1]: " _hdd_mode
+    _hdd_mode="${_hdd_mode:-1}"
+    case "$_hdd_mode" in
+        1) HDD_CACHE_MODE="default" ;;
+        2) HDD_CACHE_MODE="on"; HDD_CACHE_TOUCHED=1 ;;
+        3) HDD_CACHE_MODE="off"; HDD_CACHE_TOUCHED=1 ;;
+        *) echo "   ⚠️  invalid choice '$_hdd_mode' — using tune default"
+           HDD_CACHE_MODE="default" ;;
+    esac
+fi
+if [ "$LOG_FLAGS_TOUCHED" -eq 1 ] && [ "$HDD_CACHE_TOUCHED" -eq 0 ]; then
+    HDD_CACHE_MODE="off"
+fi
+
+case "$HDD_CACHE_MODE" in
+    on)
+        SLOT_SAVE_PATH="${SLOT_SAVE_PATH:-$_default_slot_save_path}"
+        CACHE_RAM=0
+        echo "💾 HDD cache: enabled (SLOT_SAVE_PATH=$SLOT_SAVE_PATH, CACHE_RAM=0)"
+        ;;
+    off)
+        SLOT_SAVE_PATH=""
+        echo "💾 HDD cache: disabled (CACHE_RAM=${CACHE_RAM:-unset})"
+        ;;
+    default|"")
+        if [ -n "${SLOT_SAVE_PATH:-}" ]; then
+            echo "💾 HDD cache: tune default on (SLOT_SAVE_PATH=$SLOT_SAVE_PATH, CACHE_RAM=${CACHE_RAM:-unset})"
+        else
+            echo "💾 HDD cache: tune default off (CACHE_RAM=${CACHE_RAM:-unset})"
+        fi
+        ;;
+    *)
+        echo "❌ Invalid HDD cache mode: $HDD_CACHE_MODE"
+        exit 1
+        ;;
+esac
+
+# ── Interactive logging-mode prompt (final interactive choice) ──────────────
 # Only fires when no logging flag was passed on CLI / re-applied from history.
 # Default = preset 3 (proxy + log) since it's the right answer for almost any
 # real use; presets 1/2/4 cover quiet/log-only/full-diagnostic.
@@ -819,44 +910,11 @@ if [ "$LOG_FLAGS_TOUCHED" -eq 0 ]; then
     esac
 fi
 
-# Slot-save persistence is implemented via the proxy. If a tune sets
-# SLOT_SAVE_PATH, force-enable the proxy regardless of CLI flags or interactive
-# choice — otherwise the feature would silently no-op.
+# Slot-save persistence is implemented via the proxy. If HDD cache is active,
+# force-enable the proxy regardless of CLI flags or interactive choice.
 if [ -n "${SLOT_SAVE_PATH:-}" ] && [ "$NO_PROXY" -eq 1 ]; then
-    echo "ℹ️  Tune sets SLOT_SAVE_PATH=$SLOT_SAVE_PATH — auto-enabling proxy (slot save/restore needs it)"
+    echo "ℹ️  HDD cache uses SLOT_SAVE_PATH=$SLOT_SAVE_PATH — auto-enabling proxy (slot save/restore needs it)"
     NO_PROXY=0
-fi
-
-# ── Port selection (CLI flags > interactive prompt > tune/default) ──────────
-if [ -n "$ARG_PORT" ]; then
-    PORT="$ARG_PORT"
-fi
-if [ -n "$ARG_INTERNAL_PORT" ]; then
-    INTERNAL_PORT="$ARG_INTERNAL_PORT"
-fi
-if [ "$PORT_FLAGS_TOUCHED" -eq 0 ]; then
-    echo ""
-    echo "🔌 Ports (or pass --port / --internal-port on CLI to skip):"
-    read -rp "   Public port [default=$PORT]: " _port_in
-    if [ -n "$_port_in" ]; then
-        if [[ "$_port_in" =~ ^[0-9]+$ ]] && [ "$_port_in" -ge 1 ] && [ "$_port_in" -le 65535 ]; then
-            PORT="$_port_in"
-        else
-            echo "   ⚠️  invalid port '$_port_in' — keeping $PORT"
-        fi
-    fi
-    if [ "$NO_PROXY" -eq 0 ]; then
-        _default_internal="${INTERNAL_PORT:-40802}"
-        read -rp "   Internal (llama-server) port [default=$_default_internal]: " _iport_in
-        if [ -n "$_iport_in" ]; then
-            if [[ "$_iport_in" =~ ^[0-9]+$ ]] && [ "$_iport_in" -ge 1 ] && [ "$_iport_in" -le 65535 ]; then
-                INTERNAL_PORT="$_iport_in"
-            else
-                echo "   ⚠️  invalid port '$_iport_in' — keeping $_default_internal"
-                INTERNAL_PORT="$_default_internal"
-            fi
-        fi
-    fi
 fi
 
 if [ "$NO_PROXY" -eq 0 ] && [ "$PORT" = "${INTERNAL_PORT:-40802}" ]; then
@@ -890,6 +948,8 @@ KV_UNIFIED_FLAG="--no-kv-unified"
 [ "$KV_UNIFIED" = "1" ] && KV_UNIFIED_FLAG="--kv-unified"
 FA_FLAG=""
 [ "$FLASH_ATTN" = "1" ] && FA_FLAG="-fa on"
+LOG_COLORS_FLAG="--log-colors on"
+[ "$LOG_COLORS" = "0" ] && LOG_COLORS_FLAG="--log-colors off"
 
 # ── Reasoning flags (only add if non-default) ──────────────────────────────
 REASONING_FLAGS=""
@@ -965,6 +1025,8 @@ _extras_log=""
 [[ "$NO_LOG" -eq 0 ]] && _extras_log+="--log "
 [[ "$NO_PROXY" -eq 0 ]] && _extras_log+="--proxy "
 [[ "$NO_DEEP_LOG" -eq 0 ]] && _extras_log+="--deep-log "
+[[ "$HDD_CACHE_MODE" == "on" ]] && _extras_log+="--hdd-cache "
+[[ "$HDD_CACHE_MODE" == "off" ]] && _extras_log+="--no-hdd-cache "
 _extras_log="${_extras_log% }"
 printf '%s\t%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$BUILD_TYPE" "$model_path" "$_tune_log" "$_extras_log" >> "$LAUNCH_HISTORY"
 
@@ -998,7 +1060,7 @@ LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
   ${REASONING_FLAGS:+$REASONING_FLAGS}
   ${REPEAT_FLAGS:+$REPEAT_FLAGS}
   ${EFFECTIVE_SLOT_SAVE_PATH:+--slot-save-path "$EFFECTIVE_SLOT_SAVE_PATH"}
-  --log-colors on
+  $LOG_COLORS_FLAG
   ${EXTRA_ARGS:+$EXTRA_ARGS}
 )
 

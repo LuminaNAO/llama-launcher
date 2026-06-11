@@ -48,6 +48,8 @@ Interactive launcher with per-model configs and launch history.
 | `--seed <N>`     | Override seed |
 | `--context <N>`  | Override context size |
 | `--parallel <N>` | Override parallel slots |
+| `--hdd-cache`    | Enable disk-backed slot cache and force `CACHE_RAM=0` |
+| `--no-hdd-cache` | Disable disk-backed slot cache for this launch; flag-driven launches default off when neither HDD flag is passed |
 | `--proxy`        | Enable deep-logging proxy (off by default) |
 | `--log`          | Tee server output to `~/llama.log` (off by default) |
 | `--save`         | Persist effective settings into the model's `.conf` |
