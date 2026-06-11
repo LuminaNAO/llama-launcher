@@ -990,7 +990,7 @@ if [ "$NO_PROXY" -eq 0 ]; then
         EFFECTIVE_DEEP_LOG="$DEEP_LOG"
         echo "ℹ️  Deep log enabled (--deep-log) — bodies persisted to $DEEP_LOG"
     fi
-    PROXY_ARGS=("$PORT" "$INTERNAL_PORT" "$EFFECTIVE_DEEP_LOG")
+    PROXY_ARGS=("$PORT" "$INTERNAL_PORT" "$EFFECTIVE_DEEP_LOG" --llama-log-file "$HOME/llama.log")
     if [ -n "${SLOT_SAVE_PATH:-}" ]; then
         # Per-quant namespacing: each .gguf file gets its own slot pool.
         # Slot files are KV cache bytes computed against specific model weights;
@@ -1018,7 +1018,7 @@ if [ "$NO_PROXY" -eq 0 ]; then
     # mgmt lines (slotLog console output) and any proxy errors are persisted
     # alongside server output. Otherwise inherit terminal stdout.
     if [ "$NO_LOG" -eq 0 ]; then
-        node "$PROXY_SCRIPT" "${PROXY_ARGS[@]}" >> "$HOME/llama.log" 2>&1 &
+        node "$PROXY_SCRIPT" "${PROXY_ARGS[@]}" --stdout-is-llama-log >> "$HOME/llama.log" 2>&1 &
     else
         node "$PROXY_SCRIPT" "${PROXY_ARGS[@]}" &
     fi

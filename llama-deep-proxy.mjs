@@ -8,6 +8,7 @@
 //   node llama-deep-proxy.mjs <listen-port> <backend-port> [log-file]
 //      [--slot-cache-dir <dir>] [--api-key <key>]
 //      [--min-free-gb N] [--max-total-slots-gb N]
+//      [--llama-log-file <path>] [--stdout-is-llama-log]
 //
 // Behavior:
 //   - All traffic forwarded to backend; bodies tee'd to log-file.
@@ -55,15 +56,19 @@ let slotCacheDir = null;
 let apiKey = null;
 let minFreeGB = 100;
 let maxTotalSlotsGB = 200;
+let llamaLogFile = null;
+let stdoutIsLlamaLog = false;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--slot-cache-dir") slotCacheDir = args[i + 1];
   if (args[i] === "--api-key") apiKey = args[i + 1];
   if (args[i] === "--min-free-gb") minFreeGB = Number(args[i + 1]);
   if (args[i] === "--max-total-slots-gb") maxTotalSlotsGB = Number(args[i + 1]);
+  if (args[i] === "--llama-log-file") llamaLogFile = args[i + 1];
+  if (args[i] === "--stdout-is-llama-log") stdoutIsLlamaLog = true;
 }
 
 if (!listenPort || !backendPort) {
-  console.error("Usage: llama-deep-proxy.mjs <listen-port> <backend-port> [log-file] [--slot-cache-dir <dir>] [--api-key <key>] [--min-free-gb N] [--max-total-slots-gb N]");
+  console.error("Usage: llama-deep-proxy.mjs <listen-port> <backend-port> [log-file] [--slot-cache-dir <dir>] [--api-key <key>] [--min-free-gb N] [--max-total-slots-gb N] [--llama-log-file <path>] [--stdout-is-llama-log]");
   process.exit(1);
 }
 
@@ -73,6 +78,9 @@ if (slotCacheDir) {
 }
 
 const log = createWriteStream(logFile, { flags: "a" });
+const llamaLog = llamaLogFile && !stdoutIsLlamaLog
+  ? createWriteStream(llamaLogFile, { flags: "a" })
+  : null;
 const SEP = "\n========================================\n";
 
 // ── Slot management state (parallel=1: single slot, but proxy serializes) ─
@@ -95,15 +103,29 @@ let slotHasContent = false;
 const C_GREEN   = "\x1b[1;32m";  // bright green — restore HIT (served from HDD)
 const C_YELLOW  = "\x1b[33m";    // yellow      — checkpoint/miss/prune warnings
 const C_CYAN    = "\x1b[36m";    // cyan        — save persisted
+const C_BCYAN   = "\x1b[1;36m";  // bright cyan — incoming request summary
 const C_MAGENTA = "\x1b[1;35m";  // bright purple — HDD cache operation banners
 const C_RED     = "\x1b[31m";    // red         — errors / non-200 save
 const C_DIM     = "\x1b[2m";     // dim         — low-priority detail
 const C_RESET  = "\x1b[0m";
 
+function colorLine(line, color = null) {
+  return color ? `${color}${line.replace(/\n$/, "")}${C_RESET}\n` : line;
+}
+
 function slotLog(line, color = null) {
   log.write(line);
-  const colored = color ? `${color}${line.replace(/\n$/, "")}${C_RESET}\n` : line;
+  const colored = colorLine(line, color);
   process.stdout.write(colored.startsWith("\n") ? colored : "\n" + colored);
+}
+
+function requestLog(line) {
+  log.write(line);
+  const colored = colorLine(line, C_BCYAN);
+  process.stdout.write(colored.startsWith("\n") ? colored : "\n" + colored);
+  if (llamaLog) {
+    llamaLog.write(colored.startsWith("\n") ? colored : "\n" + colored);
+  }
 }
 
 // ── Slot cache disk-quota enforcement ──────────────────────────────────────
@@ -484,9 +506,8 @@ const server = createServer(async (clientReq, clientRes) => {
       log.write(bodyBuf);
 
       const sessionId = sessionIdFromBody(bodyBuf.toString("utf8"));
-      slotLog(
+      requestLog(
         `REQUEST ${tag} body_bytes=${bodyBuf.length} (${formatBytes(bodyBuf.length)}) content_length=${clientReq.headers["content-length"] ?? "chunked"} session=${sessionId ?? "none"}\n`,
-        C_CYAN,
       );
       try {
         if (sessionId) await ensureSlotLoaded(sessionId);
@@ -599,6 +620,7 @@ async function gracefulShutdown(sig) {
     console.error(`shutdown save error: ${e.message}`);
   }
   log.end();
+  if (llamaLog) llamaLog.end();
   process.exit(0);
 }
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
