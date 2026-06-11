@@ -31,9 +31,24 @@
 //     client doesn't crash the proxy.
 
 import { createServer, request as httpRequest } from "node:http";
-import { createWriteStream, mkdirSync, existsSync, statSync, statfsSync, unlinkSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createWriteStream, mkdirSync, existsSync, statSync, statfsSync, unlinkSync, readdirSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
 import { dirname, basename, join } from "node:path";
 import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
+
+// The file doubles as a module: utilities (tests, diagnostics) import the
+// request-identity helpers below without starting the server. Everything
+// configured by CLI flags lives in module state that main() fills in.
+
+// ── Config (set by main() when run as a CLI) ──────────────────────────────
+let backendPort = 0;
+let slotCacheDir = null;
+let apiKey = null;
+let minFreeGB = 100;
+let maxTotalSlotsGB = 200;
+let log = null;        // deep log write stream
+let llamaLog = null;   // optional mirror for slot/server lines
+const SEP = "\n========================================\n";
 
 // Defensive: re-create slot cache dir if it was wiped at runtime.
 // Required because llama-server's slot-save endpoint silently returns HTTP
@@ -45,50 +60,6 @@ function ensureSlotCacheDir() {
     try { mkdirSync(slotCacheDir, { recursive: true }); } catch {}
   }
 }
-
-// ── Args ──────────────────────────────────────────────────────────────────
-const args = process.argv.slice(2);
-const listenPort = parseInt(args[0], 10);
-const backendPort = parseInt(args[1], 10);
-const logFile = args[2] && !args[2].startsWith("--") ? args[2] : "llama-deep.log";
-
-let slotCacheDir = null;
-let apiKey = null;
-let minFreeGB = 100;
-let maxTotalSlotsGB = 200;
-let serverParallel = 1;
-let llamaLogFile = null;
-let stdoutIsLlamaLog = false;
-for (let i = 0; i < args.length; i++) {
-  if (args[i] === "--slot-cache-dir") slotCacheDir = args[i + 1];
-  if (args[i] === "--api-key") apiKey = args[i + 1];
-  if (args[i] === "--min-free-gb") minFreeGB = Number(args[i + 1]);
-  if (args[i] === "--max-total-slots-gb") maxTotalSlotsGB = Number(args[i + 1]);
-  if (args[i] === "--server-parallel") serverParallel = Number(args[i + 1]);
-  if (args[i] === "--llama-log-file") llamaLogFile = args[i + 1];
-  if (args[i] === "--stdout-is-llama-log") stdoutIsLlamaLog = true;
-}
-
-if (!listenPort || !backendPort) {
-  console.error("Usage: llama-deep-proxy.mjs <listen-port> <backend-port> [log-file] [--slot-cache-dir <dir>] [--api-key <key>] [--min-free-gb N] [--max-total-slots-gb N] [--llama-log-file <path>] [--stdout-is-llama-log]");
-  process.exit(1);
-}
-
-if (slotCacheDir) {
-  if (serverParallel !== 1) {
-    console.error(`ERROR: --slot-cache-dir is single-slot only, but server parallel=${serverParallel}.`);
-    console.error("Disable HDD cache or launch with --parallel 1 to avoid wiping checkpoints on slot 0.");
-    process.exit(1);
-  }
-  if (!existsSync(slotCacheDir)) mkdirSync(slotCacheDir, { recursive: true });
-  if (!slotCacheDir.endsWith("/")) slotCacheDir += "/";
-}
-
-const log = createWriteStream(logFile, { flags: "a" });
-const llamaLog = llamaLogFile && !stdoutIsLlamaLog
-  ? createWriteStream(llamaLogFile, { flags: "a" })
-  : null;
-const SEP = "\n========================================\n";
 
 // ── Slot management state (parallel=1: single slot, but proxy serializes) ─
 let currentSession = null;        // prompt branch cache id, or null
@@ -387,7 +358,7 @@ async function callSlotSaveWithRetry(filename, reason, timeoutMs = 0) {
   return last;
 }
 
-function commonPrefixBytes(a, b) {
+export function commonPrefixBytes(a, b) {
   const len = Math.min(a.length, b.length);
   let i = 0;
   while (i < len && a.charCodeAt(i) === b.charCodeAt(i)) i++;
@@ -432,7 +403,7 @@ function writeSlotMeta(info, extra = {}) {
   }
 }
 
-function cacheInfoFromBody(jsonStr) {
+export function cacheInfoFromBody(jsonStr) {
   try {
     const obj = JSON.parse(jsonStr);
     let anchor = "";
@@ -959,7 +930,7 @@ async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessio
 }
 
 // ── Server ────────────────────────────────────────────────────────────────
-const server = createServer(async (clientReq, clientRes) => {
+async function handleRequest(clientReq, clientRes) {
   const tag = `${clientReq.method} ${clientReq.url}`;
   log.write(`${SEP}>>> ${tag}\n`);
 
@@ -1037,38 +1008,93 @@ const server = createServer(async (clientReq, clientRes) => {
   });
 
   pipeRequestStreaming(tag, clientReq, proxyReq);
-});
-
-server.listen(listenPort, "0.0.0.0", () => {
-  console.log(`llama-deep-proxy: 0.0.0.0:${listenPort} -> 127.0.0.1:${backendPort}`);
-  console.log(`llama-deep-proxy: logging to ${logFile}`);
-  if (slotCacheDir) console.log(`llama-deep-proxy: slot cache dir = ${slotCacheDir}`);
-  if (apiKey) console.log(`llama-deep-proxy: api-key set (used for slot management calls)`);
-});
-
-// ── Graceful shutdown: save current slot before exiting ───────────────────
-let shuttingDown = false;
-async function gracefulShutdown(sig) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log(`\nllama-deep-proxy: received ${sig}, shutting down`);
-  setTimeout(() => {
-    console.error("llama-deep-proxy: shutdown deadline exceeded, force-exiting");
-    process.exit(1);
-  }, 15000).unref();
-  server.close();
-  const drainDeadline = Date.now() + 5000;
-  while (inFlightRequests > 0 && Date.now() < drainDeadline) {
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  try {
-    await saveCurrentSlot("shutdown", 8000);
-  } catch (e) {
-    console.error(`shutdown save error: ${e.message}`);
-  }
-  log.end();
-  if (llamaLog) llamaLog.end();
-  process.exit(0);
 }
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+// ── CLI entrypoint ────────────────────────────────────────────────────────
+// Importers (tests, diagnostics) get the exported helpers only; the server
+// starts solely when the file itself is executed.
+function runsAsMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+}
+
+function main() {
+  const args = process.argv.slice(2);
+  const listenPort = parseInt(args[0], 10);
+  backendPort = parseInt(args[1], 10);
+  const logFile = args[2] && !args[2].startsWith("--") ? args[2] : "llama-deep.log";
+
+  let serverParallel = 1;
+  let llamaLogFile = null;
+  let stdoutIsLlamaLog = false;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--slot-cache-dir") slotCacheDir = args[i + 1];
+    if (args[i] === "--api-key") apiKey = args[i + 1];
+    if (args[i] === "--min-free-gb") minFreeGB = Number(args[i + 1]);
+    if (args[i] === "--max-total-slots-gb") maxTotalSlotsGB = Number(args[i + 1]);
+    if (args[i] === "--server-parallel") serverParallel = Number(args[i + 1]);
+    if (args[i] === "--llama-log-file") llamaLogFile = args[i + 1];
+    if (args[i] === "--stdout-is-llama-log") stdoutIsLlamaLog = true;
+  }
+
+  if (!listenPort || !backendPort) {
+    console.error("Usage: llama-deep-proxy.mjs <listen-port> <backend-port> [log-file] [--slot-cache-dir <dir>] [--api-key <key>] [--min-free-gb N] [--max-total-slots-gb N] [--llama-log-file <path>] [--stdout-is-llama-log]");
+    process.exit(1);
+  }
+
+  if (slotCacheDir) {
+    if (serverParallel !== 1) {
+      console.error(`ERROR: --slot-cache-dir is single-slot only, but server parallel=${serverParallel}.`);
+      console.error("Disable HDD cache or launch with --parallel 1 to avoid wiping checkpoints on slot 0.");
+      process.exit(1);
+    }
+    if (!existsSync(slotCacheDir)) mkdirSync(slotCacheDir, { recursive: true });
+    if (!slotCacheDir.endsWith("/")) slotCacheDir += "/";
+  }
+
+  log = createWriteStream(logFile, { flags: "a" });
+  llamaLog = llamaLogFile && !stdoutIsLlamaLog
+    ? createWriteStream(llamaLogFile, { flags: "a" })
+    : null;
+
+  const server = createServer(handleRequest);
+  server.listen(listenPort, "0.0.0.0", () => {
+    console.log(`llama-deep-proxy: 0.0.0.0:${listenPort} -> 127.0.0.1:${backendPort}`);
+    console.log(`llama-deep-proxy: logging to ${logFile}`);
+    if (slotCacheDir) console.log(`llama-deep-proxy: slot cache dir = ${slotCacheDir}`);
+    if (apiKey) console.log(`llama-deep-proxy: api-key set (used for slot management calls)`);
+  });
+
+  // ── Graceful shutdown: save current slot before exiting ─────────────────
+  let shuttingDown = false;
+  async function gracefulShutdown(sig) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`\nllama-deep-proxy: received ${sig}, shutting down`);
+    setTimeout(() => {
+      console.error("llama-deep-proxy: shutdown deadline exceeded, force-exiting");
+      process.exit(1);
+    }, 15000).unref();
+    server.close();
+    const drainDeadline = Date.now() + 5000;
+    while (inFlightRequests > 0 && Date.now() < drainDeadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    try {
+      await saveCurrentSlot("shutdown", 8000);
+    } catch (e) {
+      console.error(`shutdown save error: ${e.message}`);
+    }
+    log.end();
+    if (llamaLog) llamaLog.end();
+    process.exit(0);
+  }
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+}
+
+if (runsAsMain()) main();
