@@ -599,7 +599,7 @@ if [ "$HAS_MODEL_CONFIG" -eq 1 ]; then
     CACHE_RAM="${CACHE_RAM:-8192}"
     CACHE_TYPE_K="${CACHE_TYPE_K:-q8_0}"
     CACHE_TYPE_V="${CACHE_TYPE_V:-q8_0}"
-    CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-4096}"
+    CHECKPOINT_MIN_STEP="${CHECKPOINT_MIN_STEP:-2048}"
     CHECKPOINT_MAX="${CHECKPOINT_MAX:-32}"
     NGL="${NGL:-99}"
     TEMP="${TEMP:-0.3}"
@@ -628,7 +628,8 @@ elif [ "$TOTAL_RAM_GB" -ge 112 ]; then
     CACHE_RAM=102400   # 100 GiB ceiling; real usage capped by RAM + swap
     CACHE_TYPE_K="q8_0"
     CACHE_TYPE_V="q8_0"
-    CHECKPOINT_INTERVAL=4096
+    # 488576 / 64 ≈ 7634 → round to 8192 (ample slot for huge ctx, LRU absorbs early-ctx eviction)
+    CHECKPOINT_MIN_STEP=8192
     CHECKPOINT_MAX=64
     echo "📋 Profile: 128 GB (488k context, q8_0 KV, 100 GiB cache ceiling, 2 slots)"
 elif [ "$TOTAL_RAM_GB" -ge 48 ]; then
@@ -637,7 +638,8 @@ elif [ "$TOTAL_RAM_GB" -ge 48 ]; then
     CACHE_RAM=40960    # 40 GiB ceiling — swap still absorbs overflow
     CACHE_TYPE_K="q8_0"
     CACHE_TYPE_V="q8_0"
-    CHECKPOINT_INTERVAL=4096
+    # 131072 / 32 = 4096
+    CHECKPOINT_MIN_STEP=4096
     CHECKPOINT_MAX=32
     echo "📋 Profile: 64 GB (131k context, q8_0 KV, 40 GiB cache ceiling, 1 slot)"
 else
@@ -646,7 +648,8 @@ else
     CACHE_RAM=16384    # 16 GiB ceiling
     CACHE_TYPE_K="q8_0"
     CACHE_TYPE_V="q8_0"
-    CHECKPOINT_INTERVAL=8192
+    # 61072 / 16 ≈ 3817 → round to 4096
+    CHECKPOINT_MIN_STEP=4096
     CHECKPOINT_MAX=16
     echo "📋 Profile: minimal (61k context, q8_0 KV, 16 GiB cache ceiling, 1 slot)"
     echo "⚠️  Low RAM — using minimal settings"
@@ -739,7 +742,7 @@ CACHE_TYPE_V=__CACHE_TYPE_V__
 KV_UNIFIED=__KV_UNIFIED__
 
 # ── Checkpoints ─────────────────────────────────────────────────────────────
-CHECKPOINT_INTERVAL=__CHECKPOINT_INTERVAL__
+CHECKPOINT_MIN_STEP=__CHECKPOINT_MIN_STEP__
 CHECKPOINT_MAX=__CHECKPOINT_MAX__
 
 # ── GPU Offload ─────────────────────────────────────────────────────────────
@@ -793,7 +796,7 @@ fill_config_template() {
         | sed "s|__CACHE_TYPE_K__|$CACHE_TYPE_K|g" \
         | sed "s|__CACHE_TYPE_V__|$CACHE_TYPE_V|g" \
         | sed "s|__KV_UNIFIED__|$KV_UNIFIED|g" \
-        | sed "s|__CHECKPOINT_INTERVAL__|$CHECKPOINT_INTERVAL|g" \
+        | sed "s|__CHECKPOINT_MIN_STEP__|$CHECKPOINT_MIN_STEP|g" \
         | sed "s|__CHECKPOINT_MAX__|$CHECKPOINT_MAX|g" \
         | sed "s|__NGL__|$NGL|g" \
         | sed "s|__FLASH_ATTN__|$FLASH_ATTN|g" \
@@ -1090,7 +1093,7 @@ LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
   --cache-ram "$CACHE_RAM"
   -ctk "$CACHE_TYPE_K"
   -ctv "$CACHE_TYPE_V"
-  --checkpoint-every-n-tokens "$CHECKPOINT_INTERVAL"
+  --checkpoint-min-step "$CHECKPOINT_MIN_STEP"
   --ctx-checkpoints "$CHECKPOINT_MAX"
   --seed "$SEED"
   ${MLOCK_FLAG:+$MLOCK_FLAG}
