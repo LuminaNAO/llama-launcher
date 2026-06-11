@@ -47,7 +47,7 @@ echo ""
 HSA_XNACK=1 /path/to/llama.cpp/build/bin/llama-server \
   -m "$model_path" \
   -ngl 99 \
-  -c 262144 \
+  -c 122144 \
   -fa on \
   --temp 1 \
   --log-verbosity 3 \
@@ -56,9 +56,9 @@ HSA_XNACK=1 /path/to/llama.cpp/build/bin/llama-server \
   --top-p 0.95 \
   --top-k 20 \
   --jinja \
-  --port 8080 \
+  --port 40801 \
   --host 0.0.0.0 \
   --n-gpu-layers 99 \
-  --api-key sk-local \
+  --api-key ollama-local \
   --swa-full \
   --no-context-shift >> llama.log
