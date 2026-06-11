@@ -26,6 +26,17 @@ import { createServer, request as httpRequest } from "node:http";
 import { createWriteStream, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 
+// Defensive: re-create slot cache dir if it was wiped at runtime.
+// Required because llama-server's slot-save endpoint silently returns HTTP
+// 200 even when the underlying file write fails (file-not-found from a
+// missing parent dir → 200 + log line). Without this, a wipe of the slot
+// dir while the server is running corrupts the next session indefinitely.
+function ensureSlotCacheDir() {
+  if (slotCacheDir && !existsSync(slotCacheDir)) {
+    try { mkdirSync(slotCacheDir, { recursive: true }); } catch {}
+  }
+}
+
 // ── Args ──────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
 const listenPort = parseInt(args[0], 10);
@@ -142,6 +153,7 @@ async function ensureSlotLoaded(newSessionId) {
   try {
     if (newSessionId === currentSession) return;
     if (currentSession) {
+      ensureSlotCacheDir();
       slotLog(`\n--- SLOT save: ${currentSession}.bin\n`, C_DIM);
       const r = await callSlotAction("save", `${currentSession}.bin`);
       slotLog(`--- SLOT save status=${r.status}\n`, colorForStatus("save", r.status));
@@ -164,6 +176,7 @@ async function saveCurrentSlot(reason, timeoutMs = 0) {
   slotMutex = new Promise((r) => { release = r; });
   await prev;
   try {
+    ensureSlotCacheDir();
     slotLog(`\n--- SLOT save (${reason}): ${currentSession}.bin\n`, C_DIM);
     const r = await callSlotAction("save", `${currentSession}.bin`, timeoutMs);
     slotLog(`--- SLOT save status=${r.status}\n`, colorForStatus("save", r.status));

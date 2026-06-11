@@ -1,5 +1,47 @@
 # TODO
 
+## Verify slot save actually wrote the file (don't trust 200 alone)
+
+llama-server's `/slots/0?action=save` endpoint returns HTTP 200 even when
+the underlying `llama_state_seq_save_file` call fails (e.g., parent dir
+missing, disk full, permission denied). The file-open error is logged to
+the server's stderr but never propagated to the HTTP response body. The
+proxy currently logs `SLOT save status=200` and treats this as success,
+silently leaving the slot file unwritten. Next restore for that hash
+returns a misleading 400 "no save file or invalid".
+
+Discovered 2026-04-26 when an inline `find ... -type d -empty -delete`
+during a "clean all" operation removed the per-quant subdir while the
+server was running. Saves silently failed for the rest of the session,
+producing recurring 400s on restore. The proxy's `ensureSlotCacheDir()`
+mkdir-before-save now defends against that specific case, but the broader
+"trust 200 even when file write failed" gap remains for other failure
+modes (full disk, ENOSPC, EACCES, etc.).
+
+### Fix
+
+In `llama-deep-proxy.mjs::ensureSlotLoaded` and `saveCurrentSlot`, parse
+the JSON response body and require `n_saved > 0` before logging success.
+On detected failure, log clearly (red) and don't update `currentSession`
+state on a phantom save.
+
+```js
+const r = await callSlotAction("save", `${currentSession}.bin`);
+let saved = 0;
+try { saved = JSON.parse(r.body)?.n_saved ?? 0; } catch {}
+const ok = r.status === 200 && saved > 0;
+slotLog(`--- SLOT save status=${r.status} n_saved=${saved}\n`,
+        ok ? colorForStatus("save", 200) : C_RED);
+```
+
+### Upstream
+
+llama.cpp side could be reported separately — the slot save endpoint
+returning 200 on failed write is a contract violation that affects any
+client trusting the status code. Worth a one-line PR if motivated:
+propagate the file-open error to `result_->error()` instead of bubbling
+out via `LLAMA_LOG_ERROR`.
+
 ## Enable --mlock to prevent swap thrashing
 
 llama-server should use `--mlock` to pin memory pages and prevent the kernel
