@@ -1,0 +1,42 @@
+=== Batch Size Benchmark ===
+Date: 2026-04-04T09:57:53+08:00
+Model: Qwen3.5-35B-A3B-H-v2-Q8_0.gguf
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Testing -b 512
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Pre-launch GTT: 55 MB
+  Waiting for server...
+  Idle GTT: 43930 MB
+  Server config: llama_context: n_batch       = 512
+  Running benchmark...
+=== Benchmark: vulkan-b512 ===
+Results: /path/to/code/llama-launcher/benchmark-results/bench-vulkan-b512-20260404-095804.jsonl
+
+Model: Qwen3.5-35B-A3B-H-v2-Q8_0.gguf
+
+── Short context (prompt < 100 tokens) ──
+  short-gen50...            pp=175.2 tok/s (25 tok) | tg=52.9 tok/s (50 tok)
+  short-gen200...           pp=198.9 tok/s (25 tok) | tg=52.1 tok/s (200 tok)
+  short-gen500...           pp=201.5 tok/s (25 tok) | tg=52.1 tok/s (500 tok)
+
+── Medium context (~4k prompt) ──
+  med4k-gen200...           pp=975.3 tok/s (3261 tok) | tg=51.5 tok/s (200 tok)
+  med4k-gen500...           pp=93.8 tok/s (4 tok) | tg=51.4 tok/s (500 tok)
+
+── Large context (~16k prompt) ──
+  large16k-gen200...        pp=866.3 tok/s (10198 tok) | tg=49.7 tok/s (200 tok)
+  large16k-gen500...        pp=86.8 tok/s (4 tok) | tg=49.5 tok/s (500 tok)
+
+── XL context (~64k prompt) ──
+  xl64k-gen200...           pp=560.7 tok/s (39250 tok) | tg=44.3 tok/s (200 tok)
+  xl64k-gen500...           pp=69.7 tok/s (4 tok) | tg=44.2 tok/s (500 tok)
+
+── XXL context (~128k prompt) ──
+  xxl128k-gen500...         pp=336.7 tok/s (52164 tok) | tg=38.8 tok/s (500 tok)
+
+── XXXL context (~192k prompt) ──
+  xxxl192k-gen500...        pp=231.9 tok/s (52164 tok) | tg=34.5 tok/s (500 tok)
+
+── Max context (~256k prompt) ──
+  max256k-gen500...         FAILED (curl)
