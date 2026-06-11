@@ -21,6 +21,13 @@
 #   --hdd-cache      Enable disk-backed slot cache for this launch; forces
 #                    CACHE_RAM=0 and uses tune/default SLOT_SAVE_PATH
 #   --no-hdd-cache   Disable disk-backed slot cache for this launch
+#   --min-free-gb N  Minimum free disk space the proxy preserves on the
+#                    slot-cache partition (default 100). Triggers LRU
+#                    eviction of oldest slot files (across all sibling
+#                    model dirs) before each save.
+#   --max-total-slots-gb N
+#                    Cap on total bytes across all model slot dirs at the
+#                    slot-cache root (default 200). Same LRU eviction.
 #   --proxy          Enable the proxy (default: off). Required for slot
 #                    save/restore. Slot mgmt lines log to console.
 #   --log            Tee server stdout/stderr to ~/llama.log (default: off)
@@ -103,6 +110,8 @@ while [[ $# -gt 0 ]]; do
         --port) ARG_PORT="$2"; PORT_FLAGS_TOUCHED=1; shift 2 ;;
         --internal-port) ARG_INTERNAL_PORT="$2"; PORT_FLAGS_TOUCHED=1; shift 2 ;;
         --hdd-cache) HDD_CACHE_MODE="on"; HDD_CACHE_TOUCHED=1; shift ;;
+        --min-free-gb) MIN_FREE_GB="$2"; shift 2 ;;
+        --max-total-slots-gb) MAX_TOTAL_SLOTS_GB="$2"; shift 2 ;;
         --no-hdd-cache) HDD_CACHE_MODE="off"; HDD_CACHE_TOUCHED=1; shift ;;
         --proxy) NO_PROXY=0; LOG_FLAGS_TOUCHED=1; shift ;;
         --log) NO_LOG=0; LOG_FLAGS_TOUCHED=1; shift ;;
@@ -998,7 +1007,12 @@ if [ "$NO_PROXY" -eq 0 ]; then
             echo "ℹ️  Found $_stale_count flat .bin file(s) at $SLOT_SAVE_PATH/ root (pre-namespacing)."
             echo "   Not used by current launch. Clean with: rm $SLOT_SAVE_PATH/*.bin"
         fi
-        PROXY_ARGS+=(--slot-cache-dir "$EFFECTIVE_SLOT_SAVE_PATH" --api-key "$API_KEY")
+        # Disk-quota enforcement defaults: 100 GB free / 200 GB total budget,
+        # overridable via CLI (--min-free-gb / --max-total-slots-gb) or conf
+        # (MIN_FREE_GB / MAX_TOTAL_SLOTS_GB).
+        PROXY_ARGS+=(--slot-cache-dir "$EFFECTIVE_SLOT_SAVE_PATH" --api-key "$API_KEY" \
+                     --min-free-gb "${MIN_FREE_GB:-100}" \
+                     --max-total-slots-gb "${MAX_TOTAL_SLOTS_GB:-200}")
     fi
     # Capture proxy stdout/stderr into ~/llama.log when --log is set, so slot
     # mgmt lines (slotLog console output) and any proxy errors are persisted
