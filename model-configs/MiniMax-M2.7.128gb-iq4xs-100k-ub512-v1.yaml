@@ -30,11 +30,11 @@ metadata:
     plus min_p=0.01 per Unsloth guide.
     CACHE_RAM=0 disables the in-RAM prompt cache (host-memory heap, was the
     source of swap thrashing when contexts grew large + multi-session).
-    Cross-session warm cache is now provided by SLOT_SAVE_PATH (disk-backed,
-    automatic via deep-proxy session-hash detection).
+    Cross-session warm cache is provided by the configured HDD cache slot
+    directory when launched with --hdd-cache.
     Proxy hashes (system + messages[0].content) per request, calls
     /slots/0?action={save,restore} on session switch and on graceful shutdown.
-    Each saved file ≈ 7 GB at 100k ctx q4_0 KV. ~250 GB headroom on /mnt/storage.
+    Each saved file ≈ 7 GB at 100k ctx q4_0 KV.
     Launcher auto-namespaces per-quant: actual slot dir becomes
     $SLOT_SAVE_PATH/$(basename $model_path .gguf)/
     so each .gguf has an isolated cache pool (KV bytes are quant-specific).
@@ -56,7 +56,6 @@ settings:
   PORT: "40801"
   REASONING: "on"
   REASONING_BUDGET: "-1"
-  SLOT_SAVE_PATH: "/mnt/storage/llama-slots"
   TEMP: "1.0"
   THREADS: "32"
   TIMEOUT: "3600"

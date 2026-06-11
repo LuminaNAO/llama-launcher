@@ -42,7 +42,7 @@ metadata:
     coding prompts while avoiding the 262k KV allocation.
     Per-checkpoint size scales with position (~150 MB at pos 0, ~305 MB at
     pos 140k, slope ~1.1 MB per 1k pos; empirical measurement).
-    Disk sidecar sizing (per saved prompt, on /mnt/storage/llama-slots):
+    Disk sidecar sizing (per saved prompt, in the configured HDD cache slot directory):
     .bin (active state @ 95k):               ~175 MB
     .bin.ckpt (~20 checkpoints @ ~250 MB):  ~5 GB
     So each saved prompt is roughly 5 GB on disk for typical 95k sessions.
@@ -75,7 +75,6 @@ settings:
   NO_MMAP: "0"
   PARALLEL: "1"
   PORT: "40801"
-  SLOT_SAVE_PATH: "/mnt/storage/llama-slots"
   TEMP: "0.6"
   TIMEOUT: "3600"
   TOP_K: "20"
