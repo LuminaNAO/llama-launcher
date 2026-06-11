@@ -16,6 +16,8 @@
 #   --seed <N>       Override the random seed (default: 42)
 #   --context <N>    Override context size
 #   --parallel <N>   Override number of parallel slots
+#   --port <N>       Public port (default: from tune or 40801)
+#   --internal-port <N>  llama-server port behind the proxy (default: 40802)
 #   --proxy          Enable the proxy (default: off). Required for slot
 #                    save/restore. Slot mgmt lines log to console.
 #   --log            Tee server stdout/stderr to ~/llama.log (default: off)
@@ -79,6 +81,9 @@ ARG_TUNE=""
 NO_PROXY=1
 NO_LOG=1
 NO_DEEP_LOG=1
+ARG_PORT=""
+ARG_INTERNAL_PORT=""
+PORT_FLAGS_TOUCHED=0
 LOG_FLAGS_TOUCHED=0  # tracks whether any of --proxy/--log/--deep-log was passed on CLI;
                      # used to decide whether to show the interactive logging-mode prompt
 while [[ $# -gt 0 ]]; do
@@ -90,6 +95,8 @@ while [[ $# -gt 0 ]]; do
         --build) ARG_BUILD_TYPE="$2"; shift 2 ;;
         --model) ARG_MODEL_PATH="$2"; shift 2 ;;
         --tune) ARG_TUNE="$2"; shift 2 ;;
+        --port) ARG_PORT="$2"; PORT_FLAGS_TOUCHED=1; shift 2 ;;
+        --internal-port) ARG_INTERNAL_PORT="$2"; PORT_FLAGS_TOUCHED=1; shift 2 ;;
         --proxy) NO_PROXY=0; LOG_FLAGS_TOUCHED=1; shift ;;
         --log) NO_LOG=0; LOG_FLAGS_TOUCHED=1; shift ;;
         --deep-log) NO_DEEP_LOG=0; LOG_FLAGS_TOUCHED=1; shift ;;
@@ -811,6 +818,43 @@ fi
 if [ -n "${SLOT_SAVE_PATH:-}" ] && [ "$NO_PROXY" -eq 1 ]; then
     echo "ℹ️  Tune sets SLOT_SAVE_PATH=$SLOT_SAVE_PATH — auto-enabling proxy (slot save/restore needs it)"
     NO_PROXY=0
+fi
+
+# ── Port selection (CLI flags > interactive prompt > tune/default) ──────────
+if [ -n "$ARG_PORT" ]; then
+    PORT="$ARG_PORT"
+fi
+if [ -n "$ARG_INTERNAL_PORT" ]; then
+    INTERNAL_PORT="$ARG_INTERNAL_PORT"
+fi
+if [ "$PORT_FLAGS_TOUCHED" -eq 0 ]; then
+    echo ""
+    echo "🔌 Ports (or pass --port / --internal-port on CLI to skip):"
+    read -rp "   Public port [default=$PORT]: " _port_in
+    if [ -n "$_port_in" ]; then
+        if [[ "$_port_in" =~ ^[0-9]+$ ]] && [ "$_port_in" -ge 1 ] && [ "$_port_in" -le 65535 ]; then
+            PORT="$_port_in"
+        else
+            echo "   ⚠️  invalid port '$_port_in' — keeping $PORT"
+        fi
+    fi
+    if [ "$NO_PROXY" -eq 0 ]; then
+        _default_internal="${INTERNAL_PORT:-40802}"
+        read -rp "   Internal (llama-server) port [default=$_default_internal]: " _iport_in
+        if [ -n "$_iport_in" ]; then
+            if [[ "$_iport_in" =~ ^[0-9]+$ ]] && [ "$_iport_in" -ge 1 ] && [ "$_iport_in" -le 65535 ]; then
+                INTERNAL_PORT="$_iport_in"
+            else
+                echo "   ⚠️  invalid port '$_iport_in' — keeping $_default_internal"
+                INTERNAL_PORT="$_default_internal"
+            fi
+        fi
+    fi
+fi
+
+if [ "$NO_PROXY" -eq 0 ] && [ "$PORT" = "${INTERNAL_PORT:-40802}" ]; then
+    echo "❌ Public port and internal port must differ when proxy is on (both = $PORT)"
+    exit 1
 fi
 
 if [ "$NO_PROXY" -eq 1 ]; then
