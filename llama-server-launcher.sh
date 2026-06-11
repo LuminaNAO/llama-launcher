@@ -279,67 +279,86 @@ elif [ -n "$ARG_TUNE" ]; then
         done
         exit 1
     fi
-elif [ ${#tune_configs[@]} -eq 1 ]; then
-    # Only one config — confirm with user
-    echo ""
-    echo "🎛️  Available tunes for $selected_folder_name:"
-    tune_ctx=$(grep -m1 '^CONTEXT=' "${tune_configs[0]}" | cut -d= -f2)
-    tune_kv=$(grep -m1 '^CACHE_TYPE_K=' "${tune_configs[0]}" | cut -d= -f2)
-    printf "  1) %-30s [ctx=%s, kv=%s]\n" "${tune_names[0]}" "${tune_ctx:-?}" "${tune_kv:-?}"
-    echo "  0) None (use system profile)"
-    echo ""
-    read -rp "Select tune [0-1, default=1]: " tune_sel
-    tune_sel="${tune_sel:-1}"
-    if [ "$tune_sel" = "1" ]; then
-        MODEL_CONFIG_FILE="${tune_configs[0]}"
-        echo "📋 Tune: ${tune_names[0]} ($(basename "$MODEL_CONFIG_FILE"))"
+else
+    # Show matching tunes (or all tunes if "browse all" selected)
+    show_all_tunes=0
+
+    while true; do
+        # Auto-suggest: pick the tune whose name contains the closest RAM tier
+        tune_suggested=-1
+        for i in "${!tune_names[@]}"; do
+            name="${tune_names[$i]}"
+            if [ "$TOTAL_RAM_GB_DETECT" -ge 112 ] && [[ "$name" == *128gb* ]]; then
+                tune_suggested=$i
+            elif [ "$TOTAL_RAM_GB_DETECT" -ge 48 ] && [ "$TOTAL_RAM_GB_DETECT" -lt 112 ] && [[ "$name" == *64gb* ]]; then
+                tune_suggested=$i
+            fi
+        done
+
+        echo ""
+        if [ "$show_all_tunes" -eq 1 ]; then
+            echo "🎛️  All available tunes:"
+        else
+            echo "🎛️  Available tunes for $selected_folder_name:"
+        fi
+        for i in "${!tune_names[@]}"; do
+            local_suggested=""
+            if [ "$i" -eq "$tune_suggested" ]; then
+                local_suggested=" ← suggested for ${TOTAL_RAM_GB_DETECT}GB system"
+            fi
+            # Show key params from config
+            tune_ctx=$(grep -m1 '^CONTEXT=' "${tune_configs[$i]}" | cut -d= -f2)
+            tune_par=$(grep -m1 '^PARALLEL=' "${tune_configs[$i]}" | cut -d= -f2)
+            tune_cp=$(grep -m1 '^CHECKPOINT_MAX=' "${tune_configs[$i]}" | cut -d= -f2)
+            printf "  %d) %-30s [ctx=%s, parallel=%s, checkpoints=%s]%s\n" \
+                $((i+1)) "${tune_names[$i]}" "${tune_ctx:-?}" "${tune_par:-?}" "${tune_cp:-?}" "$local_suggested"
+        done
+        if [ "$show_all_tunes" -eq 0 ]; then
+            echo "  a) Browse all tunes"
+        fi
+        echo "  0) None (use system profile)"
+        echo ""
+
+        default_sel=$((tune_suggested + 1))
+        if [ "$default_sel" -le 0 ]; then default_sel=1; fi
+        read -rp "Select tune [1-${#tune_configs[@]}, a=all, 0=none, default=$default_sel]: " tune_sel
+
+        # "Browse all" — reload with every config in the directory
+        if [[ "$tune_sel" == "a" || "$tune_sel" == "A" ]] && [ "$show_all_tunes" -eq 0 ]; then
+            tune_configs=()
+            tune_names=()
+            for conf in "$MODEL_CONFIG_DIR"/*.conf; do
+                [ -f "$conf" ] || continue
+                conf_base="$(basename "$conf" .conf)"
+                tune_label=$(grep -m1 '^# Tune:' "$conf" 2>/dev/null | sed 's/^# Tune: *//')
+                if [ -z "$tune_label" ]; then
+                    tune_label="$conf_base"
+                fi
+                tune_configs+=("$conf")
+                tune_names+=("$tune_label")
+            done
+            show_all_tunes=1
+            continue
+        fi
+
+        tune_sel="${tune_sel:-$default_sel}"
+
+        if [ "$tune_sel" = "0" ]; then
+            echo "📋 Tune: none (using system profile)"
+            break
+        fi
+
+        if ! [[ "$tune_sel" =~ ^[0-9]+$ ]] || [ "$tune_sel" -lt 1 ] || [ "$tune_sel" -gt ${#tune_configs[@]} ]; then
+            echo "❌ Invalid selection"
+            exit 1
+        fi
+
+        MODEL_CONFIG_FILE="${tune_configs[$((tune_sel-1))]}"
+        echo "📋 Tune: ${tune_names[$((tune_sel-1))]} ($(basename "$MODEL_CONFIG_FILE"))"
         source "$MODEL_CONFIG_FILE"
         HAS_MODEL_CONFIG=1
-    else
-        echo "📋 Tune: none (using system profile)"
-    fi
-else
-    # Multiple tunes — suggest based on system RAM, let user pick
-    # Auto-suggest: pick the tune whose name contains the closest RAM tier
-    for i in "${!tune_names[@]}"; do
-        name="${tune_names[$i]}"
-        if [ "$TOTAL_RAM_GB_DETECT" -ge 112 ] && [[ "$name" == *128gb* ]]; then
-            tune_suggested=$i
-        elif [ "$TOTAL_RAM_GB_DETECT" -ge 48 ] && [ "$TOTAL_RAM_GB_DETECT" -lt 112 ] && [[ "$name" == *64gb* ]]; then
-            tune_suggested=$i
-        fi
+        break
     done
-
-    echo ""
-    echo "🎛️  Available tunes for $selected_folder_name:"
-    for i in "${!tune_names[@]}"; do
-        local_suggested=""
-        if [ "$i" -eq "$tune_suggested" ]; then
-            local_suggested=" ← suggested for ${TOTAL_RAM_GB_DETECT}GB system"
-        fi
-        # Show key params from config
-        tune_ctx=$(grep -m1 '^CONTEXT=' "${tune_configs[$i]}" | cut -d= -f2)
-        tune_par=$(grep -m1 '^PARALLEL=' "${tune_configs[$i]}" | cut -d= -f2)
-        tune_cp=$(grep -m1 '^CHECKPOINT_MAX=' "${tune_configs[$i]}" | cut -d= -f2)
-        printf "  %d) %-30s [ctx=%s, parallel=%s, checkpoints=%s]%s\n" \
-            $((i+1)) "${tune_names[$i]}" "${tune_ctx:-?}" "${tune_par:-?}" "${tune_cp:-?}" "$local_suggested"
-    done
-    echo ""
-
-    default_sel=$((tune_suggested + 1))
-    if [ "$default_sel" -le 0 ]; then default_sel=1; fi
-    read -rp "Select tune [1-${#tune_configs[@]}, default=$default_sel]: " tune_sel
-    tune_sel="${tune_sel:-$default_sel}"
-
-    if ! [[ "$tune_sel" =~ ^[0-9]+$ ]] || [ "$tune_sel" -lt 1 ] || [ "$tune_sel" -gt ${#tune_configs[@]} ]; then
-        echo "❌ Invalid selection"
-        exit 1
-    fi
-
-    MODEL_CONFIG_FILE="${tune_configs[$((tune_sel-1))]}"
-    echo "📋 Tune: ${tune_names[$((tune_sel-1))]} ($(basename "$MODEL_CONFIG_FILE"))"
-    source "$MODEL_CONFIG_FILE"
-    HAS_MODEL_CONFIG=1
 fi
 
 # ── Auto-detect vision projector ─────────────────────────────────────────────
