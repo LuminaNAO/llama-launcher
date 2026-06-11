@@ -13,7 +13,7 @@
 // Behavior:
 //   - All traffic forwarded to backend; bodies tee'd to log-file.
 //   - For POST /v1/messages, when --slot-cache-dir is set: hashes a stable
-//     conversation anchor plus an early-prompt branch prefix, calls
+//     conversation anchor plus a full request hash, calls
 //     /slots/0?action=save then /slots/0?action=restore on the backend
 //     when sessionId differs from the currently-loaded slot.
 //   - Before each slot save, prunes the slot cache to keep (a) free disk
@@ -31,7 +31,7 @@
 //     client doesn't crash the proxy.
 
 import { createServer, request as httpRequest } from "node:http";
-import { createWriteStream, mkdirSync, existsSync, statSync, statfsSync, unlinkSync, readdirSync } from "node:fs";
+import { createWriteStream, mkdirSync, existsSync, statSync, statfsSync, unlinkSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, basename, join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -50,7 +50,7 @@ function ensureSlotCacheDir() {
 const args = process.argv.slice(2);
 const listenPort = parseInt(args[0], 10);
 const backendPort = parseInt(args[1], 10);
-const logFile = args[2] && !args[2].startsWith("--") ? args[2] : `${process.env.HOME}/llama-deep.log`;
+const logFile = args[2] && !args[2].startsWith("--") ? args[2] : "llama-deep.log";
 
 let slotCacheDir = null;
 let apiKey = null;
@@ -85,6 +85,8 @@ const SEP = "\n========================================\n";
 
 // ── Slot management state (parallel=1: single slot, but proxy serializes) ─
 let currentSession = null;        // prompt branch cache id, or null
+let currentRequestInfo = null;     // cache identity/provenance for currentSession
+let currentLoadedFrom = null;      // source slot id used to bootstrap currentSession, if any
 let slotMutex = Promise.resolve(); // Promise chain — await prior op before starting next
 let messageQueue = Promise.resolve(); // End-to-end /v1/messages queue when HDD cache is active
 let inFlightRequests = 0;          // for graceful shutdown drain
@@ -97,6 +99,7 @@ const BRANCH_PREFIX_BYTES = 256 * 1024;
 // file that overwrites a previously-good cache. The save gate below uses
 // this to refuse such self-destructive saves.
 let slotHasContent = false;
+let slotDirtySinceSave = false;    // true after a request may have mutated KV
 
 function sessionBase(sessionId) {
   const dash = typeof sessionId === "string" ? sessionId.indexOf("-") : -1;
@@ -106,6 +109,22 @@ function sessionBase(sessionId) {
 function sameSessionBase(a, b) {
   const baseA = sessionBase(a);
   return !!baseA && baseA === sessionBase(b);
+}
+
+function slotPath(filename) {
+  return join(slotCacheDir, filename);
+}
+
+function slotIdFromFilename(filename) {
+  return filename.endsWith(".bin") ? filename.slice(0, -4) : filename;
+}
+
+function metaFilenameForSlotId(slotId) {
+  return `${slotId}.meta.json`;
+}
+
+function metaPathForSlotId(slotId) {
+  return slotPath(metaFilenameForSlotId(slotId));
 }
 
 function enqueueMessage(fn) {
@@ -136,6 +155,9 @@ function slotLog(line, color = null) {
   log.write(line);
   const colored = colorLine(line, color);
   process.stdout.write(colored.startsWith("\n") ? colored : "\n" + colored);
+  if (llamaLog) {
+    llamaLog.write(colored.startsWith("\n") ? colored : "\n" + colored);
+  }
 }
 
 function requestLog(line) {
@@ -230,11 +252,14 @@ function pruneSlotCacheIfNeeded(currentSlotFilename, incomingSlotFilename = null
       break;
     }
     const ckpt = victim.path + ".ckpt";
+    const meta = victim.path.replace(/\.bin$/, ".meta.json");
     let bytesFreed = 0;
     try { bytesFreed += statSync(victim.path).size; } catch {}
     try { bytesFreed += statSync(ckpt).size; } catch {}
+    try { bytesFreed += statSync(meta).size; } catch {}
     try { unlinkSync(victim.path); } catch {}
     try { unlinkSync(ckpt); } catch {}
+    try { unlinkSync(meta); } catch {}
     evicted++;
     const reason = lowFree ? `free<${minFreeGB} GB` : `total>${maxTotalSlotsGB} GB`;
     slotLog(`pruneSlotCache: evicted ${victim.path} (+ .ckpt) — ${(bytesFreed / (1024 ** 3)).toFixed(2)} GB freed (reason: ${reason})\n`, C_YELLOW);
@@ -325,7 +350,52 @@ function callSlotAction(action, filename, timeoutMs = 0) {
   });
 }
 
-function sessionIdFromBody(jsonStr) {
+function commonPrefixBytes(a, b) {
+  const len = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < len && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+  return i;
+}
+
+function readSlotMeta(slotId) {
+  try {
+    return JSON.parse(readFileSync(metaPathForSlotId(slotId), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function writeSlotMeta(info, extra = {}) {
+  if (!slotCacheDir || !info?.sessionId) return;
+  const now = Date.now();
+  const previous = readSlotMeta(info.sessionId) ?? {};
+  const meta = {
+    ...previous,
+    version: 1,
+    slotId: info.sessionId,
+    baseId: info.baseId,
+    branchId: info.branchId,
+    promptHash: info.promptHash,
+    promptPrefixHash: info.promptPrefixHash,
+    promptPrefixBytes: Buffer.byteLength(info.branchPrefix, "utf8"),
+    bodyBytes: info.bodyBytes,
+    updatedAt: now,
+    ...extra,
+  };
+  if (extra.storePromptPrefix !== false) {
+    // This is sensitive, but the slot cache already contains model state
+    // derived from the same prompt. Keeping the prefix lets the proxy choose
+    // the closest copy-on-write parent instead of "latest same-base".
+    meta.promptPrefix = info.branchPrefix;
+  }
+  try {
+    writeFileSync(metaPathForSlotId(info.sessionId), `${JSON.stringify(meta, null, 2)}\n`);
+  } catch (e) {
+    slotLog(`slot meta write failed: ${metaFilenameForSlotId(info.sessionId)} ${e.message}\n`, C_YELLOW);
+  }
+}
+
+function cacheInfoFromBody(jsonStr) {
   try {
     const obj = JSON.parse(jsonStr);
     let anchor = "";
@@ -338,22 +408,32 @@ function sessionIdFromBody(jsonStr) {
     }
     if (!anchor) return null;
 
-    const baseId = createHash("sha256").update(anchor).digest("hex").slice(0, 12);
     const branchPrefix = jsonStr.slice(0, BRANCH_PREFIX_BYTES);
-    const branchId = createHash("sha256").update(branchPrefix).digest("hex").slice(0, 12);
-    return `${baseId}-${branchId}`;
+    const promptHash = createHash("sha256").update(jsonStr).digest("hex");
+    const baseId = createHash("sha256").update(anchor).digest("hex").slice(0, 12);
+    const branchId = promptHash.slice(0, 12);
+    return {
+      sessionId: `${baseId}-${branchId}`,
+      baseId,
+      branchId,
+      promptHash,
+      promptPrefixHash: createHash("sha256").update(branchPrefix).digest("hex"),
+      branchPrefix,
+      bodyBytes: Buffer.byteLength(jsonStr, "utf8"),
+    };
   } catch {
     return null;
   }
 }
 
-function findLatestSameBaseSlot(sessionId) {
+function findBestSameBaseParent(info) {
   if (!slotCacheDir) return null;
-  const base = sessionBase(sessionId);
+  const base = info?.baseId ?? sessionBase(info?.sessionId);
   if (!base) return null;
   const prefix = `${base}-`;
-  const exact = `${sessionId}.bin`;
-  let latest = null;
+  const exact = `${info.sessionId}.bin`;
+  let best = null;
+  let latestLegacy = null;
   let files;
   try { files = readdirSync(slotCacheDir); } catch { return null; }
   for (const f of files) {
@@ -369,35 +449,63 @@ function findLatestSameBaseSlot(sessionId) {
       size = st.size;
     } catch { continue; }
     if (size <= 0) continue;
-    if (!latest || mtime > latest.mtime) latest = { filename: f, mtime };
+    const slotId = slotIdFromFilename(f);
+    const meta = readSlotMeta(slotId);
+    if (meta?.completed && !meta.volatile && typeof meta.promptPrefix === "string") {
+      const lcp = commonPrefixBytes(meta.promptPrefix, info.branchPrefix);
+      const denom = Math.max(1, Math.min(meta.promptPrefix.length, info.branchPrefix.length));
+      const similarity = lcp / denom;
+      const candidate = {
+        filename: f,
+        slotId,
+        mtime,
+        lcp,
+        similarity,
+        createdFrom: meta.createdFrom ?? null,
+      };
+      if (
+        lcp >= 4096 &&
+        (!best ||
+          candidate.lcp > best.lcp ||
+          (candidate.lcp === best.lcp && candidate.mtime > best.mtime))
+      ) {
+        best = candidate;
+      }
+    } else if (!latestLegacy || mtime > latestLegacy.mtime) {
+      latestLegacy = { filename: f, slotId, mtime, lcp: 0, similarity: 0, legacy: true };
+    }
   }
-  return latest?.filename ?? null;
+  return best ?? latestLegacy;
 }
 
-function selectRestoreFilename(sessionId) {
-  const exact = `${sessionId}.bin`;
-  if (existsSync(join(slotCacheDir, exact))) {
-    return { filename: exact, isFallback: false };
+function selectRestoreTarget(info) {
+  const exact = `${info.sessionId}.bin`;
+  if (existsSync(slotPath(exact))) {
+    return { filename: exact, slotId: info.sessionId, kind: "exact" };
   }
-  const fallback = findLatestSameBaseSlot(sessionId);
-  return fallback ? { filename: fallback, isFallback: true } : null;
+  const parent = findBestSameBaseParent(info);
+  return parent ? { ...parent, kind: parent.legacy ? "legacy-parent" : "parent" } : null;
 }
 
 // Serialize slot save+restore through a Promise mutex. Concurrent callers
 // queue and wait. Each acquires the lock, re-checks currentSession (a prior
 // holder may have already loaded the session this caller wants), then runs
 // save+restore as needed.
-async function ensureSlotLoaded(newSessionId) {
+async function ensureSlotLoaded(info) {
   if (!slotCacheDir) return;
+  const newSessionId = info.sessionId;
   const prev = slotMutex;
   let release;
   slotMutex = new Promise((r) => { release = r; });
   await prev;
   try {
-    if (newSessionId === currentSession && slotHasContent) return;
+    if (newSessionId === currentSession && slotHasContent) {
+      currentRequestInfo = info;
+      return;
+    }
     ensureSlotCacheDir();
     const exactRestoreFilename = `${newSessionId}.bin`;
-    const preSaveRestore = selectRestoreFilename(newSessionId);
+    const preSaveRestore = selectRestoreTarget(info);
     const protectIncomingFilename = preSaveRestore?.filename ?? exactRestoreFilename;
     if (currentSession) {
       if (!slotHasContent) {
@@ -405,6 +513,8 @@ async function ensureSlotLoaded(newSessionId) {
         // has populated it since). Saving here would overwrite the on-disk
         // file with a zero-token payload, locking in the corruption.
         slotLog(`\n=== HDD CACHE save SKIPPED: ${currentSession}.bin (slot empty; not overwriting cache)\n`, C_YELLOW);
+      } else if (!slotDirtySinceSave) {
+        slotLog(`\n=== HDD CACHE save SKIPPED: ${currentSession}.bin (already persisted)\n`, C_DIM);
       } else {
         ensureSlotCacheDir();
         // Pass both: don't evict the slot we're saving (currentSession) OR
@@ -418,6 +528,7 @@ async function ensureSlotLoaded(newSessionId) {
           `HDD CACHE save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten} checkpoint_sidecar=${currentSession}.bin.ckpt\n`,
           save.ok ? C_CYAN : C_RED,
         );
+        if (save.ok) slotDirtySinceSave = false;
       }
     }
 
@@ -425,29 +536,50 @@ async function ensureSlotLoaded(newSessionId) {
     // the live slot is already the best prefix. Saving above persisted the
     // old branch; restoring an older disk fallback here would throw away the
     // freshest in-RAM checkpoints and cause avoidable replay.
-    if (!existsSync(join(slotCacheDir, exactRestoreFilename)) && sameSessionBase(currentSession, newSessionId) && slotHasContent) {
+    if (!existsSync(slotPath(exactRestoreFilename)) && sameSessionBase(currentSession, newSessionId) && slotHasContent) {
       slotLog(
-        `\n=== HDD CACHE restore SKIPPED: ${newSessionId}.bin (same-base live slot is already loaded)\n`,
+        `\n=== HDD CACHE restore SKIPPED: ${newSessionId}.bin (copy-on-write from live same-base slot ${currentSession}.bin)\n`,
         C_CYAN,
       );
+      currentLoadedFrom = currentSession;
       currentSession = newSessionId;
+      currentRequestInfo = info;
+      slotDirtySinceSave = false;
+      writeSlotMeta(info, {
+        completed: false,
+        volatile: true,
+        createdFrom: currentLoadedFrom,
+        restoreKind: "live-parent",
+      });
       return;
     }
 
-    const restoreTarget = selectRestoreFilename(newSessionId);
+    const restoreTarget = selectRestoreTarget(info);
     if (!restoreTarget) {
-      slotLog(`\n=== HDD CACHE restore MISS: ${newSessionId}.bin (no saved slot yet; no same-base fallback)\n`, C_YELLOW);
+      slotLog(`\n=== HDD CACHE restore MISS: ${newSessionId}.bin (no exact or similar same-base parent)\n`, C_YELLOW);
       slotHasContent = false;
+      slotDirtySinceSave = false;
       currentSession = newSessionId;
+      currentRequestInfo = info;
+      currentLoadedFrom = null;
+      writeSlotMeta(info, {
+        completed: false,
+        volatile: true,
+        createdFrom: null,
+        restoreKind: "miss",
+      });
       return;
     }
-    if (restoreTarget.isFallback) {
+    if (restoreTarget.kind !== "exact") {
+      const detail = restoreTarget.kind === "parent"
+        ? `lcp=${restoreTarget.lcp} similarity=${restoreTarget.similarity.toFixed(3)}`
+        : "legacy metadata missing";
       slotLog(
-        `\n=== HDD CACHE restore FALLBACK: ${newSessionId}.bin -> ${restoreTarget.filename} (latest same-base slot)\n`,
+        `\n=== HDD CACHE restore PARENT: ${newSessionId}.bin <- ${restoreTarget.filename} (${detail}; copy-on-write target remains ${newSessionId}.bin)\n`,
         C_YELLOW,
       );
     }
-    hddBanner(restoreTarget.isFallback ? "restore fallback" : "restore", restoreTarget.filename, "(reads .bin + .bin.ckpt)");
+    hddBanner(restoreTarget.kind === "exact" ? "restore" : "restore parent", restoreTarget.filename, "(reads .bin + .bin.ckpt)");
     const r = await callSlotAction("restore", restoreTarget.filename);
     const restore = slotRestoreSucceeded(r);
     slotLog(
@@ -460,7 +592,22 @@ async function ensureSlotLoaded(newSessionId) {
     // Either way, the slot is now empty; gate future saves until a request
     // refills it.
     slotHasContent = restore.ok;
+    slotDirtySinceSave = false;
     currentSession = newSessionId;
+    currentRequestInfo = info;
+    const existingMeta = restoreTarget.kind === "exact" ? readSlotMeta(info.sessionId) : null;
+    currentLoadedFrom = restoreTarget.kind === "exact" ? (existingMeta?.createdFrom ?? null) : restoreTarget.slotId;
+    writeSlotMeta(info, {
+      completed: false,
+      volatile: true,
+      createdFrom: currentLoadedFrom,
+      restoreKind: restoreTarget.kind,
+      restoreOk: restore.ok,
+      restoredFrom: restoreTarget.slotId,
+      restoredFilename: restoreTarget.filename,
+      restoreLcp: restoreTarget.lcp ?? null,
+      restoreSimilarity: restoreTarget.similarity ?? null,
+    });
   } finally {
     release();
   }
@@ -478,6 +625,10 @@ async function saveCurrentSlot(reason, timeoutMs = 0) {
       slotLog(`\n=== HDD CACHE save (${reason}) SKIPPED: ${currentSession}.bin (slot empty; not overwriting cache)\n`, C_YELLOW);
       return;
     }
+    if (!slotDirtySinceSave) {
+      slotLog(`\n=== HDD CACHE save (${reason}) SKIPPED: ${currentSession}.bin (already persisted)\n`, C_DIM);
+      return;
+    }
     ensureSlotCacheDir();
     pruneSlotCacheIfNeeded(`${currentSession}.bin`);
     hddBanner(`save (${reason})`, `${currentSession}.bin`, "(writes .bin + .bin.ckpt)");
@@ -487,6 +638,17 @@ async function saveCurrentSlot(reason, timeoutMs = 0) {
       `HDD CACHE save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten} checkpoint_sidecar=${currentSession}.bin.ckpt\n`,
       save.ok ? C_CYAN : C_RED,
     );
+    if (currentRequestInfo) {
+      writeSlotMeta(currentRequestInfo, {
+        completed: save.ok,
+        volatile: !save.ok,
+        createdFrom: currentLoadedFrom,
+        saveReason: reason,
+        nSaved: save.nSaved,
+        nWritten: save.nWritten,
+      });
+    }
+    if (save.ok) slotDirtySinceSave = false;
   } finally {
     release();
   }
@@ -597,9 +759,10 @@ function pipeRequestStreaming(tag, clientReq, proxyReq) {
   });
 }
 
-async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessionId, finalize) {
+async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessionInfo, finalize) {
+  const sessionId = sessionInfo?.sessionId ?? null;
   try {
-    if (sessionId && slotCacheDir) await ensureSlotLoaded(sessionId);
+    if (sessionInfo && slotCacheDir) await ensureSlotLoaded(sessionInfo);
   } catch (e) {
     log.write(`\n!!! SLOT mgmt error ${tag}: ${e.message}\n`);
     if (sessionId && slotCacheDir) {
@@ -615,6 +778,7 @@ async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessio
   if (sessionId && slotCacheDir) {
     currentSession = sessionId;
     slotHasContent = false;
+    slotDirtySinceSave = true;
   }
 
   // Re-send the buffered request. Strip hop-by-hop and length-related
@@ -638,15 +802,33 @@ async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessio
       method: clientReq.method,
       headers: fwdHeaders,
     }, (proxyRes) => {
-      pipeResponse(tag, proxyRes, clientRes, (result) => {
+      pipeResponse(tag, proxyRes, clientRes, async (result) => {
         // Only a complete 200 response means the loaded slot now contains
         // a successful session state that is safe to save on the next switch.
         // Setting this at response headers is too early: another session can
         // arrive while prompt processing/generation is still mutating the slot.
         if (result.ended && result.statusCode === 200) {
           slotHasContent = true;
+          slotDirtySinceSave = true;
+          if (sessionId && slotCacheDir) {
+            try {
+              await saveCurrentSlot("response-complete");
+            } catch (e) {
+              slotLog(`\n!!! HDD CACHE save response-complete error: ${e.message}\n`, C_RED);
+            }
+          }
         } else if (sessionId && slotCacheDir) {
           slotHasContent = false;
+          slotDirtySinceSave = false;
+          if (currentRequestInfo) {
+            writeSlotMeta(currentRequestInfo, {
+              completed: false,
+              volatile: true,
+              createdFrom: currentLoadedFrom,
+              failureReason: result.reason ?? "incomplete-response",
+              responseStatus: result.statusCode ?? null,
+            });
+          }
         }
         finalize();
         resolve();
@@ -699,12 +881,14 @@ const server = createServer(async (clientReq, clientRes) => {
       if (aborted) return;
       const bodyBuf = Buffer.concat(chunks);
       log.write(bodyBuf);
+      log.write("\n");
 
-      const sessionId = sessionIdFromBody(bodyBuf.toString("utf8"));
+      const sessionInfo = cacheInfoFromBody(bodyBuf.toString("utf8"));
+      const sessionId = sessionInfo?.sessionId ?? null;
       requestLog(
         `REQUEST ${tag} body_bytes=${bodyBuf.length} (${formatBytes(bodyBuf.length)}) content_length=${clientReq.headers["content-length"] ?? "chunked"} session=${sessionId ?? "none"}\n`,
       );
-      const run = () => processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessionId, finalize);
+      const run = () => processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessionInfo, finalize);
       if (slotCacheDir) {
         await enqueueMessage(run);
       } else {

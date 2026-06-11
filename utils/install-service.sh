@@ -552,13 +552,13 @@ else
     fi
 fi
 if [ "$NO_PROXY" -eq 0 ]; then
-    if yes_no "Enable deep body log at $INSTALL_HOME/llama-deep.log?" n; then
+    if yes_no "Enable deep body log at $ROOT_DIR/llama-deep.log?" n; then
         NO_DEEP_LOG=0
     fi
 fi
 
-LOG_FILE="$INSTALL_HOME/llama.log"
-DEEP_LOG="$INSTALL_HOME/llama-deep.log"
+LOG_FILE="$ROOT_DIR/llama.log"
+DEEP_LOG="$ROOT_DIR/llama-deep.log"
 PROXY_SCRIPT="$ROOT_DIR/llama-deep-proxy.mjs"
 NODE_BIN="$(command -v node || true)"
 if [ "$NO_PROXY" -eq 0 ] && [ -z "$NODE_BIN" ]; then
