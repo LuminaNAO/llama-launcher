@@ -179,7 +179,8 @@ CONFIG_FILE="$LLAMA_LAUNCHER_DIR/.llama-launcher-config"
 LAUNCH_HISTORY="$LLAMA_LAUNCHER_DIR/.launch-history"
 LLAMA_LOG_FILE="$LLAMA_LAUNCHER_DIR/llama.log"
 DEEP_LOG="$LLAMA_LAUNCHER_DIR/llama-deep.log"
-DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
+DEFAULT_MODELS_DIR="$HOME/llama-launcher/models"
+DEFAULT_SLOTS_DIR="$HOME/llama-launcher/slots"
 AUTHOR_BEST_PICKS_FILE="$BUNDLED_MODEL_CONFIG_DIR/author-best-picks.sh"
 
 if [[ -f "$AUTHOR_BEST_PICKS_FILE" ]]; then
@@ -301,7 +302,7 @@ prompt_config_text() {
 
 settings_menu() {
     local default_models="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
-    local default_slots="${LLAMACPP_SLOT_SAVE_PATH:-$(dirname "$default_models")/llama-slots}"
+    local default_slots="${LLAMACPP_SLOT_SAVE_PATH:-$DEFAULT_SLOTS_DIR}"
     local choice build_default
 
     config_default LLAMACPP_MODELS_DIR "$default_models"
@@ -334,7 +335,7 @@ settings_menu() {
         case "$choice" in
             1) prompt_config_path LLAMACPP_MODELS_DIR "Models directory" "$DEFAULT_MODELS_DIR" ;;
             2)
-                default_slots="$(dirname "${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}")/llama-slots"
+                default_slots="${LLAMACPP_SLOT_SAVE_PATH:-$DEFAULT_SLOTS_DIR}"
                 prompt_config_path LLAMACPP_SLOT_SAVE_PATH "HDD cache slot save directory" "$default_slots"
                 ;;
             3) prompt_config_number MIN_FREE_GB "HDD slot-cache minimum free disk GB" 100 0 100000 ;;
@@ -533,18 +534,39 @@ else
 
     scan_model_folders "$MODELS_DIR"
 
-    # If no model folders found, prompt for a new path
+    # If no model folders found, check if dir exists
     if [ ${#model_folders[@]} -eq 0 ]; then
-        echo "❌ No model folders found at $MODELS_DIR"
-        echo ""
-        read -rp "Enter path to models directory: " new_path
-        config_set LLAMACPP_MODELS_DIR "$new_path"
-        LLAMACPP_MODELS_DIR="$new_path"
-        echo "✅ Path saved to $CONFIG_FILE for next launch"
-        echo ""
-        MODELS_DIR="$new_path"
-        scan_model_folders "$MODELS_DIR"
-    fi
+        if [ ! -d "$MODELS_DIR" ]; then
+            echo "📂 No models directory found at $DEFAULT_MODELS_DIR"
+            echo ""
+            read -rp "Create it? (y/N) " create_choice
+            if [[ "$create_choice" == [yY]* ]]; then
+                mkdir -p "$MODELS_DIR"
+                echo "✅ Created $MODELS_DIR"
+                echo "   Download models here, then run llama-launcher again."
+                echo ""
+                exit 0
+            else
+                echo ""
+                read -rp "Enter path to models directory: " new_path
+                config_set LLAMACPP_MODELS_DIR "$new_path"
+                LLAMACPP_MODELS_DIR="$new_path"
+                echo "✅ Path saved to $CONFIG_FILE for next launch"
+                echo ""
+                MODELS_DIR="$new_path"
+                scan_model_folders "$MODELS_DIR"
+            fi
+        else
+            echo "❌ No model folders found at $MODELS_DIR (directory is empty)"
+            echo ""
+            read -rp "Enter path to models directory: " new_path
+            config_set LLAMACPP_MODELS_DIR "$new_path"
+            LLAMACPP_MODELS_DIR="$new_path"
+            echo "✅ Path saved to $CONFIG_FILE for next launch"
+            echo ""
+            MODELS_DIR="$new_path"
+            scan_model_folders "$MODELS_DIR"
+        fi
 
     if [ ${#model_folders[@]} -eq 0 ]; then
         echo "❌ No model folders found in $MODELS_DIR"
@@ -1320,7 +1342,7 @@ if [ -z "$_default_slot_save_path" ]; then
     if [ -n "${MODELS_DIR:-}" ]; then
         _default_slot_save_path="$(dirname "$MODELS_DIR")/llama-slots"
     else
-        _default_slot_save_path="/usr/local/share/llama.cpp/llama-slots"
+        _default_slot_save_path="$DEFAULT_SLOTS_DIR"
     fi
 fi
 
