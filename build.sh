@@ -6,11 +6,11 @@
 # The optional -tag suffix selects a parallel output directory under builds/
 # so multiple variants of the same backend can coexist (e.g. a fork build).
 #   ./build.sh rocm           # → builds/rocm (default mainline source)
-#   ./build.sh rocm-mtp       # → builds/rocm-mtp (use LLAMACPP_SRC to point at fork)
+#   ./build.sh rocm-mtp       # → builds/rocm-mtp (tagged mainline build)
 #
-# To build from a non-default llama.cpp source tree (e.g. an upstream fork),
+# To build from a non-default llama.cpp source tree,
 # set LLAMACPP_SRC:
-#   LLAMACPP_SRC=~/code/llama-mtp/llama.cpp ./build.sh rocm-mtp
+#   LLAMACPP_SRC=/path/to/llama.cpp ./build.sh rocm-mtp
 #
 # GPU arch is auto-detected for ROCm builds but can be overridden:
 #   ./build.sh rocm gfx1100    # Force RX 7900 series target
@@ -48,7 +48,7 @@ if [ -z "$BUILD_TYPE" ]; then
     echo "  ./build.sh rocm gfx1151    # ROCm for Strix Halo"
     echo "  ./build.sh cuda            # CUDA backend (auto-detect NVIDIA GPU)"
     echo "  ./build.sh cuda 89         # CUDA for Ada Lovelace (RTX 4090)"
-    echo "  ./build.sh rocm-mtp        # Tagged build (prompts for source dir)"
+    echo "  ./build.sh rocm-mtp        # Tagged mainline ROCm build"
     exit 1
 fi
 
@@ -56,8 +56,8 @@ BUILD_DIR="$SCRIPT_DIR/builds/$BUILD_TYPE"
 # Backend = prefix before the first dash, so e.g. "rocm-mtp" uses the rocm
 # toolchain/cmake flags but lands in a separate output dir.
 BACKEND="${BUILD_TYPE%%-*}"
-# Tag = the rest after the first dash, empty if none. Used to bias the
-# source-tree picker (a tag of "mtp" suggests the path containing "mtp").
+# Tag = the rest after the first dash, empty if none. Tags select separate
+# output directories, not alternate source trees.
 BUILD_TAG=""
 [ "$BUILD_TYPE" != "$BACKEND" ] && BUILD_TAG="${BUILD_TYPE#*-}"
 
@@ -65,7 +65,7 @@ BUILD_TAG=""
 # Priority:
 #   1. LLAMACPP_SRC env var (explicit override — non-interactive)
 #   2. Plain BUILD_TYPE (no tag) with default source present → silent default
-#   3. Otherwise interactive picker (smart default based on tag, custom-path option)
+#   3. Otherwise interactive picker (mainline default, custom-path option)
 if [ -n "${LLAMACPP_SRC:-}" ]; then
     LLAMACPP_DIR="$LLAMACPP_SRC"
 elif [ -z "$BUILD_TAG" ] && [ -f "$DEFAULT_LLAMACPP_DIR/CMakeLists.txt" ]; then
@@ -98,13 +98,13 @@ else
         exit 1
     fi
 
-    # Smart default: prefer a candidate whose path contains the BUILD_TAG
+    # Smart default: prefer the mainline sibling checkout. Tags select build
+    # output directories; they should not steer source selection now that
+    # upstream llama.cpp contains MTP.
     default_sel=1
-    if [ -n "$BUILD_TAG" ]; then
-        for i in "${!candidates[@]}"; do
-            [[ "${candidates[$i]}" == *"$BUILD_TAG"* ]] && { default_sel=$((i+1)); break; }
-        done
-    fi
+    for i in "${!candidates[@]}"; do
+        [ "$(realpath "${candidates[$i]}" 2>/dev/null || echo "${candidates[$i]}")" = "$(realpath "$DEFAULT_LLAMACPP_DIR" 2>/dev/null || echo "$DEFAULT_LLAMACPP_DIR")" ] && { default_sel=$((i+1)); break; }
+    done
 
     echo "🔍 Available llama.cpp source trees:"
     for i in "${!candidates[@]}"; do
@@ -229,7 +229,7 @@ case "$BACKEND" in
         echo "  ./build.sh vulkan    # Recommended for Strix Halo / RDNA 3.5"
         echo "  ./build.sh rocm      # ROCm/HIP backend"
         echo "  ./build.sh cuda      # NVIDIA CUDA backend"
-        echo "  LLAMACPP_SRC=~/code/llama-mtp/llama.cpp ./build.sh rocm-mtp  # fork build"
+    echo "  LLAMACPP_SRC=/path/to/llama.cpp ./build.sh rocm-mtp          # alternate source"
         exit 1
         ;;
 esac
