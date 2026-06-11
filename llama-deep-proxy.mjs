@@ -81,6 +81,14 @@ const BRANCH_PREFIX_BYTES = 256 * 1024;
 // this to refuse such self-destructive saves.
 let slotHasContent = false;
 let slotDirtySinceSave = false;    // true after a request may have mutated KV
+// True when no-HDD traffic ran on the slot: the KV has diverged from the
+// persisted transcript and the disk copy is authoritative. The save gates
+// refuse to persist a tainted slot; the taint clears when a persistent
+// request completes (its prefill rewrites the slot to the clean prompt).
+// Keeping the tainted KV live is deliberate — the next same-session request
+// shares the clean prefix and llama-server's prompt cache recovers it
+// without re-reading multi-GB slot files from disk.
+let slotTainted = false;
 
 function sessionBase(sessionId) {
   // Only hash-derived "<base12>-<branch12>" ids have a base. OpenClaw slot
@@ -490,15 +498,57 @@ export function findOpenClawHeaderIdentity(headers) {
   // it become a slot filename.
   if (!sessionId || sessionId.length < 4) return null;
   const agentKind = (headerValue(headers, OPENCLAW_HEADERS.agentKind) ?? "").toLowerCase();
+  const cachePolicy = (headerValue(headers, OPENCLAW_HEADERS.cachePolicy) ?? "").toLowerCase();
   return {
     source: "openclaw-session-id",
     value: sessionId,
     agentKind: agentKind === "subagent" ? "subagent" : agentKind === "main" ? "main" : null,
+    cachePolicy: cachePolicy === "no-hdd" ? "no-hdd" : cachePolicy === "hdd" ? "hdd" : null,
     sessionKey: headerValue(headers, OPENCLAW_HEADERS.sessionKey),
     agentId: headerValue(headers, OPENCLAW_HEADERS.agentId),
     runId: headerValue(headers, OPENCLAW_HEADERS.runId),
     trigger: headerValue(headers, OPENCLAW_HEADERS.trigger),
   };
+}
+
+// ── OpenClaw body sniffing ────────────────────────────────────────────────
+// Fallback classification for traffic that arrives without policy headers.
+// These marker strings come straight from OpenClaw's prompt templates; the
+// diagnose tool imports them so the two never drift apart.
+export const OPENCLAW_MARKERS = {
+  subagentContext: "[Subagent Context]",
+  subagentTask: "[Subagent Task]:",
+  internalRuntime: "OpenClaw runtime context (internal):",
+  internalCompletion: "[Internal task completion event]",
+};
+
+export function messageContentText(message) {
+  const content = message?.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => typeof part?.text === "string" ? part.text : "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function latestMessageText(obj) {
+  if (!Array.isArray(obj?.messages) || obj.messages.length === 0) return "";
+  return messageContentText(obj.messages[obj.messages.length - 1]);
+}
+
+export function isOpenClawSubagentBody(obj) {
+  if (!Array.isArray(obj?.messages) || obj.messages.length === 0) return false;
+  const firstText = messageContentText(obj.messages[0]);
+  const latestText = latestMessageText(obj);
+  const marks = (t) => t.includes(OPENCLAW_MARKERS.subagentContext) && t.includes(OPENCLAW_MARKERS.subagentTask);
+  return marks(firstText) || marks(latestText);
+}
+
+export function isOpenClawInternalRuntimeRequest(obj) {
+  const text = latestMessageText(obj);
+  return text.includes(OPENCLAW_MARKERS.internalRuntime) &&
+    text.includes(OPENCLAW_MARKERS.internalCompletion);
 }
 
 export function findStableIdentity(obj, headers = {}) {
@@ -576,6 +626,28 @@ export function cacheInfoFromBody(jsonStr, headers = {}) {
       : stableHashId("anchor", anchor));
     const branchId = openClawSlotId ? "openclaw" : promptHash.slice(0, 12);
     const sessionId = openClawSlotId ?? `${baseId}-${branchId}`;
+    // Cache policy: no-hdd traffic must never change what's persisted.
+    // Subagents and internal runtime events share a transcript shape with
+    // the main session but are throwaway; an explicit header wins outright.
+    const bodyLooksSubagent = isOpenClawSubagentBody(obj);
+    const internalRuntimeRequest = isOpenClawInternalRuntimeRequest(obj);
+    const agentKind = bodyLooksSubagent ? "subagent" : stableIdentity?.agentKind ?? null;
+    const cachePolicy = stableIdentity?.cachePolicy === "no-hdd" ||
+      agentKind === "subagent" ||
+      internalRuntimeRequest
+      ? "no-hdd"
+      : "hdd";
+    // How the request may touch the slot cache:
+    //   persistent — normal flow: restore, run, save on switch
+    //   read-only  — main-session no-hdd traffic: may reuse/restore the
+    //                session's warm KV, response never persisted
+    //   bypass     — subagent/unknown no-hdd traffic: runs on the slot
+    //                without restore; response never persisted
+    const slotAccess = cachePolicy === "hdd"
+      ? "persistent"
+      : stableIdentity?.source === "openclaw-session-id" && agentKind === "main"
+        ? "read-only"
+        : "bypass";
     return {
       sessionId,
       baseId,
@@ -583,7 +655,9 @@ export function cacheInfoFromBody(jsonStr, headers = {}) {
       exactOnly: Boolean(openClawSlotId),
       identitySource: stableIdentity ? stableIdentity.source : "anchor",
       identityLabel: stableIdentity ? stableIdentity.source : "system+first-message",
-      agentKind: stableIdentity?.agentKind ?? null,
+      agentKind,
+      cachePolicy,
+      slotAccess,
       openClaw: stableIdentity?.source === "openclaw-session-id"
         ? {
             sessionId: stableIdentity.value ?? null,
@@ -592,6 +666,9 @@ export function cacheInfoFromBody(jsonStr, headers = {}) {
             agentId: stableIdentity.agentId ?? null,
             runId: stableIdentity.runId ?? null,
             trigger: stableIdentity.trigger ?? null,
+            cachePolicy: stableIdentity.cachePolicy ?? null,
+            bodyLooksSubagent,
+            internalRuntimeRequest,
           }
         : null,
       promptHash,
@@ -696,6 +773,12 @@ async function ensureSlotLoaded(info) {
   await prev;
   try {
     if (newSessionId === currentSession && slotHasContent) {
+      if (slotTainted) {
+        // Slot holds this session's prefix plus a no-HDD divergence. The
+        // server's prompt cache reuses the clean common prefix; a disk
+        // restore could not offer more than that prefix anyway.
+        slotLog(`\n=== HDD CACHE reuse live slot: ${newSessionId}.bin (tainted by no-HDD traffic; prompt cache recovers the clean prefix)\n`, C_DIM);
+      }
       currentRequestInfo = info;
       return;
     }
@@ -709,6 +792,10 @@ async function ensureSlotLoaded(info) {
         // has populated it since). Saving here would overwrite the on-disk
         // file with a zero-token payload, locking in the corruption.
         slotLog(`\n=== HDD CACHE save SKIPPED: ${currentSession}.bin (slot empty; not overwriting cache)\n`, C_YELLOW);
+      } else if (slotTainted) {
+        // Skip: KV diverged from the transcript via no-HDD traffic. The
+        // disk copy is the authoritative state for this session.
+        slotLog(`\n=== HDD CACHE save SKIPPED: ${currentSession}.bin (tainted by no-HDD traffic; disk copy authoritative)\n`, C_YELLOW);
       } else if (!slotDirtySinceSave) {
         slotLog(`\n=== HDD CACHE save SKIPPED: ${currentSession}.bin (already persisted)\n`, C_DIM);
       } else {
@@ -778,6 +865,7 @@ async function ensureSlotLoaded(info) {
         currentSession = newSessionId;
         currentRequestInfo = info;
         slotDirtySinceSave = false;
+        slotTainted = false;
         writeSlotMeta(info, {
           completed: false,
           volatile: true,
@@ -803,6 +891,7 @@ async function ensureSlotLoaded(info) {
       slotLog(`\n=== HDD CACHE restore MISS: ${newSessionId}.bin (${missReason})\n`, C_YELLOW);
       slotHasContent = false;
       slotDirtySinceSave = false;
+      slotTainted = false;
       currentSession = newSessionId;
       currentRequestInfo = info;
       currentLoadedFrom = null;
@@ -837,6 +926,7 @@ async function ensureSlotLoaded(info) {
     // refills it.
     slotHasContent = restore.ok;
     slotDirtySinceSave = false;
+    slotTainted = false;
     currentSession = newSessionId;
     currentRequestInfo = info;
     const existingMeta = restoreTarget.kind === "exact" ? readSlotMeta(info.sessionId) : null;
@@ -857,7 +947,7 @@ async function ensureSlotLoaded(info) {
   }
 }
 
-async function saveCurrentSlot(reason, timeoutMs = 0) {
+async function saveCurrentSlot(reason, timeoutMs = 0, failOnError = false) {
   if (!slotCacheDir || !currentSession) return;
   // Acquire mutex so we don't race with an in-flight switch
   const prev = slotMutex;
@@ -867,6 +957,10 @@ async function saveCurrentSlot(reason, timeoutMs = 0) {
   try {
     if (!slotHasContent) {
       slotLog(`\n=== HDD CACHE save (${reason}) SKIPPED: ${currentSession}.bin (slot empty; not overwriting cache)\n`, C_YELLOW);
+      return;
+    }
+    if (slotTainted) {
+      slotLog(`\n=== HDD CACHE save (${reason}) SKIPPED: ${currentSession}.bin (tainted by no-HDD traffic; disk copy authoritative)\n`, C_YELLOW);
       return;
     }
     if (!slotDirtySinceSave) {
@@ -893,10 +987,79 @@ async function saveCurrentSlot(reason, timeoutMs = 0) {
     }
     if (save.ok) {
       slotDirtySinceSave = false;
+    } else if (failOnError) {
+      throw new Error(`failed to save ${currentSession}.bin before ${reason}`);
     }
   } finally {
     release();
   }
+}
+
+// Prepare the slot for a request that must not change what's persisted.
+// access "read-only": main-session OpenClaw traffic (internal runtime
+// events, explicit no-hdd) that benefits from the session's warm KV.
+// access "bypass": subagent/unknown no-hdd traffic with no useful relation
+// to any persisted slot.
+//
+// Either way the session stays tracked: consecutive same-session no-HDD
+// turns (a subagent making tool calls, internal events between user turns)
+// run straight on the live KV and the server's prompt cache reuses their
+// growing prefix — no slot file IO at all.
+async function prepareNonPersistentRequest(info, access) {
+  if (!slotCacheDir) return;
+  const sameSession = currentSession === info.sessionId && slotHasContent;
+  // Persist clean unsaved turns before the KV diverges from the transcript.
+  // The save gate itself skips empty/tainted/already-saved slots; a failed
+  // save blocks the request (fail closed) rather than risking clean state.
+  if (currentSession) {
+    await saveCurrentSlot(sameSession ? `${access}-checkpoint` : `${access}-switch`, 0, true);
+  }
+  if (sameSession) {
+    slotLog(
+      `\n=== HDD CACHE reuse live slot: ${info.sessionId}.bin (${access} no-HDD request; response not persisted)\n`,
+      C_DIM,
+    );
+    currentRequestInfo = info;
+    return;
+  }
+  if (access === "read-only") {
+    const exact = `${info.sessionId}.bin`;
+    if (existsSync(slotPath(exact))) {
+      hddBanner("restore read-only", exact, "(reads .bin + .bin.ckpt; response will not be saved)");
+      const r = await callSlotAction("restore", exact);
+      const restore = slotRestoreSucceeded(r);
+      slotLog(
+        `HDD CACHE restore read-only status=${r.status} n_restored=${restore.nRestored} n_read=${restore.nRead} ${r.body.slice(0, 200)}\n`,
+        restore.ok ? C_GREEN : colorForStatus("restore", r.status),
+      );
+      // Deliberately no writeSlotMeta here: the persisted slot is untouched
+      // and its metadata must keep describing the completed on-disk state.
+      slotHasContent = restore.ok;
+      slotDirtySinceSave = false;
+      slotTainted = false;
+      currentSession = info.sessionId;
+      currentRequestInfo = info;
+      currentLoadedFrom = restore.ok ? info.sessionId : null;
+      return;
+    }
+    slotLog(
+      `\n=== HDD CACHE restore READ-ONLY MISS: ${info.sessionId}.bin (no exact session cache)\n`,
+      C_YELLOW,
+    );
+  } else {
+    slotLog(
+      `\n=== HDD CACHE bypass: ${info.sessionId}.bin (OpenClaw ${info.agentKind ?? "unknown"} no-HDD request; not saved to HDD)\n`,
+      C_YELLOW,
+    );
+  }
+  // Cold no-HDD start. The previous KV stays physically in the slot; the
+  // server's prompt cache may still salvage a prefix if anything matches.
+  slotHasContent = false;
+  slotDirtySinceSave = false;
+  slotTainted = false;
+  currentSession = info.sessionId;
+  currentRequestInfo = info;
+  currentLoadedFrom = null;
 }
 
 // ── Forwarding helpers ────────────────────────────────────────────────────
@@ -1006,8 +1169,16 @@ function pipeRequestStreaming(tag, clientReq, proxyReq) {
 
 async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessionInfo, finalize) {
   const sessionId = sessionInfo?.sessionId ?? null;
+  const access = sessionInfo?.slotAccess ?? "persistent";
+  const nonPersistent = access !== "persistent";
   try {
-    if (sessionInfo && slotCacheDir) await ensureSlotLoaded(sessionInfo);
+    if (sessionInfo && slotCacheDir) {
+      if (nonPersistent) {
+        await prepareNonPersistentRequest(sessionInfo, access);
+      } else {
+        await ensureSlotLoaded(sessionInfo);
+      }
+    }
   } catch (e) {
     log.write(`\n!!! SLOT mgmt error ${tag}: ${e.message}\n`);
     slotLog(`\n!!! HDD CACHE request blocked: ${e.message}\n`, C_RED);
@@ -1031,11 +1202,13 @@ async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessio
   // From this point until a complete 200 response, the slot is volatile:
   // prompt processing or generation may mutate KV/checkpoints, and aborts can
   // leave a partial state. Fail closed so the next switch does not persist an
-  // uncertain slot under a branch id.
+  // uncertain slot under a branch id. No-HDD traffic taints the slot now —
+  // from the first prefill token the KV diverges from the persisted state.
   if (sessionId && slotCacheDir) {
     currentSession = sessionId;
     slotHasContent = false;
-    slotDirtySinceSave = true;
+    slotDirtySinceSave = !nonPersistent;
+    if (nonPersistent) slotTainted = true;
   }
 
   // Re-send the buffered request. Strip hop-by-hop and length-related
@@ -1071,12 +1244,19 @@ async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessio
           // turn multiplies that for no prefix-cache benefit. The trade-off
           // is explicit: an unclean proxy/server death loses the turns since
           // the last switch.
+          //
+          // Completed no-HDD responses keep the slot tainted but usable:
+          // the KV holds this session's prompt + response, so a following
+          // same-session no-HDD turn rides the prompt cache for free. A
+          // completed persistent response clears the taint — its prefill
+          // rewrote the slot to the clean transcript.
           slotHasContent = true;
-          slotDirtySinceSave = true;
+          slotDirtySinceSave = !nonPersistent;
+          if (!nonPersistent) slotTainted = false;
         } else if (sessionId && slotCacheDir) {
           slotHasContent = false;
           slotDirtySinceSave = false;
-          if (currentRequestInfo) {
+          if (!nonPersistent && currentRequestInfo) {
             writeSlotMeta(currentRequestInfo, {
               completed: false,
               volatile: true,
@@ -1142,7 +1322,7 @@ async function handleRequest(clientReq, clientRes) {
       const sessionInfo = cacheInfoFromBody(bodyBuf.toString("utf8"), clientReq.headers);
       const sessionId = sessionInfo?.sessionId ?? null;
       requestLog(
-        `REQUEST ${tag} body_bytes=${bodyBuf.length} (${formatBytes(bodyBuf.length)}) content_length=${clientReq.headers["content-length"] ?? "chunked"} session=${sessionId ?? "none"} identity=${sessionInfo?.identitySource ?? "none"} agent=${sessionInfo?.agentKind ?? "unknown"}\n`,
+        `REQUEST ${tag} body_bytes=${bodyBuf.length} (${formatBytes(bodyBuf.length)}) content_length=${clientReq.headers["content-length"] ?? "chunked"} session=${sessionId ?? "none"} identity=${sessionInfo?.identitySource ?? "none"} agent=${sessionInfo?.agentKind ?? "unknown"} cache=${sessionInfo?.cachePolicy ?? "none"} access=${sessionInfo?.slotAccess ?? "none"}\n`,
       );
       const run = () => processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessionInfo, finalize);
       if (slotCacheDir) {
