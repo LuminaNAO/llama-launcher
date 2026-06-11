@@ -63,6 +63,10 @@ settings:
   CACHE_TYPE_V: "q4_0"
   CHECKPOINT_MAX: "64"
   CHECKPOINT_MIN_STEP: "2048"
+  # llama-hdd only: thin slot-save sidecars to <=10 checkpoints (geometric
+  # spacing from the tail, earliest kept for post-compaction resume). Cuts
+  # high-context save/restore IO ~5x; in-RAM checkpoints stay at CHECKPOINT_MAX.
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
   CONTEXT: "143360"
   DIO: "1"
   EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 2"

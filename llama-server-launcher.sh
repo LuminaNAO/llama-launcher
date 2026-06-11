@@ -776,7 +776,7 @@ TUNE_KEYS=(
     CONTEXT PARALLEL
     CACHE_RAM CACHE_TYPE_K CACHE_TYPE_V KV_UNIFIED
     SLOT_SAVE_PATH MIN_FREE_GB MAX_TOTAL_SLOTS_GB
-    CHECKPOINT_MIN_STEP CHECKPOINT_MAX
+    CHECKPOINT_MIN_STEP CHECKPOINT_MAX SLOT_SAVE_MAX_CHECKPOINTS
     NGL FLASH_ATTN
     TEMP TOP_P TOP_K
     HOST PORT API_KEY TIMEOUT THREADS
@@ -911,7 +911,7 @@ prompt_tune_value() {
     read -rp "$key [$current]: " value
     value="${value:-$current}"
     case "$key" in
-        CONTEXT|PARALLEL|CACHE_RAM|KV_UNIFIED|MIN_FREE_GB|MAX_TOTAL_SLOTS_GB|CHECKPOINT_MIN_STEP|CHECKPOINT_MAX|NGL|FLASH_ATTN|TOP_K|PORT|TIMEOUT|THREADS|NO_MMAP|DIO|JINJA|LOG_COLORS|REPEAT_LAST_N|DRY_ALLOWED_LENGTH)
+        CONTEXT|PARALLEL|CACHE_RAM|KV_UNIFIED|MIN_FREE_GB|MAX_TOTAL_SLOTS_GB|CHECKPOINT_MIN_STEP|CHECKPOINT_MAX|SLOT_SAVE_MAX_CHECKPOINTS|NGL|FLASH_ATTN|TOP_K|PORT|TIMEOUT|THREADS|NO_MMAP|DIO|JINJA|LOG_COLORS|REPEAT_LAST_N|DRY_ALLOWED_LENGTH)
             if ! [[ "$value" =~ ^[0-9]+$ ]]; then
                 echo "❌ $key must be a non-negative integer"
                 return 1
@@ -1344,6 +1344,8 @@ if [ "$HAS_MODEL_CONFIG" -eq 1 ]; then
     CACHE_TYPE_V="${CACHE_TYPE_V:-q8_0}"
     CHECKPOINT_MIN_STEP="${CHECKPOINT_MIN_STEP:-2048}"
     CHECKPOINT_MAX="${CHECKPOINT_MAX:-32}"
+    # 0 = write all checkpoints (vanilla llama.cpp compatible); >0 needs llama-hdd
+    SLOT_SAVE_MAX_CHECKPOINTS="${SLOT_SAVE_MAX_CHECKPOINTS:-0}"
     NGL="${NGL:-99}"
     TEMP="${TEMP:-0.3}"
     TOP_P="${TOP_P:-0.95}"
@@ -1642,6 +1644,12 @@ DIO_FLAG=""
 [ "$DIO" = "1" ] && DIO_FLAG="-dio"
 KV_UNIFIED_FLAG="--no-kv-unified"
 [ "$KV_UNIFIED" = "1" ] && KV_UNIFIED_FLAG="--kv-unified"
+
+# Checkpoint sidecar thinning needs llama-hdd; 0 keeps vanilla compatibility.
+SLOT_SAVE_MAX_CKPT_FLAG=""
+if [ "${SLOT_SAVE_MAX_CHECKPOINTS:-0}" -gt 0 ] 2>/dev/null; then
+    SLOT_SAVE_MAX_CKPT_FLAG="--slot-save-max-checkpoints $SLOT_SAVE_MAX_CHECKPOINTS"
+fi
 FA_FLAG=""
 [ "$FLASH_ATTN" = "1" ] && FA_FLAG="-fa on"
 LOG_COLORS_FLAG="--log-colors on"
@@ -1761,6 +1769,7 @@ LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
   -ctv "$CACHE_TYPE_V"
   --checkpoint-min-step "$CHECKPOINT_MIN_STEP"
   --ctx-checkpoints "$CHECKPOINT_MAX"
+  ${SLOT_SAVE_MAX_CKPT_FLAG:+$SLOT_SAVE_MAX_CKPT_FLAG}
   --seed "$SEED"
   ${MLOCK_FLAG:+$MLOCK_FLAG}
   ${MMPROJ:+--mmproj "$MMPROJ"}
