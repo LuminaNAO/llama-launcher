@@ -1,13 +1,17 @@
 #!/bin/bash
 # benchmark.sh — Benchmark llama.cpp inference at various context sizes
-# Usage: benchmark.sh <label>
-# Runs against a running llama-server on localhost:40801
+# Usage:  benchmark.sh <label>
+# Env vars:
+#   BASE_URL  default http://localhost:40801 — target server
+#   API_KEY   default ollama-local           — bearer token
+#   MAX_CTX   default 128000                 — skip tests whose prompt > MAX_CTX
 
 set -euo pipefail
 
 LABEL="${1:?Usage: benchmark.sh <label>}"
-API_KEY="ollama-local"
-BASE_URL="http://localhost:40801"
+API_KEY="${API_KEY:-ollama-local}"
+BASE_URL="${BASE_URL:-http://localhost:40801}"
+MAX_CTX="${MAX_CTX:-128000}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESULTS_DIR="$SCRIPT_DIR/benchmark-results"
 RESULTS_FILE="$RESULTS_DIR/bench-${LABEL}-$(date +%Y%m%d-%H%M%S).jsonl"
@@ -36,6 +40,11 @@ run_test() {
     local test_name="$1"
     local context_tokens="$2"
     local gen_tokens="$3"
+
+    if [ "$context_tokens" -gt "$MAX_CTX" ]; then
+        printf "  %-25s SKIPPED (ctx > MAX_CTX=%s)\n" "$test_name..." "$MAX_CTX"
+        return 0
+    fi
 
     printf "  %-25s " "$test_name..."
 
@@ -72,7 +81,7 @@ PYSCRIPT
     response=$(curl -sf "$BASE_URL/v1/chat/completions" \
         -H "Authorization: Bearer $API_KEY" \
         -H "Content-Type: application/json" \
-        --max-time 600 \
+        --max-time 1800 \
         -d @"$TMPDIR_BENCH/request.json" 2>/dev/null) || { echo "FAILED (curl)"; return 1; }
 
     # Parse response
