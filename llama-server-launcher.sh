@@ -5,6 +5,7 @@
 # Override paths via environment variables if needed:
 #   export LLAMACPP_MODELS_DIR=/path/to/models
 #   export LLAMACPP_SERVER_PATH=/path/to/llama-server
+#   export LLAMACPP_BUILD_TYPE=rocm|vulkan|debug|release
 
 # Config file for storing user-selected models path
 CONFIG_FILE="$HOME/.llama-launcher-config"
@@ -54,14 +55,50 @@ fi
 # Force re-evaluation of MODELS_DIR from environment
 MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
 
-# Find llama.cpp repo and server dynamically
-LLAMACPP_BASE="$(dirname "$(readlink -f "$0")")/../llama.cpp"
-LLAMACPP_SERVER_PATH="${LLAMACPP_BASE}/build/bin/llama-server"
+# Discover llama.cpp builds dynamically
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LLAMA_LAUNCHER_DIR="$SCRIPT_DIR"
+LLAMACPP_DIR="$LLAMA_LAUNCHER_DIR/llama.cpp"
+
+# Determine build type (rocm, vulkan, or default)
+BUILD_TYPE="${LLAMACPP_BUILD_TYPE:-rocm}"
+BUILD_DIR="$LLAMA_LAUNCHER_DIR/builds/$BUILD_TYPE"
+
+# Find llama-server based on build type
+if [ "$BUILD_TYPE" = "vulkan" ]; then
+    LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
+else
+    # ROCm and other backends
+    LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
+fi
 
 # Verify server exists, exit with helpful message if not
 if [ ! -f "$LLAMACPP_SERVER_PATH" ]; then
     echo "❌ llama-server not found at $LLAMACPP_SERVER_PATH"
-    echo "   Expected llama.cpp repo at: $LLAMACPP_BASE"
+    echo ""
+    echo "Available builds:"
+    if [ -d "$LLAMA_LAUNCHER_DIR/builds" ]; then
+        for dir in "$LLAMA_LAUNCHER_DIR"/builds/*/; do
+            if [ -d "$dir" ]; then
+                backend=$(basename "$dir")
+                if [ -f "$dir/bin/llama-server" ]; then
+                    echo "  ✅ $backend"
+                else
+                    echo "  ⚠️  $backend (not built)"
+                fi
+            fi
+        done
+    else
+        echo "  ❌ No builds directory found"
+    fi
+    echo ""
+    echo "To build a backend, run:"
+    echo "  cd $LLAMA_LAUNCHER_DIR"
+    echo "  ./build.sh [rocm|vulkan]"
+    echo ""
+    echo "Or set LLAMACPP_BUILD_TYPE to specify which build to use:"
+    echo "  export LLAMACPP_BUILD_TYPE=rocm"
+    echo "  export LLAMACPP_BUILD_TYPE=vulkan"
     exit 1
 fi
 
@@ -95,12 +132,28 @@ selected_model="${models[$((selection-1))]}"
 model_path="${MODELS_DIR}/${selected_model}"
 
 echo ""
-echo "🚀 Starting llama-server with model: $selected_model"
+echo "🚀 Starting llama-server"
+echo "   Backend: $BUILD_TYPE"
+echo "   Build dir: $BUILD_DIR"
+echo "   Model: $selected_model"
+echo "   Server: $LLAMACPP_SERVER_PATH"
 echo ""
 
 # Run llama-server with the selected model
-export ROCBLAS_USE_HIPBLASLT=1
-export HSA_XNACK=1
+case "$BUILD_TYPE" in
+    rocm)
+        export ROCBLAS_USE_HIPBLASLT=1
+        export HSA_XNACK=1
+        ;;
+    vulkan)
+        # Vulkan-specific environment variables if needed
+        export VK_ICD_FILENAMES=""
+        ;;
+    *)
+        echo "⚠️  No special environment variables set for $BUILD_TYPE"
+        ;;
+esac
+
 "$LLAMACPP_SERVER_PATH" \
   -m "$model_path" \
   -ngl 99 \
