@@ -12,13 +12,13 @@ temp/
 
 # Build artifacts
 build/
+builds
 *.o
 *.pyc
 
 # OS files
 .DS_Store
 Thumbs.db
-builds/
 
 # Build outputs
 build-logs/
