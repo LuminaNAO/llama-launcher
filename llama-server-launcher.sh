@@ -6,6 +6,17 @@
 #   export LLAMACPP_MODELS_DIR=/path/to/models
 #   export LLAMACPP_SERVER_PATH=/path/to/llama-server
 #   export LLAMACPP_BUILD_TYPE=rocm|vulkan|debug|release
+#
+# Options:
+#   --seed <N>   Override the random seed (default: 42)
+
+SEED=42
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --seed) SEED="$2"; shift 2 ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
 
 # Config file lives in the repo dir so it stays with the project
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,42 +81,55 @@ LLAMACPP_DIR="$LLAMA_LAUNCHER_DIR/llama.cpp"
 BUILD_TYPE="${LLAMACPP_BUILD_TYPE:-rocm}"
 BUILD_DIR="$LLAMA_LAUNCHER_DIR/builds/$BUILD_TYPE"
 
-# Find llama-server based on build type
-if [ "$BUILD_TYPE" = "vulkan" ]; then
-    LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
-else
-    # ROCm and other backends
-    LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
-fi
+LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
 
-# Verify server exists, exit with helpful message if not
+# Verify server exists, prompt interactively if not
 if [ ! -f "$LLAMACPP_SERVER_PATH" ]; then
-    echo "❌ llama-server not found at $LLAMACPP_SERVER_PATH"
+    echo "⚠️  llama-server not found at $LLAMACPP_SERVER_PATH"
     echo ""
-    echo "Available builds:"
+
+    # Collect available builds
+    available_builds=()
     if [ -d "$LLAMA_LAUNCHER_DIR/builds" ]; then
         for dir in "$LLAMA_LAUNCHER_DIR"/builds/*/; do
-            if [ -d "$dir" ]; then
-                backend=$(basename "$dir")
-                if [ -f "$dir/bin/llama-server" ]; then
-                    echo "  ✅ $backend"
-                else
-                    echo "  ⚠️  $backend (not built)"
-                fi
+            if [ -f "$dir/bin/llama-server" ]; then
+                available_builds+=("$(basename "$dir")")
             fi
         done
-    else
-        echo "  ❌ No builds directory found"
     fi
+
+    if [ ${#available_builds[@]} -gt 0 ]; then
+        echo "Available builds:"
+        for i in "${!available_builds[@]}"; do
+            printf "  %d) %s\n" $((i+1)) "${available_builds[$i]}"
+        done
+        echo ""
+        read -rp "Select build [1-${#available_builds[@]}]: " build_sel
+        if [[ "$build_sel" =~ ^[0-9]+$ ]] && [ "$build_sel" -ge 1 ] && [ "$build_sel" -le ${#available_builds[@]} ]; then
+            BUILD_TYPE="${available_builds[$((build_sel-1))]}"
+            BUILD_DIR="$LLAMA_LAUNCHER_DIR/builds/$BUILD_TYPE"
+            LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
+        else
+            echo "❌ Invalid selection"; exit 1
+        fi
+    else
+        echo "No builds found in $LLAMA_LAUNCHER_DIR/builds/"
+        echo ""
+        read -rp "Enter path to llama-server binary (or 'q' to quit): " server_path
+        if [ "$server_path" = "q" ]; then exit 0; fi
+        if [ -f "$server_path" ]; then
+            LLAMACPP_SERVER_PATH="$server_path"
+            BUILD_DIR="$(dirname "$(dirname "$server_path")")"
+            BUILD_TYPE="custom"
+        else
+            echo "❌ File not found: $server_path"; exit 1
+        fi
+    fi
+
+    # Save selection for next time
+    echo "LLAMACPP_BUILD_TYPE=$BUILD_TYPE" >> "$CONFIG_FILE"
+    echo "✅ Build type '$BUILD_TYPE' saved to $CONFIG_FILE"
     echo ""
-    echo "To build a backend, run:"
-    echo "  cd $LLAMA_LAUNCHER_DIR"
-    echo "  ./build.sh [rocm|vulkan]"
-    echo ""
-    echo "Or set LLAMACPP_BUILD_TYPE to specify which build to use:"
-    echo "  export LLAMACPP_BUILD_TYPE=rocm"
-    echo "  export LLAMACPP_BUILD_TYPE=vulkan"
-    exit 1
 fi
 
 echo "🔍 Scanning models in $MODELS_DIR..."
@@ -245,4 +269,5 @@ echo ""
   -ctv "$CACHE_TYPE_V" \
   --checkpoint-every-n-tokens "$CHECKPOINT_INTERVAL" \
   --ctx-checkpoints "$CHECKPOINT_MAX" \
+  --seed "$SEED" \
   --swa-full 2>&1 | tee -a $HOME/llama.log
