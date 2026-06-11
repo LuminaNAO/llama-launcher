@@ -267,7 +267,7 @@ if [ "$HAS_MODEL_CONFIG" -eq 1 ]; then
     CACHE_TYPE_V="${CACHE_TYPE_V:-q8_0}"
     CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-4096}"
     CHECKPOINT_MAX="${CHECKPOINT_MAX:-32}"
-    SWA_FULL="${SWA_FULL:-1}"
+
     echo "📋 Profile: per-model (${CONTEXT} ctx, ${CACHE_TYPE_K} KV, ${CACHE_RAM} MB cache, ${PARALLEL} slots)"
 elif [ "$TOTAL_RAM_GB" -ge 112 ]; then
     CONTEXT=488576
@@ -277,7 +277,6 @@ elif [ "$TOTAL_RAM_GB" -ge 112 ]; then
     CACHE_TYPE_V="q8_0"
     CHECKPOINT_INTERVAL=4096
     CHECKPOINT_MAX=64
-    SWA_FULL=1
     echo "📋 Profile: 128 GB (488k context, q8_0 KV, 30 GB cache, 2 slots)"
 elif [ "$TOTAL_RAM_GB" -ge 48 ]; then
     CONTEXT=122144
@@ -287,7 +286,6 @@ elif [ "$TOTAL_RAM_GB" -ge 48 ]; then
     CACHE_TYPE_V="q8_0"
     CHECKPOINT_INTERVAL=8192
     CHECKPOINT_MAX=32
-    SWA_FULL=1
     echo "📋 Profile: 64 GB (122k context, q8_0 KV, 8 GB cache, 2 slots)"
     echo "⚠️  64 GB profile not yet tuned — using conservative defaults"
 else
@@ -298,7 +296,6 @@ else
     CACHE_TYPE_V="q8_0"
     CHECKPOINT_INTERVAL=8192
     CHECKPOINT_MAX=16
-    SWA_FULL=1
     echo "📋 Profile: minimal (61k context, q8_0 KV, 4 GB cache, 1 slot)"
     echo "⚠️  Low RAM — using minimal settings"
 fi
@@ -345,7 +342,7 @@ CACHE_TYPE_K=$CACHE_TYPE_K
 CACHE_TYPE_V=$CACHE_TYPE_V
 CHECKPOINT_INTERVAL=$CHECKPOINT_INTERVAL
 CHECKPOINT_MAX=$CHECKPOINT_MAX
-SWA_FULL=$SWA_FULL
+
 
 # Uncomment to override additional server flags:
 # EXTRA_ARGS="--flag value"
@@ -384,4 +381,4 @@ echo ""
   ${MLOCK_FLAG:+$MLOCK_FLAG} \
   ${MMPROJ:+--mmproj "$MMPROJ"} \
   ${EXTRA_ARGS:+$EXTRA_ARGS} \
-  ${SWA_FULL:+--swa-full} 2>&1 | tee -a $HOME/llama.log
+  2>&1 | tee -a $HOME/llama.log

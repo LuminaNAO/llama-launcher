@@ -216,8 +216,7 @@ ExecStart=$SERVER_BIN \\
   -ctv $CACHE_TYPE_V \\
   --checkpoint-every-n-tokens $CHECKPOINT_INTERVAL \\
   --ctx-checkpoints $CHECKPOINT_MAX \\
-  --seed $SEED \\
-  --swa-full
+  --seed $SEED
 StandardOutput=append:$INSTALL_HOME/llama.log
 StandardError=append:$INSTALL_HOME/llama.log
 Restart=on-failure
