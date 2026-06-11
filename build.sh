@@ -76,9 +76,10 @@ else
     #   ~/code/llama.cpp            (default sibling)
     #   ~/code/llama.cpp-*          (suffix style, e.g. llama.cpp-v4flash)
     #   ~/code/llama*/llama.cpp     (nested style, e.g. llama-mtp/llama.cpp)
+    #   ~/code/llama*               (flat style, e.g. llama-mtp/ with CMakeLists at root)
     parent_dir="$(dirname "$SCRIPT_DIR")"
     candidates=()
-    for c in "$parent_dir"/llama.cpp "$parent_dir"/llama.cpp-* "$parent_dir"/llama*/llama.cpp; do
+    for c in "$parent_dir"/llama.cpp "$parent_dir"/llama.cpp-* "$parent_dir"/llama*/llama.cpp "$parent_dir"/llama*; do
         [ -f "$c/CMakeLists.txt" ] || continue
         # Deduplicate (a glob can hit the same path twice)
         c_real="$(realpath "$c" 2>/dev/null || echo "$c")"
