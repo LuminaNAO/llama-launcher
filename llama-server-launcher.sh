@@ -8,15 +8,12 @@
 #   export LLAMACPP_BUILD_TYPE=rocm|vulkan|debug|release
 #
 # Options:
-#   --seed <N>      Override the random seed (default: 42)
-#   --mmproj <path> Path to vision projector GGUF for multimodal models
+#   --seed <N>   Override the random seed (default: 42)
 
 SEED=42
-MMPROJ=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --seed)   SEED="$2";   shift 2 ;;
-        --mmproj) MMPROJ="$2"; shift 2 ;;
+        --seed) SEED="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -170,6 +167,30 @@ fi
 selected_model="${models[$((selection-1))]}"
 model_path="${MODELS_DIR}/${selected_model}"
 
+# ── Auto-detect vision projector ──────────────────────────────────────────────
+MMPROJ=""
+model_prefix=$(echo "$selected_model" | cut -d'-' -f1-3)
+mmproj_matches=()
+while IFS= read -r -d '' file; do
+    mmproj_matches+=("$file")
+done < <(find "$MODELS_DIR" -maxdepth 1 -name "*mmproj*.gguf" -print0 2>/dev/null | \
+         grep -z "$model_prefix" 2>/dev/null || true)
+
+if [ ${#mmproj_matches[@]} -eq 1 ]; then
+    MMPROJ="${mmproj_matches[0]}"
+elif [ ${#mmproj_matches[@]} -gt 1 ]; then
+    echo "Multiple vision projector files found:"
+    for i in "${!mmproj_matches[@]}"; do
+        printf "  %d) %s\n" $((i+1)) "$(basename "${mmproj_matches[$i]}")"
+    done
+    echo "  0) None (text-only)"
+    echo ""
+    read -rp "Select mmproj [0-${#mmproj_matches[@]}]: " mmproj_sel
+    if [[ "$mmproj_sel" =~ ^[1-9][0-9]*$ ]] && [ "$mmproj_sel" -le ${#mmproj_matches[@]} ]; then
+        MMPROJ="${mmproj_matches[$((mmproj_sel-1))]}"
+    fi
+fi
+
 echo ""
 echo "🚀 Starting llama-server"
 echo "   Backend: $BUILD_TYPE"
@@ -177,11 +198,9 @@ echo "   Build dir: $BUILD_DIR"
 echo "   Model: $selected_model"
 echo "   Server: $LLAMACPP_SERVER_PATH"
 if [ -n "$MMPROJ" ]; then
-    if [ ! -f "$MMPROJ" ]; then
-        echo "❌ mmproj file not found: $MMPROJ"
-        exit 1
-    fi
-    echo "   Mmproj: $MMPROJ"
+    echo "   Vision: $(basename "$MMPROJ")"
+else
+    echo "   Vision: none"
 fi
 echo ""
 
