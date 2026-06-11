@@ -119,3 +119,29 @@ See `utils/BENCHMARK-RESULTS.md` for recorded results.
 ## License
 
 MIT (same as llama.cpp).
+
+## GPG Signature
+
+Public key available in [KEYS](KEYS) and on keys.openpgp.org (`5EBC6FD72F5664B9AC6B359CF09191C191DED4BA`).
+
+## Install
+
+**AUR (Arch Linux):**
+
+```bash
+yay -S llama-launcher
+# or
+paru -S llama-launcher
+```
+
+**Manual:**
+
+```bash
+git clone https://codeberg.org/LuminaNAO/llama-launcher.git
+cd llama-launcher
+./install.sh
+```
+
+## Contributing
+
+Issues and pull requests should be submitted on [Codeberg](https://codeberg.org/LuminaNAO/llama-launcher). The GitHub mirror is read-only.
