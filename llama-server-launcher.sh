@@ -871,7 +871,7 @@ if [ "$LOG_FLAGS_TOUCHED" -eq 0 ] && [ "$HDD_CACHE_TOUCHED" -eq 0 ]; then
            HDD_CACHE_MODE="default" ;;
     esac
 fi
-if [ "$LOG_FLAGS_TOUCHED" -eq 1 ] && [ "$HDD_CACHE_TOUCHED" -eq 0 ]; then
+if [ "$LOG_FLAGS_TOUCHED" -eq 1 ] && [ "$HDD_CACHE_TOUCHED" -eq 0 ] && [ -z "${SLOT_SAVE_PATH:-}" ]; then
     HDD_CACHE_MODE="off"
 fi
 
@@ -1041,8 +1041,11 @@ _extras_log=""
 [[ "$NO_LOG" -eq 0 ]] && _extras_log+="--log "
 [[ "$NO_PROXY" -eq 0 ]] && _extras_log+="--proxy "
 [[ "$NO_DEEP_LOG" -eq 0 ]] && _extras_log+="--deep-log "
-[[ "$HDD_CACHE_MODE" == "on" ]] && _extras_log+="--hdd-cache "
-[[ "$HDD_CACHE_MODE" == "off" ]] && _extras_log+="--no-hdd-cache "
+if [ -n "${SLOT_SAVE_PATH:-}" ]; then
+    _extras_log+="--hdd-cache "
+elif [[ "$HDD_CACHE_MODE" == "off" ]]; then
+    _extras_log+="--no-hdd-cache "
+fi
 _extras_log="${_extras_log% }"
 printf '%s\t%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$BUILD_TYPE" "$model_path" "$_tune_log" "$_extras_log" >> "$LAUNCH_HISTORY"
 
