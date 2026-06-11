@@ -8,7 +8,8 @@
 
 # Default paths (can be overridden via environment variables)
 MODELS_DIR="${LLAMACPP_MODELS_DIR:-/usr/local/share/llama.cpp/models}"
-LLAMACPP_SERVER_PATH="${LLAMACPP_SERVER_PATH:-$(dirname "$(readlink -f "$0")")/../../llama.cpp/build/bin/llama-server}"
+#LLAMACPP_SERVER_PATH="${LLAMACPP_SERVER_PATH:-$(dirname "$(readlink -f "$0")")/../../llama.cpp/build/bin/llama-server}"
+LLAMACPP_SERVER_PATH="/srv/shared/git/llama.cpp/build/bin/llama-server"
 
 echo "🔍 Scanning models in $MODELS_DIR..."
 echo ""
@@ -49,21 +50,23 @@ echo "🚀 Starting llama-server with model: $selected_model"
 echo ""
 
 # Run llama-server with the selected model
-HSA_XNACK=1 "$LLAMACPP_SERVER_PATH" \
+export ROCBLAS_USE_HIPBLASLT=1
+export GGML_HIP_FORCE_MMQ=1
+export HSA_XNACK=1
+export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
+"$LLAMACPP_SERVER_PATH" \
   -m "$model_path" \
   -ngl 99 \
   -c 122144 \
   -fa on \
-  --temp 1 \
-  --log-verbosity 3 \
-  --no-mmap \
-  --timeout 3600 \
+  --temp 0.7 \
   --top-p 0.95 \
   --top-k 20 \
-  --jinja \
-  --port 40801 \
+  --threads $(nproc) \
+  --no-mmap \
+  --timeout 3600 \
   --host 0.0.0.0 \
-  --n-gpu-layers 99 \
+  --port 40801 \
   --api-key ollama-local \
-  --swa-full \
-  --no-context-shift &> $HOME/llama.log
+  --jinja \
+  --swa-full &> $HOME/llama.log
