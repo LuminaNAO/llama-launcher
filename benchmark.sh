@@ -150,6 +150,14 @@ echo "── XXL context (~128k prompt) ──"
 run_test "xxl128k-gen500" 128000 500
 echo ""
 
+echo "── XXXL context (~192k prompt) ──"
+run_test "xxxl192k-gen500" 192000 500
+echo ""
+
+echo "── Max context (~256k prompt) ──"
+run_test "max256k-gen500" 256000 500
+echo ""
+
 echo ""
 echo "=== Summary ==="
 python3 - "$RESULTS_FILE" <<'PYSCRIPT'
