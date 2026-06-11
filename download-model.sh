@@ -19,6 +19,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
+LEGACY_CONFIG_FILE="$SCRIPT_DIR/.llamacpp-helper-config"
 DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
 TMPDIR="${TMPDIR:-/tmp}"
 PARSE_FILE="$(mktemp "$TMPDIR/download-model.XXXXXX.json")"
@@ -56,6 +57,8 @@ echo ""
 # ── Resolve models directory ────────────────────────────────────────────────
 if [ -f "$CONFIG_FILE" ]; then
     eval "$(cat "$CONFIG_FILE")"
+elif [ -f "$LEGACY_CONFIG_FILE" ]; then
+    eval "$(cat "$LEGACY_CONFIG_FILE")"
 fi
 MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
 MODELS_DIR="${MODELS_DIR%/}"
