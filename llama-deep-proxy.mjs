@@ -80,8 +80,11 @@ let slotHasContent = false;
 let slotDirtySinceSave = false;    // true after a request may have mutated KV
 
 function sessionBase(sessionId) {
-  const dash = typeof sessionId === "string" ? sessionId.indexOf("-") : -1;
-  return dash > 0 ? sessionId.slice(0, dash) : null;
+  // Only hash-derived "<base12>-<branch12>" ids have a base. OpenClaw slot
+  // ids are exact-only and deliberately fall out of same-base matching.
+  if (typeof sessionId !== "string") return null;
+  const m = /^([0-9a-f]{12})-[0-9a-f]{12}$/i.exec(sessionId);
+  return m ? m[1] : null;
 }
 
 function sameSessionBase(a, b) {
@@ -387,6 +390,10 @@ function writeSlotMeta(info, extra = {}) {
     promptPrefixHash: info.promptPrefixHash,
     promptPrefixBytes: Buffer.byteLength(info.branchPrefix, "utf8"),
     bodyBytes: info.bodyBytes,
+    identitySource: info.identitySource,
+    identityLabel: info.identityLabel,
+    agentKind: info.agentKind,
+    openClaw: info.openClaw,
     updatedAt: now,
     ...extra,
   };
@@ -403,7 +410,124 @@ function writeSlotMeta(info, extra = {}) {
   }
 }
 
-export function cacheInfoFromBody(jsonStr) {
+// ── Request identity ──────────────────────────────────────────────────────
+// Slot routing prefers explicit client identity over prompt-content hashing.
+// OpenClaw labels every backend request with x-openclaw-* headers; the
+// session id maps 1:1 to a slot file regardless of how the prompt mutates
+// (compaction, tool churn, system prompt updates). Body identity keys and
+// the system+first-message anchor hash remain as fallbacks for clients that
+// don't send headers.
+export const OPENCLAW_HEADERS = {
+  sessionId: "x-openclaw-session-id",
+  agentKind: "x-openclaw-agent-kind",
+  cachePolicy: "x-openclaw-cache-policy",
+  sessionKey: "x-openclaw-session-key",
+  agentId: "x-openclaw-agent-id",
+  runId: "x-openclaw-run-id",
+  trigger: "x-openclaw-trigger",
+};
+
+export function stableHashId(prefix, value, bytes = 12) {
+  return createHash("sha256").update(`${prefix}:${value}`).digest("hex").slice(0, bytes);
+}
+
+// Map an OpenClaw session id (e.g. "signal:group:b64+chars=",
+// "tui-<uuid>", "agent:main:foo") onto a filesystem-safe slot id that stays
+// human-readable. All segments are kept — leaf-only naming collides across
+// channels. Falls back to a hashed name when sanitizing eats everything,
+// and caps length with a hash suffix so distinct long ids stay distinct.
+export function safeSlotIdFromOpenClawSessionId(value) {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  const hash = createHash("sha256").update(raw).digest("hex").slice(0, 12);
+  const safe = raw
+    .split(":")
+    .filter(Boolean)
+    .map((segment) => segment
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=/g, "")
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^[.-]+/, "")
+      .replace(/[.-]+$/, ""))
+    .filter(Boolean)
+    .join("-")
+    .replace(/^\.+/, "")
+    .replace(/\.+$/, "")
+    .replace(/-+/g, "-");
+  if (!safe || safe === "." || safe === "..") return `openclaw-${hash}`;
+  if (safe.length <= 180) return safe;
+  return `${safe.slice(0, 167).replace(/[.-]+$/, "")}-${hash}`;
+}
+
+function scalarIdentityValue(value) {
+  if (typeof value === "string") {
+    const v = value.trim();
+    if (v.length >= 6 && v.length <= 256) return v;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+export function headerValue(headers, key) {
+  const value = headers?.[key.toLowerCase()];
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string") return null;
+  const v = raw.trim();
+  if (v.length >= 1 && v.length <= 512) return v;
+  return null;
+}
+
+export function findOpenClawHeaderIdentity(headers) {
+  const sessionId = headerValue(headers, OPENCLAW_HEADERS.sessionId);
+  // Metadata headers can be short ("main"), but a session id under 4 chars
+  // is more plausibly a stray value than a real conversation id — don't let
+  // it become a slot filename.
+  if (!sessionId || sessionId.length < 4) return null;
+  const agentKind = (headerValue(headers, OPENCLAW_HEADERS.agentKind) ?? "").toLowerCase();
+  return {
+    source: "openclaw-session-id",
+    value: sessionId,
+    agentKind: agentKind === "subagent" ? "subagent" : agentKind === "main" ? "main" : null,
+    sessionKey: headerValue(headers, OPENCLAW_HEADERS.sessionKey),
+    agentId: headerValue(headers, OPENCLAW_HEADERS.agentId),
+    runId: headerValue(headers, OPENCLAW_HEADERS.runId),
+    trigger: headerValue(headers, OPENCLAW_HEADERS.trigger),
+  };
+}
+
+export function findStableIdentity(obj, headers = {}) {
+  const openClawHeaderIdentity = findOpenClawHeaderIdentity(headers);
+  if (openClawHeaderIdentity) return openClawHeaderIdentity;
+
+  const preferred = [
+    "session_id", "sessionId",
+    "conversation_id", "conversationId",
+    "thread_id", "threadId",
+    "chat_id", "chatId",
+    "transcript_id", "transcriptId",
+  ];
+  const containers = [
+    obj?.metadata,
+    obj?.meta,
+    obj?.extra,
+    obj?.session,
+    obj?.conversation,
+    obj,
+  ].filter((v) => v && typeof v === "object" && !Array.isArray(v));
+
+  for (const container of containers) {
+    for (const key of preferred) {
+      const value = scalarIdentityValue(container[key]);
+      if (value) return { source: key, value };
+    }
+  }
+  return null;
+}
+
+export function cacheInfoFromBody(jsonStr, headers = {}) {
   try {
     const obj = JSON.parse(jsonStr);
     let anchor = "";
@@ -418,12 +542,36 @@ export function cacheInfoFromBody(jsonStr) {
 
     const branchPrefix = jsonStr.slice(0, BRANCH_PREFIX_BYTES);
     const promptHash = createHash("sha256").update(jsonStr).digest("hex");
-    const baseId = createHash("sha256").update(anchor).digest("hex").slice(0, 12);
-    const branchId = promptHash.slice(0, 12);
+    const stableIdentity = findStableIdentity(obj, headers);
+    // Header-identified OpenClaw sessions get one slot file named after the
+    // session id, restored by exact match only: the id is already unique per
+    // conversation, so prefix-similarity parent matching can only misroute.
+    const openClawSlotId = stableIdentity?.source === "openclaw-session-id"
+      ? safeSlotIdFromOpenClawSessionId(stableIdentity.value)
+      : null;
+    const baseId = openClawSlotId ?? (stableIdentity
+      ? stableHashId(stableIdentity.source, stableIdentity.value)
+      : stableHashId("anchor", anchor));
+    const branchId = openClawSlotId ? "openclaw" : promptHash.slice(0, 12);
+    const sessionId = openClawSlotId ?? `${baseId}-${branchId}`;
     return {
-      sessionId: `${baseId}-${branchId}`,
+      sessionId,
       baseId,
       branchId,
+      exactOnly: Boolean(openClawSlotId),
+      identitySource: stableIdentity ? stableIdentity.source : "anchor",
+      identityLabel: stableIdentity ? stableIdentity.source : "system+first-message",
+      agentKind: stableIdentity?.agentKind ?? null,
+      openClaw: stableIdentity?.source === "openclaw-session-id"
+        ? {
+            sessionId: stableIdentity.value ?? null,
+            slotId: openClawSlotId,
+            sessionKey: stableIdentity.sessionKey ?? null,
+            agentId: stableIdentity.agentId ?? null,
+            runId: stableIdentity.runId ?? null,
+            trigger: stableIdentity.trigger ?? null,
+          }
+        : null,
       promptHash,
       promptPrefixHash: createHash("sha256").update(branchPrefix).digest("hex"),
       branchPrefix,
@@ -488,12 +636,16 @@ function selectRestoreTarget(info) {
   if (existsSync(slotPath(exact))) {
     return { filename: exact, slotId: info.sessionId, kind: "exact" };
   }
+  if (info?.exactOnly) {
+    return null;
+  }
   const parent = findBestSameBaseParent(info);
   if (parent) return { ...parent, kind: parent.legacy ? "legacy-parent" : "parent" };
   return null;
 }
 
 function scoreLiveParent(info) {
+  if (info?.exactOnly) return null;
   if (!currentSession || !slotHasContent || !sameSessionBase(currentSession, info?.sessionId)) return null;
   const parentInfo = currentRequestInfo;
   if (!parentInfo || typeof parentInfo.branchPrefix !== "string" || typeof info?.branchPrefix !== "string") {
@@ -623,7 +775,10 @@ async function ensureSlotLoaded(info) {
 
     const restoreTarget = selectRestoreTarget(info);
     if (!restoreTarget) {
-      slotLog(`\n=== HDD CACHE restore MISS: ${newSessionId}.bin (no exact or similar same-base parent)\n`, C_YELLOW);
+      const missReason = info.exactOnly
+        ? "no exact OpenClaw session cache"
+        : "no exact or similar same-base parent";
+      slotLog(`\n=== HDD CACHE restore MISS: ${newSessionId}.bin (${missReason})\n`, C_YELLOW);
       slotHasContent = false;
       slotDirtySinceSave = false;
       currentSession = newSessionId;
@@ -963,10 +1118,10 @@ async function handleRequest(clientReq, clientRes) {
       log.write(bodyBuf);
       log.write("\n");
 
-      const sessionInfo = cacheInfoFromBody(bodyBuf.toString("utf8"));
+      const sessionInfo = cacheInfoFromBody(bodyBuf.toString("utf8"), clientReq.headers);
       const sessionId = sessionInfo?.sessionId ?? null;
       requestLog(
-        `REQUEST ${tag} body_bytes=${bodyBuf.length} (${formatBytes(bodyBuf.length)}) content_length=${clientReq.headers["content-length"] ?? "chunked"} session=${sessionId ?? "none"}\n`,
+        `REQUEST ${tag} body_bytes=${bodyBuf.length} (${formatBytes(bodyBuf.length)}) content_length=${clientReq.headers["content-length"] ?? "chunked"} session=${sessionId ?? "none"} identity=${sessionInfo?.identitySource ?? "none"} agent=${sessionInfo?.agentKind ?? "unknown"}\n`,
       );
       const run = () => processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessionInfo, finalize);
       if (slotCacheDir) {
