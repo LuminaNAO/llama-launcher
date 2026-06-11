@@ -1,0 +1,8 @@
+=== Benchmark: 64k-ctx-test ===
+Results: /path/to/code/llama-launcher/benchmark-results/bench-64k-ctx-test-20260423-183241.jsonl
+
+Model: MiniMax-M2.7-UD-IQ4_XS-00001-of-00004.gguf
+
+── Short context (prompt < 100 tokens) ──
+  short-gen50...            pp=67.9 tok/s (51 tok) | tg=24.6 tok/s (50 tok)
+  short-gen200...           

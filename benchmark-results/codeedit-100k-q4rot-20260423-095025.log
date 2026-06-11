@@ -1,0 +1,56 @@
+[1;33mCode-Editing Quality Test[0m
+[1;33mServer: http://localhost:40801[0m
+
+  T1: Fix null bug in getUser: 2K payload
+  T2: Add getByEmail method: 2K payload
+  T3: Refactor callbacks to async/await: 2K payload
+  T4: Rename usr to userRecords: 1K payload
+  T5: Add TypeScript types: 2K payload
+  T6: Fix null bug (20K ctx): 40K payload
+  T7: Refactor async/await (20K ctx): 40K payload
+  T8: Add TypeScript types (20K ctx): 40K payload
+  T9: Fix null bug (50K ctx): 98K payload
+  T10: Refactor async/await (50K ctx): 98K payload
+  T11: Rename variables (50K ctx): 98K payload
+  T12: Fix null bug (80K ctx): 156K payload
+  T13: Add method (80K ctx): 156K payload
+  T14: Add TypeScript types (80K ctx): 156K payload
+TOTAL_TESTS=14
+
+[1;33m=== Baseline (no context padding) ===[0m
+[0;36mT1: Fix null bug in getUser                  [0m [0;32mPASS[0m (16738ms) null check added via edit_file
+[0;36mT2: Add getByEmail method                    [0m [0;32mPASS[0m (16747ms) method added via edit_file
+[0;36mT3: Refactor callbacks to async/await        [0m [0;32mPASS[0m (23427ms) async/await conversion correct
+[0;36mT4: Rename usr to userRecords                [0m [0;32mPASS[0m (22594ms) 1 edit(s), renamed correctly
+[0;36mT5: Add TypeScript types                     [0m [0;32mPASS[0m (23445ms) TS types added via edit_file
+
+[1;33m=== With ~20K context padding ===[0m
+[0;36mT6: Fix null bug (20K ctx)                   [0m [0;32mPASS[0m (66516ms) null check added via edit_file
+[0;36mT7: Refactor async/await (20K ctx)           [0m [0;31mFAIL[0m no tool call, stop=end_turn (19989ms)
+    Here's the refactored function using async/await:
+
+```typescript
+// File: /project/src/api-client.ts
+import { config } f
+[0;36mT8: Add TypeScript types (20K ctx)           [0m [0;32mPASS[0m (27177ms) TS types added via edit_file
+
+[1;33m=== With ~50K context padding ===[0m
+[0;36mT9: Fix null bug (50K ctx)                   [0m [0;32mPASS[0m (114554ms) null check added via edit_file
+[0;36mT10: Refactor async/await (50K ctx)          [0m [0;32mPASS[0m (24600ms) async/await conversion correct
+[0;36mT11: Rename variables (50K ctx)              [0m [0;32mPASS[0m (22886ms) 1 edit(s), renamed correctly
+
+[1;33m=== With ~80K context padding ===[0m
+[0;36mT12: Fix null bug (80K ctx)                  [0m [0;31mFAIL[0m (125748ms) used read_file instead of edit_file
+[0;36mT13: Add method (80K ctx)                    [0m [0;32mPASS[0m (21838ms) method added via edit_file
+[0;36mT14: Add TypeScript types (80K ctx)          [0m [0;32mPASS[0m (42090ms) TS types added via edit_file
+
+[1;33m════════════════════════════════════[0m
+[1;33mResults: 12/14 passed, 2 failed[0m
+[1;33m════════════════════════════════════[0m
+
+[0;31mFailures:[0m
+  T7: Refactor async/await (20K ctx): no tool_use in response
+  T12: Fix null bug (80K ctx): used read_file instead of edit_file
+
+
+Responses saved: /tmp/code-edit-results-20260423-095954

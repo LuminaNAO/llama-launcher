@@ -1,0 +1,24 @@
+=== Benchmark: vulkan-100k-ub512-cram8g ===
+Results: /path/to/code/llama-launcher/benchmark-results/bench-vulkan-100k-ub512-cram8g-20260424-011008.jsonl
+
+Model: MiniMax-M2.7-UD-IQ4_XS-00001-of-00004.gguf
+
+── Short context (prompt < 100 tokens) ──
+  short-gen50...            pp=48.6 tok/s (51 tok) | tg=28.0 tok/s (50 tok)
+  short-gen200...           pp=26.3 tok/s (1 tok) | tg=27.7 tok/s (200 tok)
+  short-gen500...           pp=27.1 tok/s (1 tok) | tg=27.6 tok/s (500 tok)
+
+── Medium context (~4k prompt) ──
+  med4k-gen200...           pp=216.3 tok/s (3204 tok) | tg=26.0 tok/s (200 tok)
+  med4k-gen500...           pp=22.5 tok/s (1 tok) | tg=25.9 tok/s (500 tok)
+
+── Large context (~16k prompt) ──
+  large16k-gen200...        pp=175.0 tok/s (9557 tok) | tg=22.2 tok/s (200 tok)
+  large16k-gen500...        pp=19.4 tok/s (1 tok) | tg=22.2 tok/s (500 tok)
+
+── XL context (~64k prompt) ──
+  xl64k-gen200...           pp=90.1 tok/s (38155 tok) | tg=14.1 tok/s (200 tok)
+  xl64k-gen500...           pp=12.3 tok/s (1 tok) | tg=14.0 tok/s (500 tok)
+
+── XXL context (~128k prompt) ──
+  xxl128k-gen500...         

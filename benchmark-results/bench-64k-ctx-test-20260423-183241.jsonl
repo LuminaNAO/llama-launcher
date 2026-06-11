@@ -1,0 +1,2 @@
+{"type": "header", "label": "64k-ctx-test", "model": "MiniMax-M2.7-UD-IQ4_XS-00001-of-00004.gguf", "timestamp": "2026-04-23T18:32:41+08:00"}
+{"test": "short-gen50", "target_ctx": 0, "actual_prompt_tokens": 51, "gen_tokens": 50, "prompt_tok_s": 67.89, "gen_tok_s": 24.58, "prompt_ms": 751, "gen_ms": 2035}
