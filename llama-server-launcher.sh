@@ -551,34 +551,38 @@ if [ "$HAS_MODEL_CONFIG" -eq 1 ]; then
     KV_UNIFIED="${KV_UNIFIED:-1}"
     FLASH_ATTN="${FLASH_ATTN:-1}"
 
-    echo "📋 Profile: per-model (${CONTEXT} ctx, ${CACHE_TYPE_K} KV, ${CACHE_RAM} MB cache, ${PARALLEL} slots)"
+    echo "📋 Profile: per-model (${CONTEXT} ctx, ${CACHE_TYPE_K} KV, ${CACHE_RAM} MiB cache ceiling, ${PARALLEL} slots)"
+# CACHE_RAM semantics (see docs/CACHE-RAM.md): host-memory heap ceiling in MiB.
+# Not disk, not pre-allocated — self-shrinks on bad_alloc. Under RAM pressure,
+# cache pages spill to swap via the kernel VM subsystem (~200× faster than cold
+# PP even when fully swapped). Size it aspirationally; the OS gates the real usage.
 elif [ "$TOTAL_RAM_GB" -ge 112 ]; then
     CONTEXT=488576
     PARALLEL=2
-    CACHE_RAM=30720
+    CACHE_RAM=102400   # 100 GiB ceiling; real usage capped by RAM + swap
     CACHE_TYPE_K="q8_0"
     CACHE_TYPE_V="q8_0"
     CHECKPOINT_INTERVAL=4096
     CHECKPOINT_MAX=64
-    echo "📋 Profile: 128 GB (488k context, q8_0 KV, 30 GB cache, 2 slots)"
+    echo "📋 Profile: 128 GB (488k context, q8_0 KV, 100 GiB cache ceiling, 2 slots)"
 elif [ "$TOTAL_RAM_GB" -ge 48 ]; then
     CONTEXT=131072
     PARALLEL=1
-    CACHE_RAM=10240
+    CACHE_RAM=40960    # 40 GiB ceiling — swap still absorbs overflow
     CACHE_TYPE_K="q8_0"
     CACHE_TYPE_V="q8_0"
     CHECKPOINT_INTERVAL=4096
     CHECKPOINT_MAX=32
-    echo "📋 Profile: 64 GB (131k context, q8_0 KV, 10 GB cache, 1 slot)"
+    echo "📋 Profile: 64 GB (131k context, q8_0 KV, 40 GiB cache ceiling, 1 slot)"
 else
     CONTEXT=61072
     PARALLEL=1
-    CACHE_RAM=4096
+    CACHE_RAM=16384    # 16 GiB ceiling
     CACHE_TYPE_K="q8_0"
     CACHE_TYPE_V="q8_0"
     CHECKPOINT_INTERVAL=8192
     CHECKPOINT_MAX=16
-    echo "📋 Profile: minimal (61k context, q8_0 KV, 4 GB cache, 1 slot)"
+    echo "📋 Profile: minimal (61k context, q8_0 KV, 16 GiB cache ceiling, 1 slot)"
     echo "⚠️  Low RAM — using minimal settings"
 fi
 
