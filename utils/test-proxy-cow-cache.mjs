@@ -226,9 +226,8 @@ try {
     postJson(PROXY_PORT, "/v1/messages", makeLongPrefixPrompt("late divergence B")),
   ]);
 
-  const { bins, metas } = await waitForSettledSlots(1);
-  assert.ok(bins.length >= 1, `expected at least one saved branch, got ${bins.length}: ${bins.join(",")}`);
-  assert.ok(bins.length <= 2, `expected old same-base branches to be pruned, got ${bins.length}: ${bins.join(",")}`);
+  const { bins, metas } = await waitForSettledSlots(4);
+  assert.ok(bins.length >= 4, `expected multiple saved branches to be preserved, got ${bins.length}: ${bins.join(",")}`);
   assert.equal(bins.length, metas.length, "each .bin should have a .meta.json");
 
   const parsedMetas = metas.map((f) => JSON.parse(readFileSync(join(SLOT_DIR, f), "utf8")));
@@ -253,6 +252,7 @@ try {
     saves: saves.length,
     restores,
     bins: bins.length,
+    binFiles: bins,
     metas: metas.length,
     bytesByKind,
     slotDir: SLOT_DIR,
