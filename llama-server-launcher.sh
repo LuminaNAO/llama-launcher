@@ -6,8 +6,38 @@
 #   export LLAMACPP_MODELS_DIR=/path/to/models
 #   export LLAMACPP_SERVER_PATH=/path/to/llama-server
 
+# Config file for storing user-selected models path
+CONFIG_FILE="$HOME/.llama-launcher-config"
+
 # Default paths (can be overridden via environment variables)
 MODELS_DIR="${LLAMACPP_MODELS_DIR:-/usr/local/share/llama.cpp/models}"
+
+# Check if we have models at the current path, if not prompt for new path
+check_and_prompt_path() {
+    local models=()
+    while IFS= read -r -d '' file; do
+        models+=("$(basename "$file")")
+    done < <(find "$MODELS_DIR" -maxdepth 1 -name "*.gguf" -print0 2>/dev/null)
+    
+    if [ ${#models[@]} -eq 0 ]; then
+        echo "❌ No .gguf models found at $MODELS_DIR"
+        echo ""
+        read -rp "Enter path to models directory: " new_path
+        MODELS_DIR="$new_path"
+        # Save to config for next time
+        echo "LLAMACPP_MODELS_DIR=$MODELS_DIR" > "$CONFIG_FILE"
+        echo "✅ Path saved to $CONFIG_FILE for next launch"
+        echo ""
+    fi
+}
+
+# Load config from previous session if it exists
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+fi
+
+# Check if we have models at the current path, if not prompt for new path
+check_and_prompt_path
 
 # Find llama.cpp repo and server dynamically
 LLAMACPP_BASE="$(dirname "$(readlink -f "$0")")/../llama.cpp"
@@ -27,10 +57,11 @@ echo ""
 models=()
 while IFS= read -r -d '' file; do
     models+=("$(basename "$file")")
-done < <(find "$MODELS_DIR" -maxdepth 1 -name "*.gguf" -print0)
+done < <(find "$MODELS_DIR" -maxdepth 1 -name "*.gguf" -print0 2>/dev/null)
 
 if [ ${#models[@]} -eq 0 ]; then
     echo "❌ No .gguf models found in $MODELS_DIR"
+    echo "   Please run the launcher again to set the correct path"
     exit 1
 fi
 
@@ -108,7 +139,7 @@ export HSA_XNACK=1
   -ngl 99 \
   -c 122144 \
   -fa on \
-  --temp 0.8 \
+  --temp 0.3 \
   --top-p 0.95 \
   --top-k 20 \
   --threads $(nproc) \
