@@ -13,10 +13,13 @@
 //
 // Behavior:
 //   - All traffic forwarded to backend; bodies tee'd to log-file.
-//   - For POST /v1/messages, when --slot-cache-dir is set: hashes a stable
-//     conversation anchor plus a full request hash, calls
-//     /slots/0?action=save then /slots/0?action=restore on the backend
-//     when sessionId differs from the currently-loaded slot.
+//   - For POST /v1/messages, when --slot-cache-dir is set: derives a session
+//     id (OpenClaw headers > body identity keys > content anchor hash) and
+//     calls /slots/0?action=save then /slots/0?action=restore on the backend
+//     when it differs from the currently-loaded slot.
+//   - Saves happen ONLY on session switch and graceful shutdown — never per
+//     response. Full-KV saves are multi-GB writes; an unclean death loses
+//     the turns since the last switch, by design.
 //   - Before each slot save, prunes the slot cache to keep (a) free disk
 //     space above --min-free-gb (default 100) and (b) total bytes across
 //     all sibling model slot dirs below --max-total-slots-gb (default 200).
@@ -1062,15 +1065,14 @@ async function processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessio
         // Setting this at response headers is too early: another session can
         // arrive while prompt processing/generation is still mutating the slot.
         if (result.ended && result.statusCode === 200) {
+          // Leave the slot dirty: persistence happens on the next session
+          // switch or shutdown, not per response. A full-KV save costs
+          // multiple GB of disk writes at high context; saving every chat
+          // turn multiplies that for no prefix-cache benefit. The trade-off
+          // is explicit: an unclean proxy/server death loses the turns since
+          // the last switch.
           slotHasContent = true;
           slotDirtySinceSave = true;
-          if (sessionId && slotCacheDir) {
-            try {
-              await saveCurrentSlot("response-complete");
-            } catch (e) {
-              slotLog(`\n!!! HDD CACHE save response-complete error: ${e.message}\n`, C_RED);
-            }
-          }
         } else if (sessionId && slotCacheDir) {
           slotHasContent = false;
           slotDirtySinceSave = false;
