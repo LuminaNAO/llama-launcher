@@ -16,10 +16,12 @@
 #   --seed <N>       Override the random seed (default: 42)
 #   --context <N>    Override context size
 #   --parallel <N>   Override number of parallel slots
-#   --proxy          Enable the deep-logging proxy (default: off)
-#   --log            Tee output to ~/llama.log (default: off)
-#   --no-proxy       (deprecated, no-op; proxy is now off by default)
-#   --no-log         (deprecated, no-op; logging is now off by default)
+#   --proxy          Enable the proxy (default: off). Required for slot
+#                    save/restore. Slot mgmt lines log to console.
+#   --log            Tee server stdout/stderr to ~/llama.log (default: off)
+#   --deep-log       With --proxy: also persist request/response BODIES to
+#                    ~/llama-deep.log (default: off, since the file grows fast).
+#                    Useful for diagnostics / debugging template issues.
 #   --save           Save effective launch settings as a per-model config
 #
 # Subcommands:
@@ -30,28 +32,40 @@
 # saved configs. Use --save to persist tuned settings.
 
 # ── Subcommand: stop ────────────────────────────────────────────────────────
+# Stop order matters when slot-save-path is in use: the proxy needs to POST
+# its final save to a still-alive server. Stop proxy first, wait for it to
+# exit cleanly (max 20s), THEN stop server.
 if [[ "${1:-}" == "stop" ]]; then
-    stopped=0
-    for pat in "bin/llama-server" "llama-deep-proxy.mjs"; do
+    _stop_pat() {
+        local pat="$1" timeout="$2"
+        local pids
         pids="$(pgrep -f "$pat" || true)"
-        if [[ -n "$pids" ]]; then
-            echo "🛑 SIGINT -> $pat (pids: $pids)"
-            # shellcheck disable=SC2086
-            kill -INT $pids
-            stopped=1
-        fi
-    done
-    if [[ "$stopped" -eq 0 ]]; then
-        echo "ℹ️  No running llama-server or deep proxy found."
-        exit 0
+        if [[ -z "$pids" ]]; then return 0; fi
+        echo "🛑 SIGINT -> $pat (pids: $pids)"
+        # shellcheck disable=SC2086
+        kill -INT $pids
+        local i
+        for ((i=0; i<timeout*2; i++)); do
+            sleep 0.5
+            pgrep -f "$pat" >/dev/null || { echo "  ✅ $pat stopped"; return 0; }
+        done
+        echo "  ⚠️  $pat still running after ${timeout}s — sending SIGTERM"
+        pkill -TERM -f "$pat" || true
+        for ((i=0; i<10; i++)); do
+            sleep 0.5
+            pgrep -f "$pat" >/dev/null || return 0
+        done
+        echo "  ⚠️  $pat still running — sending SIGKILL"
+        pkill -KILL -f "$pat" || true
+        return 0
+    }
+    # Proxy first (so it can save its slot), then server
+    _stop_pat "llama-deep-proxy.mjs" 20
+    _stop_pat "bin/llama-server" 10
+    if pgrep -f "bin/llama-server|llama-deep-proxy.mjs" >/dev/null; then
+        echo "❌ Some processes still running"; exit 1
     fi
-    # Wait up to 10s for clean exit, then escalate to SIGTERM
-    for _ in $(seq 1 20); do
-        sleep 0.5
-        pgrep -f "bin/llama-server|llama-deep-proxy.mjs" >/dev/null || { echo "✅ Stopped."; exit 0; }
-    done
-    echo "⚠️  Still running after 10s — sending SIGTERM."
-    pkill -TERM -f "bin/llama-server|llama-deep-proxy.mjs" || true
+    echo "✅ Stopped."
     exit 0
 fi
 
@@ -64,6 +78,7 @@ ARG_MODEL_PATH=""
 ARG_TUNE=""
 NO_PROXY=1
 NO_LOG=1
+NO_DEEP_LOG=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --seed) SEED="$2"; shift 2 ;;
@@ -75,8 +90,7 @@ while [[ $# -gt 0 ]]; do
         --tune) ARG_TUNE="$2"; shift 2 ;;
         --proxy) NO_PROXY=0; shift ;;
         --log) NO_LOG=0; shift ;;
-        --no-proxy) NO_PROXY=1; shift ;;
-        --no-log) NO_LOG=1; shift ;;
+        --deep-log) NO_DEEP_LOG=0; shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -129,6 +143,7 @@ if [[ -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && -z "$ARG_TUNE" && -f "$LAU
             extras="${recent_extras[$idx]}"
             [[ " $extras " == *" --log "* ]] && NO_LOG=0
             [[ " $extras " == *" --proxy "* ]] && NO_PROXY=0
+            [[ " $extras " == *" --deep-log "* ]] && NO_DEEP_LOG=0
             echo ""
             echo "🔄 Relaunching: $ARG_BUILD_TYPE / $(basename "$ARG_MODEL_PATH") / ${ARG_TUNE:-(no tune)}${extras:+  [$extras]}"
             echo ""
@@ -550,8 +565,10 @@ if [ "$HAS_MODEL_CONFIG" -eq 1 ]; then
     API_KEY="${API_KEY:-ollama-local}"
     KV_UNIFIED="${KV_UNIFIED:-1}"
     FLASH_ATTN="${FLASH_ATTN:-1}"
+    SLOT_SAVE_PATH="${SLOT_SAVE_PATH:-}"
 
     echo "📋 Profile: per-model (${CONTEXT} ctx, ${CACHE_TYPE_K} KV, ${CACHE_RAM} MiB cache ceiling, ${PARALLEL} slots)"
+    [ -n "$SLOT_SAVE_PATH" ] && echo "💾 Slot save dir: $SLOT_SAVE_PATH"
 # CACHE_RAM semantics (see docs/CACHE-RAM.md): host-memory heap ceiling in MiB.
 # Not disk, not pre-allocated — self-shrinks on bad_alloc. Under RAM pressure,
 # cache pages spill to swap via the kernel VM subsystem (~200× faster than cold
@@ -762,22 +779,30 @@ INTERNAL_PORT="${INTERNAL_PORT:-40802}"
 DEEP_LOG="$HOME/llama-deep.log"
 PROXY_SCRIPT="$SCRIPT_DIR/llama-deep-proxy.mjs"
 
+# Slot-save persistence is implemented via the proxy. If a tune sets
+# SLOT_SAVE_PATH, force-enable the proxy regardless of CLI flags — otherwise
+# the feature would silently no-op.
+if [ -n "${SLOT_SAVE_PATH:-}" ] && [ "$NO_PROXY" -eq 1 ]; then
+    echo "ℹ️  Tune sets SLOT_SAVE_PATH=$SLOT_SAVE_PATH — auto-enabling proxy (slot save/restore needs it)"
+    NO_PROXY=0
+fi
+
 if [ "$NO_PROXY" -eq 1 ]; then
-    # No proxy — llama-server binds directly to the public port
     INTERNAL_PORT="$PORT"
     LLAMA_BIND_HOST="$HOST"
-    echo ""
-    echo "🚀 Launching llama-server..."
-    echo "   llama-server on port $PORT (no proxy)"
-    echo ""
+    _proxy_state="off"
+    _deep_state="—"   # n/a without proxy
 else
-    echo ""
-    echo "🚀 Launching llama-server..."
-    echo "   llama-server on internal port $INTERNAL_PORT"
-    echo "   proxy on public port $PORT -> $INTERNAL_PORT"
-    echo "   deep log: $DEEP_LOG"
-    echo ""
+    _proxy_state="on  (proxy :$PORT -> server :$INTERNAL_PORT)"
+    _deep_state=$([ "$NO_DEEP_LOG" -eq 0 ] && echo "on  ($DEEP_LOG)" || echo "off")
 fi
+_log_state=$([ "$NO_LOG" -eq 0 ] && echo "on  ($HOME/llama.log)" || echo "off")
+echo ""
+echo "🚀 Launching llama-server"
+echo "   proxy:    $_proxy_state"
+echo "   log:      $_log_state"
+echo "   deep-log: $_deep_state"
+echo ""
 
 # ── Build launch flags from tuneable variables ──────────────────────────────
 MMAP_FLAG=""
@@ -812,7 +837,24 @@ cleanup_proxy() {
 trap cleanup_proxy EXIT
 
 if [ "$NO_PROXY" -eq 0 ]; then
-    node "$PROXY_SCRIPT" "$PORT" "$INTERNAL_PORT" "$DEEP_LOG" &
+    EFFECTIVE_DEEP_LOG="/dev/null"
+    if [ "$NO_DEEP_LOG" -eq 0 ]; then
+        EFFECTIVE_DEEP_LOG="$DEEP_LOG"
+        echo "ℹ️  Deep log enabled (--deep-log) — bodies persisted to $DEEP_LOG"
+    fi
+    PROXY_ARGS=("$PORT" "$INTERNAL_PORT" "$EFFECTIVE_DEEP_LOG")
+    if [ -n "${SLOT_SAVE_PATH:-}" ]; then
+        mkdir -p "$SLOT_SAVE_PATH"
+        PROXY_ARGS+=(--slot-cache-dir "$SLOT_SAVE_PATH" --api-key "$API_KEY")
+    fi
+    # Capture proxy stdout/stderr into ~/llama.log when --log is set, so slot
+    # mgmt lines (slotLog console output) and any proxy errors are persisted
+    # alongside server output. Otherwise inherit terminal stdout.
+    if [ "$NO_LOG" -eq 0 ]; then
+        node "$PROXY_SCRIPT" "${PROXY_ARGS[@]}" >> "$HOME/llama.log" 2>&1 &
+    else
+        node "$PROXY_SCRIPT" "${PROXY_ARGS[@]}" &
+    fi
     PROXY_PID=$!
 
     # Give the proxy a moment to bind
@@ -831,6 +873,7 @@ _tune_log=""
 _extras_log=""
 [[ "$NO_LOG" -eq 0 ]] && _extras_log+="--log "
 [[ "$NO_PROXY" -eq 0 ]] && _extras_log+="--proxy "
+[[ "$NO_DEEP_LOG" -eq 0 ]] && _extras_log+="--deep-log "
 _extras_log="${_extras_log% }"
 printf '%s\t%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$BUILD_TYPE" "$model_path" "$_tune_log" "$_extras_log" >> "$LAUNCH_HISTORY"
 
@@ -863,6 +906,7 @@ LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
   ${MMPROJ:+--mmproj "$MMPROJ"}
   ${REASONING_FLAGS:+$REASONING_FLAGS}
   ${REPEAT_FLAGS:+$REPEAT_FLAGS}
+  ${SLOT_SAVE_PATH:+--slot-save-path "$SLOT_SAVE_PATH"}
   ${EXTRA_ARGS:+$EXTRA_ARGS}
 )
 
