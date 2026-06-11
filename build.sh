@@ -51,12 +51,12 @@ command -v pkg-config >/dev/null 2>&1 || MISSING+=("pkg-config|pkgconf (Arch) / 
 
 case "$BUILD_TYPE" in
     vulkan)
-        # Check Vulkan SDK / headers
-        if ! pkg-config --exists vulkan 2>/dev/null && [ ! -f /usr/include/vulkan/vulkan.h ]; then
+        # Check Vulkan headers (needed at compile time — vulkan-headers package)
+        if [ ! -f /usr/include/vulkan/vulkan.h ] && [ ! -f /usr/local/include/vulkan/vulkan.h ]; then
             MISSING+=("vulkan headers|vulkan-headers (Arch) / libvulkan-dev (Debian/Ubuntu)")
         fi
-        # Check Vulkan ICD loader
-        if ! ldconfig -p 2>/dev/null | grep -q libvulkan.so && [ ! -f /usr/lib/libvulkan.so ]; then
+        # Check Vulkan ICD loader (runtime library)
+        if ! ldconfig -p 2>/dev/null | grep -q libvulkan.so && [ ! -f /usr/lib/libvulkan.so ] && [ ! -f /usr/lib64/libvulkan.so ]; then
             MISSING+=("vulkan loader|vulkan-icd-loader (Arch) / libvulkan1 (Debian/Ubuntu)")
         fi
         # Check for a Vulkan driver
