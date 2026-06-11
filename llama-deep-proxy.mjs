@@ -416,7 +416,20 @@ async function saveCurrentSlot(reason, timeoutMs = 0) {
 // stream finishes (success or aborted).
 function pipeResponse(tag, proxyRes, clientRes, onDone) {
   let done = false;
-  const finalize = (result = {}) => { if (!done) { done = true; onDone(result); } };
+  let backpressureTimer = null;
+  const clearBackpressureTimer = () => {
+    if (backpressureTimer) {
+      clearTimeout(backpressureTimer);
+      backpressureTimer = null;
+    }
+  };
+  const finalize = (result = {}) => {
+    if (!done) {
+      done = true;
+      clearBackpressureTimer();
+      onDone(result);
+    }
+  };
 
   const teardown = () => {
     try { proxyRes.destroy(); } catch {}
@@ -435,9 +448,22 @@ function pipeResponse(tag, proxyRes, clientRes, onDone) {
       log.write(`\n!!! clientRes write error ${tag}: ${e.message}\n`);
       return teardown();
     }
-    if (!ok) proxyRes.pause();
+    if (!ok) {
+      proxyRes.pause();
+      clearBackpressureTimer();
+      backpressureTimer = setTimeout(() => {
+        if (done) return;
+        log.write(`\n!!! downstream backpressure timeout ${tag}: client did not drain; closing stalled stream\n`);
+        try { proxyRes.destroy(); } catch {}
+        try { clientRes.destroy(); } catch {}
+        finalize({ ended: false, reason: "downstream-backpressure-timeout", statusCode: proxyRes.statusCode });
+      }, 30000);
+    }
   });
-  clientRes.on("drain", () => { try { proxyRes.resume(); } catch {} });
+  clientRes.on("drain", () => {
+    clearBackpressureTimer();
+    try { proxyRes.resume(); } catch {}
+  });
   clientRes.on("close", () => {
     // Client gave up — stop pulling from backend
     if (!done) {
@@ -455,6 +481,13 @@ function pipeResponse(tag, proxyRes, clientRes, onDone) {
     log.write("\n");
     try { clientRes.end(); } catch {}
     finalize({ ended: true, reason: "backend-end", statusCode: proxyRes.statusCode });
+  });
+  proxyRes.on("close", () => {
+    if (!done) {
+      log.write(`\n--- backend response closed ${tag}\n`);
+      try { clientRes.end(); } catch {}
+      finalize({ ended: false, reason: "backend-close", statusCode: proxyRes.statusCode });
+    }
   });
   proxyRes.on("error", (e) => {
     log.write(`\n!!! proxyRes error ${tag}: ${e.message}\n`);
