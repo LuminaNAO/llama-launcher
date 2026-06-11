@@ -337,6 +337,26 @@ function sessionIdFromBody(jsonStr) {
   }
 }
 
+function findLatestSameBaseSlot(sessionId) {
+  if (!slotCacheDir) return null;
+  const dash = sessionId.indexOf("-");
+  if (dash < 0) return null;
+  const prefix = `${sessionId.slice(0, dash)}-`;
+  const exact = `${sessionId}.bin`;
+  let latest = null;
+  let files;
+  try { files = readdirSync(slotCacheDir); } catch { return null; }
+  for (const f of files) {
+    if (!f.endsWith(".bin")) continue;
+    if (!f.startsWith(prefix)) continue;
+    if (f === exact) continue;
+    let mtime;
+    try { mtime = statSync(join(slotCacheDir, f)).mtimeMs; } catch { continue; }
+    if (!latest || mtime > latest.mtime) latest = { filename: f, mtime };
+  }
+  return latest?.filename ?? null;
+}
+
 // Serialize slot save+restore through a Promise mutex. Concurrent callers
 // queue and wait. Each acquires the lock, re-checks currentSession (a prior
 // holder may have already loaded the session this caller wants), then runs
@@ -349,6 +369,16 @@ async function ensureSlotLoaded(newSessionId) {
   await prev;
   try {
     if (newSessionId === currentSession) return;
+    ensureSlotCacheDir();
+    let restoreFilename = `${newSessionId}.bin`;
+    let restoreIsFallback = false;
+    if (!existsSync(join(slotCacheDir, restoreFilename))) {
+      const fallbackFilename = findLatestSameBaseSlot(newSessionId);
+      if (fallbackFilename) {
+        restoreFilename = fallbackFilename;
+        restoreIsFallback = true;
+      }
+    }
     if (currentSession) {
       if (!slotHasContent) {
         // Skip: slot is known-empty (previous restore failed, no /v1/messages
@@ -358,9 +388,9 @@ async function ensureSlotLoaded(newSessionId) {
       } else {
         ensureSlotCacheDir();
         // Pass both: don't evict the slot we're saving (currentSession) OR
-        // the one we're about to restore next (newSessionId). Otherwise the
+        // the one we're about to restore next. Otherwise the
         // LRU prune can wipe our restore target before we read it.
-        pruneSlotCacheIfNeeded(`${currentSession}.bin`, `${newSessionId}.bin`);
+        pruneSlotCacheIfNeeded(`${currentSession}.bin`, restoreFilename);
         hddBanner("save", `${currentSession}.bin`, "(writes .bin + .bin.ckpt)");
         const r = await callSlotAction("save", `${currentSession}.bin`);
         const save = slotSaveSucceeded(r);
@@ -370,19 +400,23 @@ async function ensureSlotLoaded(newSessionId) {
         );
       }
     }
-    ensureSlotCacheDir();
-    const restoreFilename = `${newSessionId}.bin`;
     if (!existsSync(join(slotCacheDir, restoreFilename))) {
-      slotLog(`\n=== HDD CACHE restore MISS: ${restoreFilename} (no saved slot yet)\n`, C_YELLOW);
+      slotLog(`\n=== HDD CACHE restore MISS: ${newSessionId}.bin (no saved slot yet; no same-base fallback)\n`, C_YELLOW);
       slotHasContent = false;
       currentSession = newSessionId;
       return;
     }
-    hddBanner("restore", restoreFilename, "(reads .bin + .bin.ckpt)");
-    const r = await callSlotAction("restore", `${newSessionId}.bin`);
+    if (restoreIsFallback) {
+      slotLog(
+        `\n=== HDD CACHE restore FALLBACK: ${newSessionId}.bin -> ${restoreFilename} (latest same-base slot)\n`,
+        C_YELLOW,
+      );
+    }
+    hddBanner(restoreIsFallback ? "restore fallback" : "restore", restoreFilename, "(reads .bin + .bin.ckpt)");
+    const r = await callSlotAction("restore", restoreFilename);
     const restore = slotRestoreSucceeded(r);
     slotLog(
-      `HDD CACHE restore status=${r.status} n_restored=${restore.nRestored} n_read=${restore.nRead} checkpoint_sidecar=${newSessionId}.bin.ckpt ${r.body.slice(0, 200)}\n`,
+      `HDD CACHE restore status=${r.status} n_restored=${restore.nRestored} n_read=${restore.nRead} checkpoint_sidecar=${restoreFilename}.ckpt ${r.body.slice(0, 200)}\n`,
       restore.ok ? C_GREEN : colorForStatus("restore", r.status),
     );
     // Restore returning 4xx/5xx (e.g., file not found) is normal for new sessions.
