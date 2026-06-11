@@ -15,4 +15,5 @@ build/
 
 # OS files
 .DS_Store
-Thumbs.dbbuilds/
+Thumbs.db
+builds/

@@ -234,24 +234,42 @@ tune_suggested=-1
 TOTAL_RAM_MB_DETECT=$(free -m | awk '/^Mem:/{print $2}')
 TOTAL_RAM_GB_DETECT=$((TOTAL_RAM_MB_DETECT / 1024))
 
-# Collect configs: match by model-type family (prefix matching)
-# e.g., folder "gemma-4-26B-A4B-it" matches configs for "gemma-4-26B-A4B" and vice versa
+# Collect configs: model-specific first, then family tunes
+# Config filename format: <model-name>.<tune-name>.conf
+# "Model-specific" = conf_model matches the folder name exactly
+# "Family" = conf_model is a prefix of the folder name (shorter match)
+_specific_configs=()
+_specific_names=()
+_family_configs=()
+_family_names=()
 for conf in "$MODEL_CONFIG_DIR"/*.conf; do
     [ -f "$conf" ] || continue
     conf_base="$(basename "$conf" .conf)"
-    # Extract model-name portion (everything before first '.')
     conf_model="${conf_base%%.*}"
-    # Family match: one must be a prefix of the other
-    if [[ "$selected_folder_name" != "$conf_model"* ]] && [[ "$conf_model" != "$selected_folder_name"* ]]; then
-        continue
+    if [[ "$selected_folder_name" == "$conf_model" ]]; then
+        # Exact match — model-specific tune
+        tune_label=$(grep -m1 '^# Tune:' "$conf" 2>/dev/null | sed 's/^# Tune: *//')
+        [ -z "$tune_label" ] && tune_label="$conf_base"
+        _specific_configs+=("$conf")
+        _specific_names+=("$tune_label")
+    elif [[ "$selected_folder_name" == "$conf_model"* ]]; then
+        # Prefix match — family tune
+        tune_label=$(grep -m1 '^# Tune:' "$conf" 2>/dev/null | sed 's/^# Tune: *//')
+        [ -z "$tune_label" ] && tune_label="$conf_base"
+        _family_configs+=("$conf")
+        _family_names+=("$tune_label")
     fi
-    # Extract tune name from "# Tune:" header, or derive from filename
-    tune_label=$(grep -m1 '^# Tune:' "$conf" 2>/dev/null | sed 's/^# Tune: *//')
-    if [ -z "$tune_label" ]; then
-        tune_label="$conf_base"
-    fi
-    tune_configs+=("$conf")
-    tune_names+=("$tune_label")
+done
+# Model-specific tunes first
+for i in "${!_specific_configs[@]}"; do
+    tune_configs+=("${_specific_configs[$i]}")
+    tune_names+=("${_specific_names[$i]}")
+done
+# Then family tunes (with a separator marker)
+TUNE_FAMILY_SPLIT=${#tune_configs[@]}
+for i in "${!_family_configs[@]}"; do
+    tune_configs+=("${_family_configs[$i]}")
+    tune_names+=("${_family_names[$i]}")
 done
 
 HAS_MODEL_CONFIG=0
@@ -302,6 +320,10 @@ else
             echo "🎛️  Available tunes for $selected_folder_name:"
         fi
         for i in "${!tune_names[@]}"; do
+            # Show separator between model-specific and family tunes
+            if [ "$i" -eq "$TUNE_FAMILY_SPLIT" ] && [ "$TUNE_FAMILY_SPLIT" -gt 0 ] && [ "$show_all_tunes" -eq 0 ]; then
+                echo "  ── base model family tunes ──"
+            fi
             local_suggested=""
             if [ "$i" -eq "$tune_suggested" ]; then
                 local_suggested=" ← suggested for ${TOTAL_RAM_GB_DETECT}GB system"
