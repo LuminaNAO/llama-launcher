@@ -7,7 +7,7 @@ metadata:
   notes: |-
     Tune: 64gb-100k-v1
     Per-model config for: Qwen3.6-27B-NEO-CODE-Di-IMatrix-MAX (DavidAU Q6_K, 20.86 GiB)
-    Target: Strix Halo / AMD Ryzen AI Max+ 395 — 64 GB unified (e.g., framed)
+    Target: Strix Halo / AMD Ryzen AI Max+ 395 — 64 GB unified
     Intended use: openclaw coding agent
     Architecture: qwen35 (hybrid linear-attn) — 27B dense, 64 layers
     - Layout: 16 × (3× Gated DeltaNet + 1× Gated Attention)
