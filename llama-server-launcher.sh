@@ -272,11 +272,24 @@ elif [ -n "$ARG_TUNE" ]; then
         exit 1
     fi
 elif [ ${#tune_configs[@]} -eq 1 ]; then
-    # Only one config — use it directly
-    MODEL_CONFIG_FILE="${tune_configs[0]}"
-    echo "📋 Tune: ${tune_names[0]} ($(basename "$MODEL_CONFIG_FILE"))"
-    source "$MODEL_CONFIG_FILE"
-    HAS_MODEL_CONFIG=1
+    # Only one config — confirm with user
+    echo ""
+    echo "🎛️  Available tunes for $selected_folder_name:"
+    tune_ctx=$(grep -m1 '^CONTEXT=' "${tune_configs[0]}" | cut -d= -f2)
+    tune_kv=$(grep -m1 '^CACHE_TYPE_K=' "${tune_configs[0]}" | cut -d= -f2)
+    printf "  1) %-30s [ctx=%s, kv=%s]\n" "${tune_names[0]}" "${tune_ctx:-?}" "${tune_kv:-?}"
+    echo "  0) None (use system profile)"
+    echo ""
+    read -rp "Select tune [0-1, default=1]: " tune_sel
+    tune_sel="${tune_sel:-1}"
+    if [ "$tune_sel" = "1" ]; then
+        MODEL_CONFIG_FILE="${tune_configs[0]}"
+        echo "📋 Tune: ${tune_names[0]} ($(basename "$MODEL_CONFIG_FILE"))"
+        source "$MODEL_CONFIG_FILE"
+        HAS_MODEL_CONFIG=1
+    else
+        echo "📋 Tune: none (using system profile)"
+    fi
 else
     # Multiple tunes — suggest based on system RAM, let user pick
     # Auto-suggest: pick the tune whose name contains the closest RAM tier
@@ -329,18 +342,16 @@ while IFS= read -r -d '' file; do
     mmproj_matches+=("$file")
 done < <(find "$MODEL_FOLDER" -maxdepth 1 -name "*mmproj*.gguf" -print0 2>/dev/null)
 
-if [ ${#mmproj_matches[@]} -eq 1 ]; then
-    MMPROJ="${mmproj_matches[0]}"
-    echo "👁️  Vision: $(basename "$MMPROJ")"
-elif [ ${#mmproj_matches[@]} -gt 1 ]; then
+if [ ${#mmproj_matches[@]} -ge 1 ]; then
     echo ""
-    echo "Multiple vision projector files found:"
+    echo "👁️  Vision projector(s) found:"
     for i in "${!mmproj_matches[@]}"; do
         printf "  %d) %s\n" $((i+1)) "$(basename "${mmproj_matches[$i]}")"
     done
     echo "  0) None (text-only)"
     echo ""
-    read -rp "Select mmproj [0-${#mmproj_matches[@]}]: " mmproj_sel
+    read -rp "Enable vision? [0=no, 1=yes, default=0]: " mmproj_sel
+    mmproj_sel="${mmproj_sel:-0}"
     if [[ "$mmproj_sel" =~ ^[1-9][0-9]*$ ]] && [ "$mmproj_sel" -le ${#mmproj_matches[@]} ]; then
         MMPROJ="${mmproj_matches[$((mmproj_sel-1))]}"
         echo "👁️  Vision: $(basename "$MMPROJ")"
@@ -379,8 +390,7 @@ RESERVE_GB=20
 echo "🖥️  System RAM: ${TOTAL_RAM_GB} GB (reserving ${RESERVE_GB} GB for system)"
 
 if [ "$HAS_MODEL_CONFIG" -eq 1 ]; then
-    # Model config already set CONTEXT, PARALLEL, etc. — use those as base.
-    # Fill in any values the config didn't set with sensible defaults.
+    # Model config already set values — fill in anything it didn't set with sane defaults.
     CONTEXT="${CONTEXT:-32768}"
     PARALLEL="${PARALLEL:-1}"
     CACHE_RAM="${CACHE_RAM:-8192}"
@@ -388,6 +398,19 @@ if [ "$HAS_MODEL_CONFIG" -eq 1 ]; then
     CACHE_TYPE_V="${CACHE_TYPE_V:-q8_0}"
     CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-4096}"
     CHECKPOINT_MAX="${CHECKPOINT_MAX:-32}"
+    NGL="${NGL:-99}"
+    TEMP="${TEMP:-0.3}"
+    TOP_P="${TOP_P:-0.95}"
+    TOP_K="${TOP_K:-20}"
+    THREADS="${THREADS:-$(nproc)}"
+    NO_MMAP="${NO_MMAP:-1}"
+    DIO="${DIO:-1}"
+    TIMEOUT="${TIMEOUT:-3600}"
+    HOST="${HOST:-0.0.0.0}"
+    PORT="${PORT:-40801}"
+    API_KEY="${API_KEY:-ollama-local}"
+    KV_UNIFIED="${KV_UNIFIED:-1}"
+    FLASH_ATTN="${FLASH_ATTN:-1}"
 
     echo "📋 Profile: per-model (${CONTEXT} ctx, ${CACHE_TYPE_K} KV, ${CACHE_RAM} MB cache, ${PARALLEL} slots)"
 elif [ "$TOTAL_RAM_GB" -ge 112 ]; then
@@ -419,6 +442,21 @@ else
     echo "📋 Profile: minimal (61k context, q8_0 KV, 4 GB cache, 1 slot)"
     echo "⚠️  Low RAM — using minimal settings"
 fi
+
+# ── Apply defaults for all tuneable params (system profiles don't set these) ──
+NGL="${NGL:-99}"
+TEMP="${TEMP:-0.3}"
+TOP_P="${TOP_P:-0.95}"
+TOP_K="${TOP_K:-20}"
+THREADS="${THREADS:-$(nproc)}"
+NO_MMAP="${NO_MMAP:-1}"
+DIO="${DIO:-1}"
+TIMEOUT="${TIMEOUT:-3600}"
+HOST="${HOST:-0.0.0.0}"
+PORT="${PORT:-40801}"
+API_KEY="${API_KEY:-ollama-local}"
+KV_UNIFIED="${KV_UNIFIED:-1}"
+FLASH_ATTN="${FLASH_ATTN:-1}"
 
 # ── Apply CLI overrides ──────────────────────────────────────────────────────
 if [ -n "$CONTEXT_OVERRIDE" ]; then
@@ -460,57 +498,93 @@ fi
 # When launching a model for the first time (no config file), save the effective
 # settings so the user has a starting point to tune. Uses the folder-name
 # convention so the launcher finds it automatically next time.
-if [ "$HAS_MODEL_CONFIG" -eq 0 ] && [ "$SAVE_CONFIG" -eq 0 ]; then
-    mkdir -p "$MODEL_CONFIG_DIR"
-    MODEL_CONFIG_FILE="$MODEL_CONFIG_DIR/${selected_folder_name}.conf"
-    cat > "$MODEL_CONFIG_FILE" <<CONF
-# Per-model launch config for: $selected_model
-# Auto-generated from ${TOTAL_RAM_GB} GB system profile: $(date -Iseconds)
+CONFIG_TEMPLATE=$(cat <<'CONFTEMPLATE'
+# Per-model launch config for: __MODEL__
+# __GENERATED__
 # Edit these values and they'll be loaded automatically on next launch.
 # CLI flags (--context, --parallel) override these settings.
 
-CONTEXT=$CONTEXT
-PARALLEL=$PARALLEL
-CACHE_RAM=$CACHE_RAM
-CACHE_TYPE_K=$CACHE_TYPE_K
-CACHE_TYPE_V=$CACHE_TYPE_V
-CHECKPOINT_INTERVAL=$CHECKPOINT_INTERVAL
-CHECKPOINT_MAX=$CHECKPOINT_MAX
+# ── Context & Scheduling ────────────────────────────────────────────────────
+CONTEXT=__CONTEXT__
+PARALLEL=__PARALLEL__
 
+# ── KV Cache ────────────────────────────────────────────────────────────────
+CACHE_RAM=__CACHE_RAM__
+CACHE_TYPE_K=__CACHE_TYPE_K__
+CACHE_TYPE_V=__CACHE_TYPE_V__
+KV_UNIFIED=__KV_UNIFIED__
 
+# ── Checkpoints ─────────────────────────────────────────────────────────────
+CHECKPOINT_INTERVAL=__CHECKPOINT_INTERVAL__
+CHECKPOINT_MAX=__CHECKPOINT_MAX__
+
+# ── GPU Offload ─────────────────────────────────────────────────────────────
+NGL=__NGL__
+FLASH_ATTN=__FLASH_ATTN__
+
+# ── Sampling ────────────────────────────────────────────────────────────────
+TEMP=__TEMP__
+TOP_P=__TOP_P__
+TOP_K=__TOP_K__
+
+# ── Server ──────────────────────────────────────────────────────────────────
+HOST=__HOST__
+PORT=__PORT__
+API_KEY=__API_KEY__
+TIMEOUT=__TIMEOUT__
+THREADS=__THREADS__
+
+# ── I/O & Memory ────────────────────────────────────────────────────────────
+NO_MMAP=__NO_MMAP__
+DIO=__DIO__
+
+# ── Template ────────────────────────────────────────────────────────────────
 # Set JINJA=0 to disable --jinja (e.g. for Gemma 4 models)
 # JINJA=1
 
-# Uncomment to override additional server flags:
+# ── Extra ───────────────────────────────────────────────────────────────────
+# Append arbitrary flags to the server command:
 # EXTRA_ARGS="--flag value"
-CONF
+CONFTEMPLATE
+)
+
+fill_config_template() {
+    echo "$CONFIG_TEMPLATE" \
+        | sed "s|__MODEL__|$selected_model|g" \
+        | sed "s|__GENERATED__|$1|g" \
+        | sed "s|__CONTEXT__|$CONTEXT|g" \
+        | sed "s|__PARALLEL__|$PARALLEL|g" \
+        | sed "s|__CACHE_RAM__|$CACHE_RAM|g" \
+        | sed "s|__CACHE_TYPE_K__|$CACHE_TYPE_K|g" \
+        | sed "s|__CACHE_TYPE_V__|$CACHE_TYPE_V|g" \
+        | sed "s|__KV_UNIFIED__|$KV_UNIFIED|g" \
+        | sed "s|__CHECKPOINT_INTERVAL__|$CHECKPOINT_INTERVAL|g" \
+        | sed "s|__CHECKPOINT_MAX__|$CHECKPOINT_MAX|g" \
+        | sed "s|__NGL__|$NGL|g" \
+        | sed "s|__FLASH_ATTN__|$FLASH_ATTN|g" \
+        | sed "s|__TEMP__|$TEMP|g" \
+        | sed "s|__TOP_P__|$TOP_P|g" \
+        | sed "s|__TOP_K__|$TOP_K|g" \
+        | sed "s|__HOST__|$HOST|g" \
+        | sed "s|__PORT__|$PORT|g" \
+        | sed "s|__API_KEY__|$API_KEY|g" \
+        | sed "s|__TIMEOUT__|$TIMEOUT|g" \
+        | sed "s|__THREADS__|$THREADS|g" \
+        | sed "s|__NO_MMAP__|$NO_MMAP|g" \
+        | sed "s|__DIO__|$DIO|g"
+}
+
+if [ "$HAS_MODEL_CONFIG" -eq 0 ] && [ "$SAVE_CONFIG" -eq 0 ]; then
+    mkdir -p "$MODEL_CONFIG_DIR"
+    MODEL_CONFIG_FILE="$MODEL_CONFIG_DIR/${selected_folder_name}.conf"
+    fill_config_template "Auto-generated from ${TOTAL_RAM_GB} GB system profile: $(date -Iseconds)" > "$MODEL_CONFIG_FILE"
     echo "💾 Auto-saved config: model-configs/${selected_folder_name}.conf"
 fi
 
 # ── Save per-model config if requested ───────────────────────────────────────
 if [ "$SAVE_CONFIG" -eq 1 ]; then
     mkdir -p "$MODEL_CONFIG_DIR"
-    cat > "$MODEL_CONFIG_FILE" <<CONF
-# Per-model launch config for: $selected_model
-# Generated: $(date -Iseconds)
-# Edit these values and they'll be loaded automatically on next launch.
-# CLI flags (--context, --parallel) override these settings.
-
-CONTEXT=$CONTEXT
-PARALLEL=$PARALLEL
-CACHE_RAM=$CACHE_RAM
-CACHE_TYPE_K=$CACHE_TYPE_K
-CACHE_TYPE_V=$CACHE_TYPE_V
-CHECKPOINT_INTERVAL=$CHECKPOINT_INTERVAL
-CHECKPOINT_MAX=$CHECKPOINT_MAX
-
-
-# Set JINJA=0 to disable --jinja (e.g. for Gemma 4 models)
-# JINJA=1
-
-# Uncomment to override additional server flags:
-# EXTRA_ARGS="--flag value"
-CONF
+    fill_config_template "Generated: $(date -Iseconds)" > "$MODEL_CONFIG_FILE"
     echo "💾 Saved model config: $MODEL_CONFIG_FILE"
 fi
 
@@ -518,24 +592,34 @@ echo ""
 echo "🚀 Launching llama-server..."
 echo ""
 
+# ── Build launch flags from tuneable variables ──────────────────────────────
+MMAP_FLAG=""
+[ "$NO_MMAP" = "1" ] && MMAP_FLAG="--no-mmap"
+DIO_FLAG=""
+[ "$DIO" = "1" ] && DIO_FLAG="-dio"
+KV_UNIFIED_FLAG=""
+[ "$KV_UNIFIED" = "1" ] && KV_UNIFIED_FLAG="--kv-unified"
+FA_FLAG=""
+[ "$FLASH_ATTN" = "1" ] && FA_FLAG="-fa on"
+
 "$LLAMACPP_SERVER_PATH" \
   -m "$model_path" \
-  -ngl 99 \
+  -ngl "$NGL" \
   -c "$CONTEXT" \
-  -fa on \
-  --temp 0.3 \
-  --top-p 0.95 \
-  --top-k 20 \
-  --threads $(nproc) \
-  --no-mmap \
-  -dio \
-  --timeout 3600 \
-  --host 0.0.0.0 \
-  --port 40801 \
-  --api-key ollama-local \
+  ${FA_FLAG:+$FA_FLAG} \
+  --temp "$TEMP" \
+  --top-p "$TOP_P" \
+  --top-k "$TOP_K" \
+  --threads "$THREADS" \
+  ${MMAP_FLAG:+$MMAP_FLAG} \
+  ${DIO_FLAG:+$DIO_FLAG} \
+  --timeout "$TIMEOUT" \
+  --host "$HOST" \
+  --port "$PORT" \
+  --api-key "$API_KEY" \
   ${JINJA_FLAG:+$JINJA_FLAG} \
   --parallel "$PARALLEL" \
-  --kv-unified \
+  ${KV_UNIFIED_FLAG:+$KV_UNIFIED_FLAG} \
   --cache-ram "$CACHE_RAM" \
   -ctk "$CACHE_TYPE_K" \
   -ctv "$CACHE_TYPE_V" \

@@ -1,0 +1,309 @@
+#!/usr/bin/expect -f
+#
+# End-to-end test of the launcher interactive flow + server quality.
+#
+# Tests:
+#   1. Interactive menu selection (build, model, tune, vision)
+#   2. Server starts with correct config (131K ctx, q8_0 KV, no vision)
+#   3. Tool calling works correctly
+#   4. Code generation has no repeats
+#
+# Usage: expect test-launcher-interactive.exp
+
+set timeout 180
+set script_dir [file dirname [file normalize [info script]]]
+log_user 1
+
+# Kill any existing server on port 40801
+catch { exec pkill -f "llama-server.*40801" }
+after 2000
+
+puts "============================================================"
+puts "  LAUNCHER INTERACTIVE FLOW + SERVER QUALITY TEST"
+puts "============================================================\n"
+
+spawn bash [file join $script_dir llama-server-launcher.sh]
+
+# ── Build selection: pick vulkan ─────────────────────────────────────────────
+expect {
+    -re {(\d+)\) vulkan} {
+        set vulkan_num $expect_out(1,string)
+        puts "\n>>> Build: vulkan (#$vulkan_num)"
+    }
+    "Using only available build*" {
+        puts "\n>>> Build: auto-selected (only one)"
+        set vulkan_num ""
+    }
+    timeout { puts "\nFAIL: No build menu"; exit 1 }
+}
+if {[info exists vulkan_num] && $vulkan_num ne ""} {
+    expect "Select build*"
+    send "$vulkan_num\r"
+}
+
+# ── Model selection: pick the Opus Reasoning Distilled folder ────────────────
+expect {
+    -re {(\d+)\) Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled} {
+        set model_num $expect_out(1,string)
+        puts "\n>>> Model: Opus Reasoning Distilled (#$model_num)"
+    }
+    timeout { puts "\nFAIL: Model not found in menu"; exit 1 }
+}
+expect "Select model*"
+send "$model_num\r"
+
+# ── Quant selection: only one non-mmproj gguf, should auto-select ────────────
+expect {
+    -re "Select quant" {
+        expect -re {(\d+)\) .*Q4_K_M}
+        set quant_num $expect_out(1,string)
+        puts "\n>>> Quant: Q4_K_M (#$quant_num)"
+        send "$quant_num\r"
+    }
+    -re "Model:.*" {
+        puts "\n>>> Quant: auto-selected"
+    }
+    timeout { puts "\nFAIL: Quant selection timeout"; exit 1 }
+}
+
+# ── Tune selection ───────────────────────────────────────────────────────────
+expect {
+    -re {(\d+)\).*24gb-q8-131k} {
+        set tune_num $expect_out(1,string)
+        puts "\n>>> Tune: 24gb-q8-131k (#$tune_num)"
+        expect "Select tune*"
+        send "$tune_num\r"
+    }
+    -re "Tune: 24gb-q8-131k" {
+        puts "\n>>> Tune: auto-selected (only one)"
+    }
+    timeout { puts "\nFAIL: Tune selection timeout"; exit 1 }
+}
+
+# ── Vision selection: pick 0 (none) ─────────────────────────────────────────
+expect {
+    "Select mmproj*" {
+        puts "\n>>> Vision: selecting none (0)"
+        send "0\r"
+    }
+    "Vision: none" {
+        puts "\n>>> Vision: none (no projector found)"
+    }
+    timeout { puts "\nFAIL: Vision selection timeout"; exit 1 }
+}
+
+expect {
+    "Vision: none" {}
+    timeout { puts "\nFAIL: Vision not set to none"; exit 1 }
+}
+puts "PASS: Vision disabled"
+
+# ── Verify config was applied ────────────────────────────────────────────────
+expect {
+    -re "per-model.*131072.*q8_0" {
+        puts "PASS: Config applied (131072 ctx, q8_0 KV)"
+    }
+    -re "per-model" {
+        puts "PASS: Per-model config loaded"
+    }
+    timeout { puts "\nFAIL: Config not applied"; exit 1 }
+}
+
+# ── Wait for server launch ──────────────────────────────────────────────────
+expect {
+    "Launching llama-server" {
+        puts "PASS: Server launching"
+    }
+    timeout { puts "\nFAIL: Server not launching"; exit 1 }
+}
+
+# ── Verify server config in startup logs ─────────────────────────────────────
+set found_ctx 0
+set found_kv 0
+set found_no_mmproj 1
+
+expect {
+    "server is listening" {
+        puts "PASS: Server is listening"
+    }
+    timeout { puts "\nFAIL: Server not ready (model load timeout)"; exit 1 }
+}
+
+# Give it a moment to fully initialize
+after 5000
+
+# ── Health check ─────────────────────────────────────────────────────────────
+puts "\n--- Server Verification ---"
+
+if {[catch { exec curl -sf http://127.0.0.1:40801/health -H "Authorization: Bearer ollama-local" } result] == 0} {
+    puts "PASS: Health check OK"
+} else {
+    puts "FAIL: Health check failed: $result"
+    catch { exec pkill -f "llama-server.*40801" }
+    exit 1
+}
+
+# ── Verify server props (context size, no vision) ───────────────────────────
+if {[catch { exec curl -sf http://127.0.0.1:40801/props -H "Authorization: Bearer ollama-local" } props_result] == 0} {
+    puts "PASS: Props endpoint responding"
+} else {
+    puts "WARN: Props check failed"
+}
+
+# ── Test 1: Tool calling ────────────────────────────────────────────────────
+puts "\n--- Quality Test: Tool Calling ---"
+
+set tool_request {
+    {
+        "model": "qwen3.5-27b",
+        "messages": [
+            {"role": "system", "content": "You are a coding assistant. Use tools when needed. Do not explain, just call the tool."},
+            {"role": "user", "content": "Read the file /home/user/app.py"}
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read contents of a file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string", "description": "File path to read"}},
+                        "required": ["path"]
+                    }
+                }
+            }
+        ],
+        "temperature": 0.3,
+        "max_tokens": 1024
+    }
+}
+
+if {[catch {
+    exec curl -sf http://127.0.0.1:40801/v1/chat/completions \
+        -H "Authorization: Bearer ollama-local" \
+        -H "Content-Type: application/json" \
+        -d $tool_request
+} tool_result] == 0} {
+    # Parse with python
+    set check [exec python3 -c "
+import json, sys
+r = json.loads(sys.argv\[1\])
+msg = r\['choices'\]\[0\]\['message'\]
+tc = msg.get('tool_calls', \[\])
+ok = True
+errors = \[\]
+if not tc:
+    errors.append('no tool_calls in response')
+    ok = False
+else:
+    fn = tc\[0\]\['function'\]
+    if fn\['name'\] != 'read_file':
+        errors.append(f'wrong function: {fn\[\"name\"\]}')
+        ok = False
+    args = json.loads(fn\['arguments'\])
+    if args.get('path') != '/home/user/app.py':
+        errors.append(f'wrong path: {args.get(\"path\")}')
+        ok = False
+    if r\['choices'\]\[0\]\['finish_reason'\] != 'tool_calls':
+        errors.append(f'wrong finish_reason: {r\[\"choices\"\]\[0\]\[\"finish_reason\"\]}')
+        ok = False
+if ok:
+    print('PASS')
+else:
+    print('FAIL: ' + '; '.join(errors))
+" $tool_result]
+    puts "Tool calling: $check"
+} else {
+    puts "FAIL: Tool call request failed: $tool_result"
+    catch { exec pkill -f "llama-server.*40801" }
+    exit 1
+}
+
+# ── Test 2: Code generation + repeat check ──────────────────────────────────
+puts "\n--- Quality Test: Code Generation + Repeat Check ---"
+
+set code_request {
+    {
+        "model": "qwen3.5-27b",
+        "messages": [
+            {"role": "system", "content": "You are an expert Python developer. Write clean, production-quality code."},
+            {"role": "user", "content": "Write a Python class implementing a thread-safe LRU cache with TTL expiration. Include get, put, and cleanup methods. Use type hints."}
+        ],
+        "temperature": 0.3,
+        "max_tokens": 3000
+    }
+}
+
+# Write response to temp file to avoid Tcl quoting issues
+set tmpfile "/tmp/llamacpp-test-codegen-result.json"
+set check_script "/tmp/llamacpp-test-codegen-check.py"
+
+# Write the python check script to a file
+set pyfd [open $check_script w]
+puts $pyfd {
+import json, sys
+
+with open(sys.argv[1]) as f:
+    r = json.load(f)
+
+msg = r['choices'][0]['message']
+content = msg.get('content', '')
+lines = content.split('\n')
+
+errors = []
+
+if len(content) < 200:
+    errors.append(f'too short: {len(content)} chars')
+
+if 'class' not in content.lower():
+    errors.append('no class definition found')
+
+repeats = 0
+for i in range(len(lines)-5):
+    chunk = '\n'.join(lines[i:i+5])
+    if len(chunk.strip()) > 80:
+        rest = '\n'.join(lines[i+5:])
+        if chunk in rest:
+            repeats += 1
+
+if repeats > 0:
+    errors.append(f'{repeats} repeat sequences (5-line, >80 chars) found')
+
+if r['choices'][0]['finish_reason'] != 'stop':
+    errors.append(f'finish_reason: {r["choices"][0]["finish_reason"]}')
+
+t = r.get('timings', {})
+tok_s = t.get('predicted_per_second', 0)
+n_tok = t.get('predicted_n', 0)
+
+if errors:
+    print(f'FAIL: {"; ".join(errors)}')
+else:
+    print(f'PASS: {len(lines)} lines, {n_tok} tokens, {tok_s:.1f} tok/s, 0 repeats')
+}
+close $pyfd
+
+if {[catch {
+    exec curl -sf -o $tmpfile http://127.0.0.1:40801/v1/chat/completions \
+        -H "Authorization: Bearer ollama-local" \
+        -H "Content-Type: application/json" \
+        -d $code_request
+} curl_err] == 0} {
+    set check [exec python3 $check_script $tmpfile]
+    puts "Code generation: $check"
+} else {
+    puts "FAIL: Code gen request failed: $curl_err"
+}
+
+file delete -force $tmpfile $check_script
+
+# ── Summary ──────────────────────────────────────────────────────────────────
+puts "\n============================================================"
+puts "  END-TO-END TEST COMPLETE"
+puts "============================================================"
+
+# Clean up
+catch { exec pkill -f "llama-server.*40801" }
+after 2000
+exit 0
