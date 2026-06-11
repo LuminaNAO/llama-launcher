@@ -6,15 +6,15 @@ Validate the production llama-launcher + llama-hdd cache path under real OpenCla
 
 ## Current Test Target
 
-- OpenClaw command: `/home/claude/.local/bin/openclaw`
+- OpenClaw command: `openclaw` (from `PATH`)
 - Launcher proxy: `http://127.0.0.1:40801`
 - Internal llama-server: `http://127.0.0.1:40802`
 - Model: `Qwen3.6-27B-UD-Q4_K_XL.gguf`
 - Tune: author pick `Qwen3.6-27B-MTP.64gb-q4-140k-coding-v1.conf`
 - Effective context: launcher/server started with 131k-class context (`-c 143360`)
 - Repo logs:
-  - `/home/claude/code/llama-launcher/llama.log`
-  - `/home/claude/code/llama-launcher/llama-deep.log`
+  - `<llama-launcher dir>/llama.log`
+  - `<llama-launcher dir>/llama-deep.log`
 - Production slot cache:
   - `/mnt/storage/llama-slots/Qwen3.6-27B-UD-Q4_K_XL`
 
