@@ -179,18 +179,35 @@ CONFIG_FILE="$LLAMA_LAUNCHER_DIR/.llama-launcher-config"
 LAUNCH_HISTORY="$LLAMA_LAUNCHER_DIR/.launch-history"
 LLAMA_LOG_FILE="$LLAMA_LAUNCHER_DIR/llama.log"
 DEEP_LOG="$LLAMA_LAUNCHER_DIR/llama-deep.log"
+MODEL_CONFIG_DIR="$LLAMA_LAUNCHER_DIR/model-configs"
 DEFAULT_MODELS_DIR="$HOME/llama-launcher/models"
 DEFAULT_SLOTS_DIR="$HOME/llama-launcher/slots"
-AUTHOR_BEST_PICKS_FILE="$BUNDLED_MODEL_CONFIG_DIR/author-best-picks.sh"
 DOWNLOAD_MODEL_SCRIPT="${LLAMA_LAUNCHER_DOWNLOAD_MODEL:-$LLAMA_LAUNCHER_LIB_DIR/download-model.sh}"
 if [[ ! -x "$DOWNLOAD_MODEL_SCRIPT" && -x "$SCRIPT_DIR/download-model.sh" ]]; then
     DOWNLOAD_MODEL_SCRIPT="$SCRIPT_DIR/download-model.sh"
 fi
 
+AUTHOR_BEST_PICKS_FILE=""
+for _author_pick_candidate in \
+    "$BUNDLED_MODEL_CONFIG_DIR/author-best-picks.sh" \
+    "$MODEL_CONFIG_DIR/author-best-picks.sh" \
+    "$LLAMA_LAUNCHER_LIB_DIR/model-configs/author-best-picks.sh" \
+    "$SCRIPT_DIR/model-configs/author-best-picks.sh"; do
+    if [[ -f "$_author_pick_candidate" ]]; then
+        AUTHOR_BEST_PICKS_FILE="$_author_pick_candidate"
+        break
+    fi
+done
+unset _author_pick_candidate
+
 if [[ -f "$AUTHOR_BEST_PICKS_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$AUTHOR_BEST_PICKS_FILE"
 fi
+AUTHOR_BEST_PICK_NAME="${AUTHOR_BEST_PICK_NAME:-Qwen3.6-27B-MTP 64GB coding}"
+AUTHOR_BEST_PICK_REPO="${AUTHOR_BEST_PICK_REPO:-unsloth/Qwen3.6-27B-MTP-GGUF}"
+AUTHOR_BEST_PICK_GGUF="${AUTHOR_BEST_PICK_GGUF:-Qwen3.6-27B-UD-Q4_K_XL.gguf}"
+AUTHOR_BEST_PICK_TUNE="${AUTHOR_BEST_PICK_TUNE:-Qwen3.6-27B-MTP.64gb-q4-140k-coding-v1.yaml}"
 
 # Load installer defaults early so non-interactive launches also see them.
 # Explicit environment variables still win over the repo-local config.
@@ -734,7 +751,6 @@ fi
 echo "📦 Model: $selected_model"
 
 # ── YAML tune helpers ────────────────────────────────────────────────────────
-MODEL_CONFIG_DIR="$LLAMA_LAUNCHER_DIR/model-configs"
 selected_folder_name="$(basename "$MODEL_FOLDER")"
 
 TUNE_KEYS=(
@@ -985,6 +1001,21 @@ edit_existing_tune_interactive() {
     HAS_MODEL_CONFIG=1
 }
 
+model_config_search_dirs() {
+    local seen=":"
+    local dir
+    for dir in \
+        "$BUNDLED_MODEL_CONFIG_DIR" \
+        "$MODEL_CONFIG_DIR" \
+        "$LLAMA_LAUNCHER_LIB_DIR/model-configs" \
+        "$SCRIPT_DIR/model-configs"; do
+        [[ -d "$dir" ]] || continue
+        [[ ":$seen:" == *":$dir:"* ]] && continue
+        seen="${seen}${dir}:"
+        printf '%s\0' "$dir"
+    done
+}
+
 collect_tunes() {
     tune_configs=()
     tune_names=()
@@ -994,8 +1025,7 @@ collect_tunes() {
     _family_names=()
     local conf conf_base conf_model tune_label dir
     shopt -s nullglob
-    for dir in "$BUNDLED_MODEL_CONFIG_DIR" "$MODEL_CONFIG_DIR"; do
-        [ -d "$dir" ] || continue
+    while IFS= read -r -d '' dir; do
         for conf in "$dir"/*.yaml "$dir"/*.yml; do
             [ -f "$conf" ] || continue
             conf_base="$(basename "$conf")"
@@ -1011,7 +1041,7 @@ collect_tunes() {
                 _family_names+=("$tune_label")
             fi
         done
-    done
+    done < <(model_config_search_dirs)
     shopt -u nullglob
     for i in "${!_specific_configs[@]}"; do
         tune_configs+=("${_specific_configs[$i]}")
@@ -1141,15 +1171,14 @@ else
             tune_configs=()
             tune_names=()
             shopt -s nullglob
-            for dir in "$BUNDLED_MODEL_CONFIG_DIR" "$MODEL_CONFIG_DIR"; do
-                [ -d "$dir" ] || continue
+            while IFS= read -r -d '' dir; do
                 for conf in "$dir"/*.yaml "$dir"/*.yml; do
                     [ -f "$conf" ] || continue
                     tune_label="$(tune_label "$conf")"
                     tune_configs+=("$conf")
                     tune_names+=("$tune_label")
                 done
-            done
+            done < <(model_config_search_dirs)
             shopt -u nullglob
             show_all_tunes=1
             continue
