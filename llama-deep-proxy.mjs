@@ -527,6 +527,25 @@ export function findStableIdentity(obj, headers = {}) {
   return null;
 }
 
+// Build the prefix used for copy-on-write parent comparison from the parts
+// of the prompt that actually reach the KV cache (system, tools, messages),
+// serialized in a fixed order. Comparing raw request JSON instead lets
+// field ordering or unrelated sampling params fake an early divergence.
+export function cacheComparisonPrefix(obj, fallbackJsonStr) {
+  const parts = [];
+  if (obj?.system) {
+    parts.push(typeof obj.system === "string" ? obj.system : JSON.stringify(obj.system));
+  }
+  if (obj?.tools) {
+    parts.push(JSON.stringify(obj.tools));
+  }
+  if (Array.isArray(obj?.messages)) {
+    parts.push(JSON.stringify(obj.messages));
+  }
+  const canonical = parts.join("\n");
+  return canonical ? canonical.slice(0, BRANCH_PREFIX_BYTES) : fallbackJsonStr.slice(0, BRANCH_PREFIX_BYTES);
+}
+
 export function cacheInfoFromBody(jsonStr, headers = {}) {
   try {
     const obj = JSON.parse(jsonStr);
@@ -540,7 +559,7 @@ export function cacheInfoFromBody(jsonStr, headers = {}) {
     }
     if (!anchor) return null;
 
-    const branchPrefix = jsonStr.slice(0, BRANCH_PREFIX_BYTES);
+    const branchPrefix = cacheComparisonPrefix(obj, jsonStr);
     const promptHash = createHash("sha256").update(jsonStr).digest("hex");
     const stableIdentity = findStableIdentity(obj, headers);
     // Header-identified OpenClaw sessions get one slot file named after the
