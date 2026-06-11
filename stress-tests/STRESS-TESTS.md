@@ -79,6 +79,10 @@ Supports both ROCm (rocm-smi) and NVIDIA (nvidia-smi) GPUs.
   one tool even when asked for multiple.
 - **PEG vs JINJA** — with the Gemma 4 parsing edge case fix (b8783+), both parsers
   perform identically for Q8_0. For Q4_K_M, JINJA extends the usable range.
+- **Rotor quants (PR #21038, b8898):** Hadamard-rotate activations before KV
+  quantization. Auto-enables when head_dim % 64 == 0 AND KV type is quantized.
+  Disable via `LLAMA_ATTN_ROT_DISABLE=1`. Rescues q4_0 KV quality to near-q8_0
+  fidelity — enables using q4 KV (half the VRAM of q8) without visible degradation.
 
 ## Test Results Summary
 
@@ -92,3 +96,4 @@ Supports both ROCm (rocm-smi) and NVIDIA (nvidia-smi) GPUs.
 | Claude-Opus-Distill (v1) | Q8_0 | PEG | 120K (62K pt) | b8783+, 65 ct consistently |
 | supergemma4-26b-uncensored | Q4_K_M | PEG | 120K (62K pt) | b8783+ (was ~35K pre-fix) |
 | Qwen3.5-27B-Claude-Opus-Distill | Q4_K_M | JINJA | 120K (65K pt) | b8791, 1/3 tools (sequential, normal Qwen) |
+| MiniMax-M2.7-UD-IQ4_XS | q4_0 KV + rotor | JINJA | 100K (46K pt) | b8898, ROCm 7.2.2, 0 hangs, 1/3 tools (MiniMax sequential pattern). Hung at 55K on 64k-q8 tune 2026-04-22; q4+rotor fixed. |
