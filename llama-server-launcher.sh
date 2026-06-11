@@ -89,6 +89,27 @@ if [[ "${1:-}" == "stop" ]]; then
     exit 0
 fi
 
+# ── Subcommand / multi-name invocation: log (follow the log) ────────────────
+# When the script (or a symlink to it) is invoked as "llama-launcher-log",
+# or when run as "llama-launcher log", this tails the repo-local llama.log.
+# This lets you install a dedicated `llama-launcher-log` command alongside
+# `llama-launcher`.
+progname="$(basename "$0" 2>/dev/null || echo "")"
+if [[ "$progname" == *llama-launcher-log* ]] || [[ "${1:-}" == "log" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+    LOG_FILE="$SCRIPT_DIR/llama.log"
+    if [[ ! -f "$LOG_FILE" ]]; then
+        echo "❌ No log file at $LOG_FILE"
+        echo "   Run the launcher at least once with logging enabled"
+        echo "   (preset 2/3/4 or --log / --deep-log)."
+        exit 1
+    fi
+    if [[ "${1:-}" == "log" ]]; then
+        shift
+    fi
+    exec tail -f "$LOG_FILE" "$@"
+fi
+
 SEED=1320
 CONTEXT_OVERRIDE=""
 PARALLEL_OVERRIDE=""

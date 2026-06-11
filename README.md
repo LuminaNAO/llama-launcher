@@ -69,6 +69,18 @@ Run without flags for the interactive launcher. Enter `s` from the recent-launch
 llama-launcher stop      # SIGINT llama-server and deep proxy; SIGTERM after 10s
 ```
 
+A dedicated `llama-launcher-log` command is also installed alongside `llama-launcher`
+(by the same `install.sh` / AUR package). It is equivalent to `tail -f` on the
+repo-local log file:
+
+```bash
+llama-launcher-log          # follow $LLAMA_LAUNCHER_DIR/llama.log
+llama-launcher log          # same (subcommand form also works)
+llama-launcher-log -n 200   # start from last 200 lines, then follow
+```
+
+(When no log exists yet it prints a helpful message instead of failing silently.)
+
 **Launch history:** the last 5 unique `build+model+tune` combinations are shown at startup. Selecting one re-applies the flags (`--log` / `--proxy`) used in that launch. Stored at `.launch-history`.
 
 **Per-model tunes:** `model-configs/<model>.yaml` or `model-configs/<model>.<tune>.yaml`. CLI flags override saved values; use `--save` to persist. Tune files are YAML data, not sourced shell. The launcher loads only an allowlist of keys under `settings`, which is intentional groundwork for future user-shared tunes.
