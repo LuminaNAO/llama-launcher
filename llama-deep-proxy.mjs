@@ -365,7 +365,15 @@ async function ensureSlotLoaded(newSessionId) {
         );
       }
     }
-    hddBanner("restore", `${newSessionId}.bin`, "(reads .bin + .bin.ckpt)");
+    ensureSlotCacheDir();
+    const restoreFilename = `${newSessionId}.bin`;
+    if (!existsSync(join(slotCacheDir, restoreFilename))) {
+      slotLog(`\n=== HDD CACHE restore MISS: ${restoreFilename} (no saved slot yet)\n`, C_YELLOW);
+      slotHasContent = false;
+      currentSession = newSessionId;
+      return;
+    }
+    hddBanner("restore", restoreFilename, "(reads .bin + .bin.ckpt)");
     const r = await callSlotAction("restore", `${newSessionId}.bin`);
     const restore = slotRestoreSucceeded(r);
     slotLog(

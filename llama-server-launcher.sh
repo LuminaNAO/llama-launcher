@@ -43,6 +43,14 @@
 # automatically loaded when that model is selected. CLI flags override
 # saved configs. Use --save to persist tuned settings.
 
+canonical_build_type() {
+    case "$1" in
+        rocm-mtp)   printf '%s\n' "rocm" ;;
+        vulkan-mtp) printf '%s\n' "vulkan" ;;
+        *)          printf '%s\n' "$1" ;;
+    esac
+}
+
 # ── Subcommand: stop ────────────────────────────────────────────────────────
 # Stop order matters when slot-save-path is in use: the proxy needs to POST
 # its final save to a still-alive server. Stop proxy first, wait for it to
@@ -131,6 +139,7 @@ if [[ -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && -z "$ARG_TUNE" && -f "$LAU
     # Read up to 5 most recent unique launches (newest first)
     recent=()
     while IFS=$'\t' read -r ts build model tune extras; do
+        build="$(canonical_build_type "$build")"
         entry="${build}${model}${tune}"
         # Deduplicate (latest flags win for a given build+model+tune)
         dup=0
@@ -183,14 +192,24 @@ fi
 
 if [ -n "$ARG_BUILD_TYPE" ]; then
     # Build type passed via CLI
-    BUILD_TYPE="$ARG_BUILD_TYPE"
+    BUILD_TYPE="$(canonical_build_type "$ARG_BUILD_TYPE")"
+    if [ "$BUILD_TYPE" != "$ARG_BUILD_TYPE" ]; then
+        echo "🔧 Build alias: $ARG_BUILD_TYPE -> $BUILD_TYPE"
+    fi
 else
     # Interactive: list available builds and let user pick
     available_builds=()
     if [ -d "$LLAMA_LAUNCHER_DIR/builds" ]; then
         for dir in "$LLAMA_LAUNCHER_DIR"/builds/*/; do
             if [ -f "$dir/bin/llama-server" ]; then
-                available_builds+=("$(basename "$dir")")
+                build_name="$(basename "$dir")"
+                case "$build_name" in
+                    rocm-mtp|vulkan-mtp)
+                        base_name="${build_name%-mtp}"
+                        [ -f "$LLAMA_LAUNCHER_DIR/builds/$base_name/bin/llama-server" ] && continue
+                        ;;
+                esac
+                available_builds+=("$build_name")
             fi
         done
     fi
@@ -547,7 +566,7 @@ fi
 echo ""
 
 # ── Backend environment ──────────────────────────────────────────────────────
-# Match on the backend prefix so tagged builds (e.g. "rocm-mtp", "vulkan-v4")
+# Match on the backend prefix so tagged builds (e.g. "rocm-test", "vulkan-v4")
 # inherit the same env setup as their backend.
 case "${BUILD_TYPE%%-*}" in
     rocm)
