@@ -314,6 +314,12 @@ for i, p in enumerate(d['projections']):
 fi
 
 # ── Derive folder name ──────────────────────────────────────────────────────
+# Determine if we need sudo to write to the models directory
+SUDO=""
+if [ ! -w "$MODELS_DIR" ]; then
+    SUDO="sudo"
+fi
+
 FOLDER_NAME="$REPO_NAME"
 FOLDER_NAME="${FOLDER_NAME%-GGUF}"
 FOLDER_NAME="${FOLDER_NAME%-gguf}"
@@ -355,7 +361,7 @@ if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
     exit 0
 fi
 
-mkdir -p "$TARGET_DIR"
+$SUDO mkdir -p "$TARGET_DIR"
 
 # ── Download function ────────────────────────────────────────────────────────
 download_file() {
@@ -380,12 +386,12 @@ download_file() {
     local url="https://huggingface.co/${REPO}/resolve/main/${remote_path}"
 
     if [ -n "$HF_TOKEN" ]; then
-        curl -L -C - --progress-bar \
+        $SUDO curl -L -C - --progress-bar \
             -H "Authorization: Bearer $HF_TOKEN" \
             -o "$local_path" \
             "$url"
     else
-        curl -L -C - --progress-bar \
+        $SUDO curl -L -C - --progress-bar \
             -o "$local_path" \
             "$url"
     fi
