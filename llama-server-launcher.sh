@@ -144,6 +144,7 @@ case "$BUILD_TYPE" in
     rocm)
         export ROCBLAS_USE_HIPBLASLT=1
         export HSA_XNACK=1
+        export LD_LIBRARY_PATH="$BUILD_DIR/bin:$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         ;;
     vulkan)
         # Vulkan-specific environment variables if needed
