@@ -1,6 +1,7 @@
 # Logs
 llama.log
 llama-deep.log
+launcher-restart.log
 
 # Cache
 .cache/

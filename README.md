@@ -93,6 +93,18 @@ The interactive tune menu also supports `n` for a new tune and `e` to edit an ex
 
 Transparent HTTP proxy that tees request/response bodies to a log (default `llama-deep.log` in the llama-launcher dir). Started automatically by the launcher when `--proxy` is passed.
 
+With `--slot-cache-dir` it also manages the disk-backed slot cache. Slot routing prefers explicit client identity headers over prompt-content hashing:
+
+| Header | Meaning |
+|--------|---------|
+| `x-openclaw-session-id` | Stable conversation id; maps 1:1 to a sanitized, exact-match-only slot file. Works for any channel shape (`signal:group:…`, `tui-…`, web GUI ids). |
+| `x-openclaw-agent-kind` | `main` or `subagent`. Subagent traffic never touches persisted slots. |
+| `x-openclaw-cache-policy` | `hdd` or `no-hdd`. `no-hdd` on a main session restores its warm cache read-only; the response is never persisted. |
+
+Requests without headers fall back to body identity keys (`session_id`, `conversation_id`, …) and finally a system+first-message anchor hash with copy-on-write branch slots. OpenClaw subagent and internal-runtime traffic is also recognized by body markers when headers are absent.
+
+Slots are persisted **only on session switch and graceful shutdown** — never per response. An unclean death loses the turns since the last switch; the transcript lives with the client and the cache re-fills on the next prefill.
+
 ### `download-model.sh <hf-url-or-repo>`
 
 Interactive GGUF downloader from HuggingFace with quant selection. Reads `HF_TOKEN` or `~/.cache/huggingface/token`. Use `--filename <gguf-name>` to preselect a specific GGUF while still showing the download summary and confirmation.
@@ -120,6 +132,7 @@ Raises `memlock` in `/etc/security/limits.conf` so `llama-server --mlock` doesn'
 | `utils/benchmark.sh <label>` | Inference benchmarks across context sizes against `localhost:40801`. Writes `utils/benchmark-results/bench-<label>-<ts>.jsonl`. |
 | `utils/bench-batch-sizes.sh` | Sweep `-b` values, restart server between runs, log GTT. |
 | `utils/benchmark-backends.sh [model]` | Compare vulkan / rocm / rocm-gfx1100 via `llama-bench`. |
+| `utils/diagnose-cache-divergence.mjs [log] --latest` | Compare deep-log request bodies from the log tail and explain prompt/cache divergence. |
 | `utils/load-test.sh` | Fire concurrent diverse requests, monitor slot usage. |
 | `utils/soak-test-v3b.sh` | 1-hour soak test under concurrent high-context load. |
 | `utils/vram-stress-test.sh` | Peak VRAM/GTT measurement across all slots. |
