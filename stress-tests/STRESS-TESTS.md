@@ -91,3 +91,4 @@ Supports both ROCm (rocm-smi) and NVIDIA (nvidia-smi) GPUs.
 | supergemma4-26b-uncensored | Q4_K_M | JINJA | 120K (62K pt) | b8783+ (was ~45K pre-fix) |
 | Claude-Opus-Distill (v1) | Q8_0 | PEG | 120K (62K pt) | b8783+, 65 ct consistently |
 | supergemma4-26b-uncensored | Q4_K_M | PEG | 120K (62K pt) | b8783+ (was ~35K pre-fix) |
+| Qwen3.5-27B-Claude-Opus-Distill | Q4_K_M | JINJA | 120K (65K pt) | b8791, 1/3 tools (sequential, normal Qwen) |
