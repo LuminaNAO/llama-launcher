@@ -98,8 +98,6 @@ let slotMutex = Promise.resolve(); // Promise chain — await prior op before st
 let messageQueue = Promise.resolve(); // End-to-end /v1/messages queue when HDD cache is active
 let inFlightRequests = 0;          // for graceful shutdown drain
 const BRANCH_PREFIX_BYTES = 256 * 1024;
-const CROSS_BASE_MIN_LCP_BYTES = 64 * 1024;
-const CROSS_BASE_MIN_SIMILARITY = 0.5;
 // Tracks whether the slot is believed to hold real KV content. Set true after
 // a successful restore (n_restored > 0) or a 200 response from /v1/messages
 // (PP filled the slot). Set false after a failed restore — llama-server's
@@ -514,54 +512,6 @@ function findBestSameBaseParent(info) {
   return best;
 }
 
-function findBestCrossBaseParent(info) {
-  if (!slotCacheDir || !info?.baseId || typeof info.branchPrefix !== "string") return null;
-  let best = null;
-  let bestRejected = null;
-  let files;
-  try { files = readdirSync(slotCacheDir); } catch { return null; }
-  for (const f of files) {
-    if (!f.endsWith(".bin")) continue;
-    const slotId = slotIdFromFilename(f);
-    if (slotId === info.sessionId) continue;
-    const meta = readSlotMeta(slotId);
-    if (meta?.baseId === info.baseId) continue;
-    if (!meta?.completed || meta.volatile || typeof meta.promptPrefix !== "string") continue;
-    const full = join(slotCacheDir, f);
-    let st;
-    try { st = statSync(full); } catch { continue; }
-    if (st.size <= 0) continue;
-
-    const lcp = commonPrefixBytes(meta.promptPrefix, info.branchPrefix);
-    const denom = Math.max(1, Math.min(meta.promptPrefix.length, info.branchPrefix.length));
-    const similarity = lcp / denom;
-    const candidate = {
-      filename: f,
-      slotId,
-      mtime: st.mtimeMs,
-      lcp,
-      similarity,
-      createdFrom: meta.createdFrom ?? null,
-      baseId: meta.baseId ?? sessionBase(slotId),
-    };
-    const betterThan = (a, b) => !b || a.lcp > b.lcp || (a.lcp === b.lcp && a.mtime > b.mtime);
-    if (lcp >= CROSS_BASE_MIN_LCP_BYTES && similarity >= CROSS_BASE_MIN_SIMILARITY) {
-      if (betterThan(candidate, best)) best = candidate;
-    } else if (lcp > 0 && betterThan(candidate, bestRejected)) {
-      bestRejected = candidate;
-    }
-  }
-  if (best) return best;
-  if (bestRejected) {
-    return {
-      ...bestRejected,
-      rejected: true,
-      rejectReason: `cross-base prefix too weak; require lcp>=${CROSS_BASE_MIN_LCP_BYTES} and similarity>=${CROSS_BASE_MIN_SIMILARITY}`,
-    };
-  }
-  return null;
-}
-
 function selectRestoreTarget(info) {
   const exact = `${info.sessionId}.bin`;
   if (existsSync(slotPath(exact))) {
@@ -667,7 +617,7 @@ async function ensureSlotLoaded(info) {
       const diskParent = selectRestoreTarget(info);
       const diskIsBetter =
         diskParent &&
-        (diskParent.kind === "parent" || diskParent.kind === "cross-base-parent") &&
+        diskParent.kind === "parent" &&
         diskParent.slotId !== liveParent.slotId &&
         diskParent.lcp > liveParent.lcp;
 
@@ -716,31 +666,8 @@ async function ensureSlotLoaded(info) {
       });
       return;
     }
-    if (restoreTarget.kind === "rejected-cross-base-parent") {
-      slotLog(
-        `\n=== HDD CACHE restore MISS: ${newSessionId}.bin (best cross-base candidate ${restoreTarget.filename} rejected: ${restoreTarget.rejectReason}; lcp=${restoreTarget.lcp} similarity=${restoreTarget.similarity.toFixed(3)})\n`,
-        C_YELLOW,
-      );
-      slotHasContent = false;
-      slotDirtySinceSave = false;
-      currentSession = newSessionId;
-      currentRequestInfo = info;
-      currentLoadedFrom = null;
-      writeSlotMeta(info, {
-        completed: false,
-        volatile: true,
-        createdFrom: null,
-        restoreKind: "miss",
-        rejectedParent: restoreTarget.slotId,
-        rejectedParentKind: "cross-base",
-        rejectedParentLcp: restoreTarget.lcp,
-        rejectedParentSimilarity: restoreTarget.similarity,
-        rejectedParentReason: restoreTarget.rejectReason,
-      });
-      return;
-    }
     if (restoreTarget.kind !== "exact") {
-      const detail = restoreTarget.kind === "parent" || restoreTarget.kind === "cross-base-parent"
+      const detail = restoreTarget.kind === "parent"
         ? `lcp=${restoreTarget.lcp} similarity=${restoreTarget.similarity.toFixed(3)}`
         : "legacy metadata missing";
       slotLog(
