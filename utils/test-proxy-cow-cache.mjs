@@ -43,7 +43,7 @@ function readBody(req) {
   });
 }
 
-function postJson(port, path, body) {
+function postJson(port, path, body, headers = {}) {
   const payload = JSON.stringify(body);
   return new Promise((resolve, reject) => {
     const req = httpRequest({
@@ -54,6 +54,7 @@ function postJson(port, path, body) {
       headers: {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(payload),
+        ...headers,
       },
     }, (res) => {
       let text = "";
@@ -113,7 +114,7 @@ async function waitForSettledSlots(expectedBins, timeoutMs = 5000) {
     const files = readdirSync(SLOT_DIR);
     const bins = files.filter((f) => f.endsWith(".bin")).sort();
     const metas = files.filter((f) => f.endsWith(".meta.json")).sort();
-    if (bins.length >= expectedBins && bins.length === metas.length) {
+    if (bins.length >= expectedBins && bins.every((b) => metas.includes(`${b.slice(0, -4)}.meta.json`))) {
       return { bins, metas };
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -201,6 +202,13 @@ await new Promise((resolve) => backend.listen(BACKEND_PORT, "127.0.0.1", resolve
 try {
   proxy = await startProxy();
 
+  const signalSessionId = "signal:group:gjya+mpwbiyete2fuz5fj1opv4hbtrd4ch68smwyaky=";
+  const signalSlotId = "signal-group-gjya-mpwbiyete2fuz5fj1opv4hbtrd4ch68smwyaky";
+  await postJson(PROXY_PORT, "/v1/messages", makePrompt("main", "signal group turn"), {
+    "x-openclaw-session-id": signalSessionId,
+    "x-openclaw-agent-kind": "main",
+  });
+
   const initial = Array.from({ length: 4 }, (_, i) =>
     postJson(PROXY_PORT, "/v1/messages", makePrompt("main", `append ${i}`)));
   await Promise.all(initial);
@@ -228,12 +236,18 @@ try {
 
   const { bins, metas } = await waitForSettledSlots(4);
   assert.ok(bins.length >= 4, `expected multiple saved branches to be preserved, got ${bins.length}: ${bins.join(",")}`);
-  assert.equal(bins.length, metas.length, "each .bin should have a .meta.json");
+  for (const bin of bins) {
+    assert.ok(metas.includes(`${bin.slice(0, -4)}.meta.json`), `missing metadata for ${bin}`);
+  }
 
-  const parsedMetas = metas.map((f) => JSON.parse(readFileSync(join(SLOT_DIR, f), "utf8")));
+  const parsedMetas = bins.map((f) => JSON.parse(readFileSync(join(SLOT_DIR, `${f.slice(0, -4)}.meta.json`), "utf8")));
+  const signalMeta = JSON.parse(readFileSync(join(SLOT_DIR, `${signalSlotId}.meta.json`), "utf8"));
   assert.ok(restores.length > 0, "expected persisted parent/exact restores after proxy restart");
   assert.ok(parsedMetas.every((m) => m.completed === true && m.volatile === false), "saved branches should be completed/non-volatile");
   assert.ok(new Set(bins).size === bins.length, "slot filenames should be unique");
+  assert.ok(bins.includes(`${signalSlotId}.bin`), `expected routed OpenClaw slot filename, got ${bins.join(",")}`);
+  assert.equal(signalMeta.openClaw.sessionId, signalSessionId, "metadata should preserve raw OpenClaw session id");
+  assert.equal(signalMeta.agentKind, "main", "metadata should preserve OpenClaw agent kind");
 
   const slotFiles = readdirSync(SLOT_DIR);
   const bytesByKind = { bin: 0, ckpt: 0, meta: 0, total: 0 };
