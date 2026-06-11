@@ -567,6 +567,7 @@ else
             MODELS_DIR="$new_path"
             scan_model_folders "$MODELS_DIR"
         fi
+    fi
 
     if [ ${#model_folders[@]} -eq 0 ]; then
         echo "❌ No model folders found in $MODELS_DIR"
