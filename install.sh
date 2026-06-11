@@ -16,6 +16,11 @@ if [[ ! -x "$TARGET" ]]; then
     echo "ERROR: Launcher not found or not executable: $TARGET"
     exit 1
 fi
+DOWNLOAD_TARGET="$SCRIPT_DIR/download-model.sh"
+if [[ ! -x "$DOWNLOAD_TARGET" ]]; then
+    echo "ERROR: Downloader not found or not executable: $DOWNLOAD_TARGET"
+    exit 1
+fi
 
 if ! command -v yq >/dev/null 2>&1; then
     echo "ERROR: llama-launcher YAML tunes require yq (the Python jq-wrapper YAML processor)."
@@ -441,6 +446,8 @@ else
 fi
 LINK="$LINK_DIR/llama-launcher"
 LOG_LINK="$LINK_DIR/llama-launcher-log"
+DOWNLOAD_LINK="$LINK_DIR/llama-download-model"
+DOWNLOAD_COMPAT_LINK="$LINK_DIR/download-model.sh"
 
 if [[ -e "$LINK" || -L "$LINK" ]]; then
     if [[ -L "$LINK" && "$(readlink -f "$LINK")" == "$TARGET" ]]; then
@@ -474,6 +481,24 @@ else
     echo "Installed: $LOG_LINK -> $TARGET"
 fi
 
+for _download_link in "$DOWNLOAD_LINK" "$DOWNLOAD_COMPAT_LINK"; do
+    if [[ -e "$_download_link" || -L "$_download_link" ]]; then
+        if [[ -L "$_download_link" && "$(readlink -f "$_download_link")" == "$DOWNLOAD_TARGET" ]]; then
+            echo "Already installed: $_download_link -> $DOWNLOAD_TARGET"
+        else
+            echo "WARNING: $_download_link exists and points elsewhere, or is a regular file."
+            read -rp "Overwrite? [y/N] " ans
+            [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 1; }
+            ln -sfn "$DOWNLOAD_TARGET" "$_download_link"
+            echo "Updated: $_download_link -> $DOWNLOAD_TARGET"
+        fi
+    else
+        ln -s "$DOWNLOAD_TARGET" "$_download_link"
+        echo "Installed: $_download_link -> $DOWNLOAD_TARGET"
+    fi
+done
+unset _download_link
+
 SHELL_NAME="$(detect_shell_name)"
 PROFILE="$(shell_profile_path "$SHELL_NAME")"
 
@@ -498,3 +523,4 @@ echo ""
 echo "Run:  llama-launcher        # interactive"
 echo "      llama-launcher stop   # graceful shutdown"
 echo "      llama-launcher-log    # tail -f the repo-local llama.log"
+echo "      llama-download-model  # download GGUF models"
