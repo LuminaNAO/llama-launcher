@@ -13,7 +13,7 @@ code/
 ├── llama.cpp/
 └── llama-launcher/
     ├── builds/<backend>/{bin,lib}/   # built artifacts
-    ├── model-configs/                # per-model tunes (*.conf)
+    ├── model-configs/                # per-model tunes (*.yaml)
     ├── utils/                        # maintenance, benchmarking, service tools
     │   ├── benchmark-results/        # JSONL/TXT results
     │   └── stress-tests/             # specialized load/stress scripts
@@ -31,7 +31,7 @@ Scripts resolve their own location via `readlink -f`, so the launcher can be sym
 
 The installer is interactive. It checks `LLAMACPP_MODELS_DIR` and `LLAMACPP_SLOT_SAVE_PATH`, scans common GGUF locations including the Hugging Face cache, suggests defaults, creates missing directories when approved, and saves the result to `.llama-launcher-config`.
 
-On first install it also offers the author best pick from `model-configs/author-best-picks.sh`. The current pick is `Qwen3.6-27B-MTP.64gb-q4-140k-coding-v1.conf` with `Qwen3.6-27B-UD-Q4_K_XL.gguf`, downloaded through `download-model.sh` when approved.
+On first install it also offers the author best pick from `model-configs/author-best-picks.sh`. The current pick is `Qwen3.6-27B-MTP.64gb-q4-140k-coding-v1.yaml` with `Qwen3.6-27B-UD-Q4_K_XL.gguf`, downloaded through `download-model.sh` when approved.
 
 It symlinks `llama-launcher` into `/usr/local/bin` (if root) or `~/.local/bin` (otherwise), then installs a managed shell startup block for bash, zsh, or fish so `PATH` and the launcher environment are available in new shells.
 
@@ -53,7 +53,7 @@ Run without flags for the interactive launcher. Enter `s` from the recent-launch
 |------|-------------|
 | `--build <type>` | rocm / vulkan / cuda (skips build menu) |
 | `--model <path>` | Path to `.gguf` (skips model menu) |
-| `--tune <name>`  | Named tune from model's `.conf` |
+| `--tune <name>`  | Named tune from model's `.yaml` |
 | `--seed <N>`     | Override seed |
 | `--context <N>`  | Override context size |
 | `--parallel <N>` | Override parallel slots |
@@ -61,7 +61,7 @@ Run without flags for the interactive launcher. Enter `s` from the recent-launch
 | `--no-hdd-cache` | Disable disk-backed slot cache for this launch; flag-driven launches default off when neither HDD flag is passed |
 | `--proxy`        | Enable deep-logging proxy (off by default) |
 | `--log`          | Tee server output to `~/llama.log` (off by default) |
-| `--save`         | Persist effective settings into the model's `.conf` |
+| `--save`         | Persist effective settings into the model's `.yaml` |
 
 **Subcommand:**
 
@@ -71,7 +71,9 @@ llama-launcher stop      # SIGINT llama-server and deep proxy; SIGTERM after 10s
 
 **Launch history:** the last 5 unique `build+model+tune` combinations are shown at startup. Selecting one re-applies the flags (`--log` / `--proxy`) used in that launch. Stored at `.launch-history`.
 
-**Per-model configs:** `model-configs/<model>.conf`. CLI flags override saved values; use `--save` to persist.
+**Per-model tunes:** `model-configs/<model>.yaml` or `model-configs/<model>.<tune>.yaml`. CLI flags override saved values; use `--save` to persist. Tune files are YAML data, not sourced shell. The launcher loads only an allowlist of keys under `settings`, which is intentional groundwork for future user-shared tunes.
+
+The interactive tune menu also supports `n` for a new tune and `e` to edit an existing tune. New tunes can start fresh from the current system profile or copy an existing tune first.
 
 **Models directory:** scanned from `LLAMACPP_MODELS_DIR` or `/usr/local/share/llama.cpp/models`. Global settings are saved to `.llama-launcher-config`.
 
@@ -114,7 +116,7 @@ See `utils/BENCHMARK-RESULTS.md` for recorded results.
 
 ## Requirements
 
-`cmake`, `git`, `bash`, `curl`, `jq`, `bc`, `node` (for the deep proxy), `ssh` (for tunnels).
+`cmake`, `git`, `bash`, `curl`, `jq`, `yq` 3.x (Python jq-wrapper, common distro package), `bc`, `node` (for the deep proxy), `ssh` (for tunnels).
 
 ## License
 

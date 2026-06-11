@@ -1,0 +1,88 @@
+kind: llama-launcher-tune
+version: 1
+name: "64gb-q5-140k-v1"
+model: "Ornstein3"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 64gb-q5-140k-v1
+    Per-model config for: Ornstein3.6-27B-MTP-NSC-ACE-SABER (GestaltLabs)
+    Source: https://huggingface.co/GestaltLabs/Ornstein3.6-27B-MTP-NSC-ACE-SABER-GGUF
+    Target: Strix Halo / AMD Ryzen AI Max+ 395 — 64 GB unified
+    Backend: rocm or vulkan mainline with MTP enabled by runtime flags and the .ckpt sidecar patch
+    Lineage: fine-tuned derivative of Qwen3.6-27B-MTP via NSC-ACE (tool-call
+    alignment) + SABER (safety calibration) + Ornstein SFT (50 steps, rank 32).
+    KLD from base = 0.008, PPL ratio = 1.10 — small distributional shift,
+    small quality cost. Same arch (`qwen35`), same MTP head, same chat template.
+    Empirically validated in our 2026-05-16 quality suite vs the unsloth base
+    Qwen3.6-27B-MTP: Ornstein fixed the runaway-thinking failure on Q1
+    (merge_overlapping) and passed all 4 prompts cleanly with ~3x less
+    thinking budget on that case. Tool-call format adherence was clean.
+    Quant: Q5_K_M (~18.2 GB). GestaltLabs' "Strong balance" recommendation;
+    they explicitly flag Q4_K_M as the floor for reliable tool-call structure.
+    We pick Q5_K_M for safety since this is an agentic/tool-call-focused tune.
+    Same shape as the Qwen3.6-MTP 64gb-q4-140k-coding sibling: 140k context,
+    disk-backed slot cache, and aggressive CHECKPOINT_MAX for divergence
+    resilience.
+    HDD cache:
+    - CACHE_RAM=0: prompt cache lives on disk, not in host RAM
+    - SLOT_SAVE_PATH set: launcher namespaces by model basename →
+    /mnt/storage/llama-slots/Ornstein3.6-27B-MTP-NSC-ACE-SABER-Q5_K_M-MTP/
+    - Requires the .ckpt sidecar patch in our private mainline branch so
+    checkpoints survive slot save/restore.
+    To bench WITHOUT HDD cache (cold baseline): launch with --no-hdd-cache.
+    To bench WITH HDD cache: launch with --hdd-cache, or pass nothing (the
+    launcher's "tune default" picks HDD on because SLOT_SAVE_PATH is set).
+    RAM footprint at 143360 ctx, q4_0 KV with rotor, CHECKPOINT_MAX=92:
+    Weights (Q5_K_M):                       18.2 GB
+    Attention KV (16 layers, q4_0):          2.29 GB
+    DeltaNet recurrent state:                0.4 GB
+    MTP draft context (q4_0):                0.14 GB
+    Compute buffers + scratch + proxy:       ~2.4 GB
+    Empirical baseline (measured 2026-05-17): 23.4 GB
+    Active-slot checkpoints worst case
+    (92 × ~305 MB at full 140k context):   ~28.1 GB
+    Total live RAM at WORST case: ~51 GB → fits the 52 GB target
+    (worst case = saturated 140k prompt, all 92 ckpts
+    clustered near pos 140k after many task turns)
+    Typical: ~46 GB (95k prompts, smaller per-ckpt, fewer ckpts accumulated)
+    Per-checkpoint size scales with position (~150 MB at pos 0,
+    ~305 MB at pos 140k, slope ~1.1 MB per 1k pos — empirically measured).
+    CHECKPOINT_MAX=92 was chosen to keep the WORST CASE under 52 GB on a
+    64 GB host. Q5_K_M's 1.8 GB heavier weights vs the Qwen3.6-MTP Q4_K_XL
+    sibling means MAX comes in 8 lower (92 vs 100) to stay within the same
+    budget. Coverage at small-task append rates: 92 retained checkpoints
+    still cover ~15-30k tokens of recent task history — enough for
+    task-16088-class within-prompt divergences (5k back from end).
+    Disk sidecar sizing (per saved prompt, on /mnt/storage/llama-slots):
+    .bin (active state @ 95k):             ~175 MB
+    .bin.ckpt (92 checkpoints @ ~250 MB):  ~23 GB
+    Each saved prompt ≈ 23 GB on disk. With /mnt/storage at 244 GB free,
+    ~10 retained sessions fit comfortably.
+    q4_0 K/V with rotor activation rotation (auto-engaged: head_dim=256).
+    Sized so the WORST CASE (saturated 140k prompt with all checkpoints
+    clustered at the high end @ ~305 MB each) stays under 52 GB. See header
+    math. MAX=92 here vs 100 in the Qwen3.6-MTP sibling because Q5_K_M's
+    extra 1.8 GB of weights eats ~8 checkpoints worth of budget.
+    GestaltLabs published no custom sampling recs — Ornstein inherits from base.
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "92"
+  CONTEXT: "143360"
+  DIO: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 2"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  NGL: "99"
+  NO_MMAP: "1"
+  PARALLEL: "1"
+  PORT: "40801"
+  SLOT_SAVE_PATH: "/mnt/storage/llama-slots"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

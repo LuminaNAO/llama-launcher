@@ -17,6 +17,18 @@ if [[ ! -x "$TARGET" ]]; then
     exit 1
 fi
 
+if ! command -v yq >/dev/null 2>&1; then
+    echo "ERROR: llama-launcher YAML tunes require yq (the Python jq-wrapper YAML processor)."
+    echo "Install yq and re-run install.sh."
+    exit 1
+fi
+_yq_version="$(yq --version 2>/dev/null || true)"
+if [[ "$_yq_version" != yq\ 3.* ]]; then
+    echo "ERROR: llama-launcher YAML tunes require the Python/jq-wrapper yq 3.x; found: ${_yq_version:-unknown}"
+    exit 1
+fi
+unset _yq_version
+
 _env_models_dir="${LLAMACPP_MODELS_DIR:-}"
 _env_slot_save_path="${LLAMACPP_SLOT_SAVE_PATH:-}"
 if [[ -f "$CONFIG_FILE" ]]; then

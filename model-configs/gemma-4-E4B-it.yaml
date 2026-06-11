@@ -1,0 +1,43 @@
+kind: llama-launcher-tune
+version: 1
+name: "gemma-4-E4B-it"
+model: "gemma-4-E4B-it"
+metadata:
+  shareable: true
+  notes: |-
+    Per-model launch config for: gemma-4-E4B-it-Q4_K_M.gguf
+    Auto-generated from 62 GB system profile: 2026-04-27T20:59:32+07:00
+    Edit these values and they'll be loaded automatically on next launch.
+    CLI flags (--context, --parallel) override these settings.
+    REPEAT_PENALTY=__REPEAT_PENALTY__
+    REPEAT_LAST_N=__REPEAT_LAST_N__
+    PRESENCE_PENALTY=__PRESENCE_PENALTY__
+    FREQUENCY_PENALTY=__FREQUENCY_PENALTY__
+    DRY_MULTIPLIER=__DRY_MULTIPLIER__
+    DRY_BASE=__DRY_BASE__
+    DRY_ALLOWED_LENGTH=__DRY_ALLOWED_LENGTH__
+    DRY_PENALTY_LAST_N=__DRY_PENALTY_LAST_N__
+    Set JINJA=0 to disable --jinja (e.g. for Gemma 4 models)
+    JINJA=1
+    Append arbitrary flags to the server command:
+    EXTRA_ARGS="--flag value"
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "40960"
+  CACHE_TYPE_K: "q8_0"
+  CACHE_TYPE_V: "q8_0"
+  CHECKPOINT_MAX: "32"
+  CONTEXT: "131072"
+  DIO: "1"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  NGL: "99"
+  NO_MMAP: "1"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.3"
+  THREADS: "32"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

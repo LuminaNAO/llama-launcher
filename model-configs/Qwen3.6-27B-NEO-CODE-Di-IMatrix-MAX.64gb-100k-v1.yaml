@@ -1,0 +1,61 @@
+kind: llama-launcher-tune
+version: 1
+name: "64gb-100k-v1"
+model: "Qwen3"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 64gb-100k-v1
+    Per-model config for: Qwen3.6-27B-NEO-CODE-Di-IMatrix-MAX (DavidAU Q6_K, 20.86 GiB)
+    Target: Strix Halo / AMD Ryzen AI Max+ 395 — 64 GB unified (e.g., framed)
+    Intended use: openclaw coding agent
+    Architecture: qwen35 (hybrid linear-attn) — 27B dense, 64 layers
+    - Layout: 16 × (3× Gated DeltaNet + 1× Gated Attention)
+    → 16 of 64 layers carry full-attention KV cache; the other 48
+    carry a small ctx-independent SSM/DeltaNet state
+    - Full attention: 24 Q heads, 4 KV heads (GQA 6:1), head_dim=256
+    - DeltaNet (via SSM ops): state_size=128, inner_size=6144, group_count=16
+    - RoPE theta: 10,000,000   Native ctx: 262,144
+    - imatrix: NEO-CODE merged dataset (DavidAU), 496 entries / 342 chunks
+    KV math (only 16/64 layers carry KV):
+    16 × 4 KV heads × 256 head_dim × ctx × 2 (KV) × 2 B = 65_536 × ctx bytes
+    100k ctx fp16: ~6.4 GB    q8_0: ~3.2 GB    q4_0: ~1.6 GB
+    Expected allocations (102_400 ctx, 1 slot, q8_0 K/V, FA on, -ub 512):
+    Model weights:                ~21,400 MiB   (mlock-pinned)
+    KV cache (100k q8_0):          ~3,300 MiB
+    SSM/DeltaNet state:               ~80 MiB
+    FA scratch @ -ub 512:          ~3,600 MiB   (24 Q × 256 head_dim × 512 ub)
+    Compute buffers:                 ~500 MiB
+    On-device working set:        ~28.9 GB → fits 32-48 GB GPU TTM budget
+    Sampling: DavidAU recommendation for precise code (lower temp than chat tunes).
+    CHAT TEMPLATE NOTE:
+    The GGUF-embedded template is the pre-Unsloth-fixes version. It supports
+    system/user/assistant only and will raise 'Unexpected message role.' on a
+    `developer`-role message (Codex/OpenCode-style). If openclaw triggers this,
+    uncomment the chat-template-file flag in EXTRA_ARGS below.
+    Model defaults thinking-on. Set REASONING=off to disable for lower latency.
+    To use Unsloth's developer-role-aware template, swap the line below for:
+    EXTRA_ARGS="--min-p 0.0 -ub 512 -b 2048 --chat-template-file model-configs/qwen36-unsloth.j2"
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "20480"
+  CACHE_TYPE_K: "q8_0"
+  CACHE_TYPE_V: "q8_0"
+  CONTEXT: "102400"
+  DIO: "1"
+  EXTRA_ARGS: "--min-p 0.0 -ub 512 -b 2048"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  JINJA: "1"
+  KV_UNIFIED: "1"
+  NGL: "99"
+  NO_MMAP: "1"
+  PARALLEL: "1"
+  PORT: "40801"
+  REASONING: "on"
+  REASONING_BUDGET: "-1"
+  TEMP: "0.6"
+  THREADS: "32"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

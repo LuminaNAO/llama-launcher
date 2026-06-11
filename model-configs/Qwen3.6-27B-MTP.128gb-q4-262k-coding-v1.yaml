@@ -1,0 +1,85 @@
+kind: llama-launcher-tune
+version: 1
+name: "128gb-q4-262k-coding-v1"
+model: "Qwen3"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 128gb-q4-262k-coding-v1
+    Per-model config for: Qwen3.6-27B-MTP (hybrid Gated-DeltaNet + Gated-Attention,
+    trained with multi-token prediction). Tuned for coding / agentic tasks.
+    Source: https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF
+    Target: Strix Halo / AMD Ryzen AI Max+ 395 — 128 GB unified
+    Backend: rocm or vulkan mainline; MTP is enabled by runtime flags
+    Quant: UD-Q4_K_XL — chosen on perf evidence:
+    2026-05-15 bench (local vs identical-hw remote at <private-ip>):
+    local Q4+MTP   ≈ 2.0–2.8× faster TG than remote Q8 no-MTP
+    local Q8+MTP   ≈ 2.0–2.2× faster TG than remote Q8 no-MTP
+    local BF16+MTP ≈ 1.0× (BF16 too heavy for MTP to overcome).
+    So Q4 wins on speed AND quality is preserved by the UD dynamic tail.
+    Mainline llama.cpp now contains the MTP runtime. Build the normal ROCm
+    or Vulkan target, then enable MTP with EXTRA_ARGS below.
+    ./build-llamacpp.sh rocm
+    Architecture (from HF model card):
+    - 27B params, 64 layers in a hybrid pattern:
+    16 × [ 3 × (Gated-DeltaNet → FFN)  +  1 × (Gated-Attention → FFN) ]
+    i.e. only ¼ of the layers (16) carry full quadratic KV; the other 48
+    are linear-state DeltaNet (Mamba-family) with bounded state.
+    - Gated Attention: 24 Q heads / 4 KV heads, head_dim=256, RoPE dim=64
+    - DeltaNet: 48 V heads / 16 QK heads, head_dim=128
+    - FFN intermediate=17408, hidden=5120
+    - Native ctx: 262144. YARN to ~1M is supported but not enabled here
+    ("modify rope_parameters only when long contexts are required").
+    VRAM footprint at 262144 ctx, q4_0 KV with rotor activation rotation:
+    Weights (UD-Q4_K_XL):                  16.4 GB
+    Attention KV (16 of 65 layers, q4_0):   4.35 GB
+    DeltaNet recurrent state:               0.4 GB
+    MTP draft context (q4_0):               0.3 GB
+    Compute buffers:                        1.4 GB
+    Total live: ~23 GB → ~95 GB headroom on 128 GB Strix Halo.
+    Plenty of room for cache_ram-backed prefix reuse and/or a second model.
+    Sampling: HF card's "Thinking mode for precise coding tasks (e.g. WebDev)"
+    temp=0.6, top_p=0.95, top_k=20, min_p=0.0, repeat_penalty=1.0
+    (NOT the general thinking temp=1.0 — that's hotter than ideal for code.
+    Also NOT the instruct/non-thinking preset, which forces presence=1.5.)
+    Thinking mode: always on for this model. The card explicitly states
+    "Qwen3.6 does not officially support the soft switch of Qwen3, i.e.,
+    /think and /nothink" — don't try to toggle via prompt tags. For agent
+    scenarios the card recommends preserve_thinking=True; llama-server's
+    default reasoning=auto handles this when --jinja drives the template.
+    MTP runtime: --spec-type draft-mtp --spec-draft-n-max 2
+    - Mainline llama.cpp exposes this as `draft-mtp`; verify with:
+    llama-server --help | grep spec-type
+    - n-max=2 matches the card; small draft depth keeps acceptance high
+    on coding workloads where the draft model is the model itself.
+    - PARALLEL=1 is REQUIRED — card: "-np > 1 ... not yet supported with MTP"
+    - mmproj is also unsupported with MTP (this model has no vision anyway).
+    q4_0 K/V with rotor activation rotation (auto-engaged: head_dim=256).
+    Rotor support is in current mainline llama.cpp and
+    closes the q4_0 vs q8_0 quality gap. Halves KV memory + halves KV
+    bandwidth per attention step (meaningful TG win at ≥16k ctx).
+    Aggressive: coding/agentic sessions edit a long shared prefix many times.
+    More checkpoints = more chances to skip prefill on small edits.
+    JINJA=1 (launcher default) is needed for Qwen3's chat template / tool calls.
+    Reasoning=auto picks up the thinking block from the embedded template.
+    Mainline flag name: use `draft-mtp`.
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "40960"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "64"
+  CONTEXT: "262144"
+  DIO: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 2"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  NGL: "99"
+  NO_MMAP: "1"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

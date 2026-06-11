@@ -291,6 +291,74 @@ config_set LLAMACPP_DEFAULT_MODEL "$(basename "$MODEL_FOLDER")/$selected_model"
 # ── Tune selection ──────────────────────────────────────────────────────────
 MODEL_CONFIG_DIR="$ROOT_DIR/model-configs"
 selected_folder_name="$(basename "$MODEL_FOLDER")"
+TUNE_KEYS=(
+    CONTEXT PARALLEL
+    CACHE_RAM CACHE_TYPE_K CACHE_TYPE_V KV_UNIFIED
+    SLOT_SAVE_PATH MIN_FREE_GB MAX_TOTAL_SLOTS_GB
+    CHECKPOINT_MIN_STEP CHECKPOINT_MAX
+    NGL FLASH_ATTN
+    TEMP TOP_P TOP_K
+    HOST PORT API_KEY TIMEOUT THREADS
+    NO_MMAP DIO
+    JINJA LOG_COLORS
+    REASONING REASONING_BUDGET
+    REPEAT_PENALTY REPEAT_LAST_N PRESENCE_PENALTY FREQUENCY_PENALTY
+    DRY_MULTIPLIER DRY_BASE DRY_ALLOWED_LENGTH DRY_PENALTY_LAST_N
+    EXTRA_ARGS
+)
+
+require_yq() {
+    local version
+    if ! command -v yq >/dev/null 2>&1; then
+        echo "ERROR: YAML tunes require yq (the Python jq-wrapper YAML processor)."
+        exit 1
+    fi
+    version="$(yq --version 2>/dev/null || true)"
+    if [[ "$version" != yq\ 3.* ]]; then
+        echo "ERROR: YAML tunes require the Python/jq-wrapper yq 3.x; found: ${version:-unknown}"
+        exit 1
+    fi
+}
+
+tune_yq() {
+    local file="$1"
+    local expr="$2"
+    local value
+    value="$(yq -r "$expr" "$file" 2>/dev/null || true)"
+    [ "$value" = "null" ] && value=""
+    printf '%s\n' "$value"
+}
+
+tune_label() {
+    local file="$1"
+    local label
+    label="$(tune_yq "$file" '.name // ""')"
+    [ -z "$label" ] && label="$(basename "$file" .yaml)"
+    [ "$label" = "$(basename "$file")" ] && label="$(basename "$file" .yml)"
+    printf '%s\n' "$label"
+}
+
+tune_setting() {
+    tune_yq "$1" ".settings.$2 // \"\""
+}
+
+load_tune() {
+    local file="$1"
+    local key value kind
+    kind="$(tune_yq "$file" '.kind // ""')"
+    if [ "$kind" != "llama-launcher-tune" ]; then
+        echo "ERROR: Invalid tune file: $(basename "$file")"
+        exit 1
+    fi
+    for key in "${TUNE_KEYS[@]}"; do
+        value="$(tune_setting "$file" "$key")"
+        if [ -n "$value" ]; then
+            printf -v "$key" '%s' "$value"
+        fi
+    done
+}
+
+require_yq
 tune_configs=()
 tune_names=()
 _specific_configs=()
@@ -298,22 +366,24 @@ _specific_names=()
 _family_configs=()
 _family_names=()
 
-for conf in "$MODEL_CONFIG_DIR"/*.conf; do
+shopt -s nullglob
+for conf in "$MODEL_CONFIG_DIR"/*.yaml "$MODEL_CONFIG_DIR"/*.yml; do
     [ -f "$conf" ] || continue
-    conf_base="$(basename "$conf" .conf)"
+    conf_base="$(basename "$conf")"
+    conf_base="${conf_base%.yaml}"
+    conf_base="${conf_base%.yml}"
     conf_model="${conf_base%%.*}"
     if [[ "$selected_folder_name" == "$conf_model" ]]; then
-        tune_label="$(grep -m1 '^# Tune:' "$conf" 2>/dev/null | sed 's/^# Tune: *//')"
-        [ -z "$tune_label" ] && tune_label="$conf_base"
+        label="$(tune_label "$conf")"
         _specific_configs+=("$conf")
-        _specific_names+=("$tune_label")
+        _specific_names+=("$label")
     elif [[ "$selected_folder_name" == "$conf_model"* ]]; then
-        tune_label="$(grep -m1 '^# Tune:' "$conf" 2>/dev/null | sed 's/^# Tune: *//')"
-        [ -z "$tune_label" ] && tune_label="$conf_base"
+        label="$(tune_label "$conf")"
         _family_configs+=("$conf")
-        _family_names+=("$tune_label")
+        _family_names+=("$label")
     fi
 done
+shopt -u nullglob
 for i in "${!_specific_configs[@]}"; do
     tune_configs+=("${_specific_configs[$i]}")
     tune_names+=("${_specific_names[$i]}")
@@ -350,9 +420,9 @@ if [ ${#tune_configs[@]} -gt 0 ]; then
         fi
         suggested=""
         [ "$i" -eq "$tune_suggested" ] && suggested=" <- suggested for ${TOTAL_RAM_GB_DETECT}GB system"
-        tune_ctx="$(grep -m1 '^CONTEXT=' "${tune_configs[$i]}" | cut -d= -f2)"
-        tune_par="$(grep -m1 '^PARALLEL=' "${tune_configs[$i]}" | cut -d= -f2)"
-        tune_cp="$(grep -m1 '^CHECKPOINT_MAX=' "${tune_configs[$i]}" | cut -d= -f2)"
+        tune_ctx="$(tune_setting "${tune_configs[$i]}" CONTEXT)"
+        tune_par="$(tune_setting "${tune_configs[$i]}" PARALLEL)"
+        tune_cp="$(tune_setting "${tune_configs[$i]}" CHECKPOINT_MAX)"
         printf "  %d) %-30s [ctx=%s, parallel=%s, checkpoints=%s]%s\n" \
             $((i + 1)) "${tune_names[$i]}" "${tune_ctx:-?}" "${tune_par:-?}" "${tune_cp:-?}" "$suggested"
     done
@@ -362,8 +432,7 @@ if [ ${#tune_configs[@]} -gt 0 ]; then
     if [ "$tune_sel" -gt 0 ]; then
         MODEL_CONFIG_FILE="${tune_configs[$((tune_sel - 1))]}"
         echo "Loading tune: ${tune_names[$((tune_sel - 1))]} ($(basename "$MODEL_CONFIG_FILE"))"
-        # shellcheck disable=SC1090
-        source "$MODEL_CONFIG_FILE"
+        load_tune "$MODEL_CONFIG_FILE"
         HAS_MODEL_CONFIG=1
     fi
 else
