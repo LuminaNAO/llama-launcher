@@ -538,7 +538,9 @@ fi
 echo ""
 
 # ── Backend environment ──────────────────────────────────────────────────────
-case "$BUILD_TYPE" in
+# Match on the backend prefix so tagged builds (e.g. "rocm-mtp", "vulkan-v4")
+# inherit the same env setup as their backend.
+case "${BUILD_TYPE%%-*}" in
     rocm)
         export ROCBLAS_USE_HIPBLASLT=1
         export HSA_XNACK=1
