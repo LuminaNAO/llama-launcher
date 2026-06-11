@@ -1,0 +1,39 @@
+========================================================================
+BACKEND BENCHMARK — Tue 07 Apr 2026 17:46:02 AWST
+========================================================================
+Model: google_gemma-4-31B-it-Q6_K_L.gguf
+Context: 131072 | KV: q8_0 | Threads: 32
+Prompt sizes: 512,2048,8192,32768 | Gen: 128 tokens
+System RAM: 125 GB
+========================================================================
+
+── Vulkan (generic) ──
+  Running...
+  FAILED:
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = Radeon 8060S Graphics (RADV STRIX_HALO) (radv) | uma: 1 | fp16: 1 | bf16: 0 | warp size: 64 | shared memory: 65536 | int dot: 1 | matrix cores: KHR_coopmat
+| model                          |       size |     params | backend    | ngl | threads | type_k | type_v | fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ------: | -----: | -----: | -: | --------------: | -------------------: |
+| gemma4 ?B Q6_K                 |  25.19 GiB |    30.70 B | Vulkan     |  99 |      32 |   q8_0 |   q8_0 |  1 |           pp512 |        192.15 ± 1.73 |
+| gemma4 ?B Q6_K                 |  25.19 GiB |    30.70 B | Vulkan     |  99 |      32 |   q8_0 |   q8_0 |  1 |          pp2048 |        181.52 ± 0.13 |
+| gemma4 ?B Q6_K                 |  25.19 GiB |    30.70 B | Vulkan     |  99 |      32 |   q8_0 |   q8_0 |  1 |          pp8192 |        168.15 ± 0.07 |
+
+── ROCm gfx1151 (native Strix Halo) ──
+  Running...
+  FAILED:
+ggml_cuda_init: found 1 ROCm devices (Total VRAM: 112640 MiB):
+  Device 0: Radeon 8060S Graphics, gfx1151 (0x1151), VMM: no, Wave Size: 32, VRAM: 112640 MiB
+| model                          |       size |     params | backend    | ngl | threads | type_k | type_v | fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ------: | -----: | -----: | -: | --------------: | -------------------: |
+| gemma4 ?B Q6_K                 |  25.19 GiB |    30.70 B | ROCm       |  99 |      32 |   q8_0 |   q8_0 |  1 |           pp512 |       198.99 ± 52.33 |
+| gemma4 ?B Q6_K                 |  25.19 GiB |    30.70 B | ROCm       |  99 |      32 |   q8_0 |   q8_0 |  1 |          pp2048 |         64.07 ± 2.12 |
+
+── ROCm gfx1100 (7900 series target) ──
+  Running...
+  FAILED:
+ggml_cuda_init: found 1 ROCm devices (Total VRAM: 112640 MiB):
+  Device 0: Radeon 8060S Graphics, gfx1151 (0x1151), VMM: no, Wave Size: 32, VRAM: 112640 MiB
+llama-bench: /usr/src/debug/hip-runtime/rocm-systems-rocm-7.2.1/projects/clr/hipamd/src/hip_code_object.cpp:400: hipError_t hip::StatCO::getStatFunc(ihipModuleSymbol_t**, const void*, int): Assertion `err == hipSuccess' failed.
+
+========================================================================
+Results saved: /path/to/code/llama-launcher/benchmark-results/bench-20260407-174602.txt
