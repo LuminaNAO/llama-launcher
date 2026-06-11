@@ -1,291 +1,172 @@
 #!/bin/bash
+# benchmark.sh — Benchmark llama.cpp inference at various context sizes
+# Usage: benchmark.sh <label>
+# Runs against a running llama-server on localhost:40801
 
-# Benchmark llama.cpp servers
-# Interactive model selection, same as launcher
+set -euo pipefail
 
-set -e
+LABEL="${1:?Usage: benchmark.sh <label>}"
+API_KEY="ollama-local"
+BASE_URL="http://localhost:40801"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RESULTS_DIR="$SCRIPT_DIR/benchmark-results"
+RESULTS_FILE="$RESULTS_DIR/bench-${LABEL}-$(date +%Y%m%d-%H%M%S).jsonl"
+TMPDIR_BENCH=$(mktemp -d)
+trap "rm -rf $TMPDIR_BENCH" EXIT
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+mkdir -p "$RESULTS_DIR"
 
-# Script directory
-SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
-LLAMA_LAUNCHER_DIR="$SCRIPT_DIR"
+echo "=== Benchmark: $LABEL ==="
+echo "Results: $RESULTS_FILE"
+echo ""
 
-# Config file for storing user-selected models path
-CONFIG_FILE="$HOME/.llama-launcher-config"
-
-# Default path
-DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
-
-# Load config from previous session if it exists
-if [ -f "$CONFIG_FILE" ]; then
-    eval "$(cat "$CONFIG_FILE")"
-    export LLAMACPP_MODELS_DIR
-    MODELS_DIR="$LLAMACPP_MODELS_DIR"
-    echo "📝 Using saved path: $MODELS_DIR"
-    echo ""
-else
-    MODELS_DIR="$DEFAULT_MODELS_DIR"
-    echo "📝 No saved path, using default: $MODELS_DIR"
-    echo ""
-fi
-
-# Force re-evaluation of MODELS_DIR from environment
-MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
-
-# Check if we have models at the current path
-models=()
-while IFS= read -r -d '' file; do
-    models+=("$(basename "$file")")
-done < <(find "$MODELS_DIR" -maxdepth 1 -name "*.gguf" -print0 2>/dev/null)
-
-if [ ${#models[@]} -eq 0 ]; then
-    echo -e "${RED}❌ No .gguf models found at $MODELS_DIR${NC}"
-    echo ""
-    read -rp "Enter path to models directory: " new_path
-    # Save to config for next time
-    echo "LLAMACPP_MODELS_DIR=$new_path" > "$CONFIG_FILE"
-    echo "✅ Path saved to $CONFIG_FILE for next launch"
-    echo ""
-    # Update MODELS_DIR for current session
-    MODELS_DIR="$new_path"
-    # Re-scan models
-    models=()
-    while IFS= read -r -d '' file; do
-        models+=("$(basename "$file")")
-    done < <(find "$MODELS_DIR" -maxdepth 1 -name "*.gguf" -print0 2>/dev/null)
-fi
-
-# Force re-evaluation of MODELS_DIR from environment
-MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
-
-# Determine build type (rocm, vulkan, or default)
-BUILD_TYPE="${LLAMACPP_BUILD_TYPE:-rocm}"
-
-# Find llama-server based on build type
-BUILD_DIR="$LLAMA_LAUNCHER_DIR/builds/$BUILD_TYPE"
-LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
-
-# Check if server exists
-if [ ! -f "$LLAMACPP_SERVER_PATH" ]; then
-    echo -e "${RED}❌ llama-server not found for $BUILD_TYPE${NC}"
-    echo ""
-    echo "Available builds:"
-    if [ -d "$LLAMA_LAUNCHER_DIR/builds" ]; then
-        for dir in "$LLAMA_LAUNCHER_DIR"/builds/*/; do
-            if [ -d "$dir" ]; then
-                backend=$(basename "$dir")
-                if [ -f "$dir/bin/llama-server" ]; then
-                    echo -e "  ${GREEN}✅ $backend${NC}"
-                else
-                    echo -e "  ${YELLOW}⚠️  $backend (not built)${NC}"
-                fi
-            fi
-        done
-    else
-        echo -e "  ${RED}❌ No builds directory found${NC}"
-    fi
-    echo ""
-    echo "Build a backend first:"
-    echo "  cd $LLAMA_LAUNCHER_DIR"
-    echo "  ./build.sh $BUILD_TYPE"
+# Check server is up
+if ! curl -sf "$BASE_URL/health" > /dev/null 2>&1; then
+    echo "❌ Server not responding on $BASE_URL"
     exit 1
 fi
 
-# List available models
-echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE} llama.cpp Benchmark${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo ""
-echo -e "Backend: ${GREEN}$BUILD_TYPE${NC}"
-echo -e "Models dir: ${YELLOW}$MODELS_DIR${NC}"
-echo ""
-echo -e "${BLUE}Available models:${NC}"
+# Get model info
+MODEL=$(curl -sf "$BASE_URL/v1/models" -H "Authorization: Bearer $API_KEY" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['data'][0]['id'])" 2>/dev/null)
+echo "Model: $MODEL"
 echo ""
 
-for i in "${!models[@]}"; do
-    printf "%d) %s\n" $((i+1)) "${models[$i]}"
-done
-echo ""
-
-# Ask user to select
-read -rp "Select model [1-${#models[@]}]: " selection
-
-# Validate selection
-if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt ${#models[@]} ]; then
-    echo -e "${RED}❌ Invalid selection${NC}"
-    exit 1
-fi
-
-# Get selected model
-selected_model="${models[$((selection-1))]}"
-MODEL_PATH="${MODELS_DIR}/${selected_model}"
-
-echo ""
-echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE} llama.cpp Benchmark${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo ""
-echo -e "Backend: ${GREEN}$BUILD_TYPE${NC}"
-echo -e "Model:   $MODEL_PATH"
-echo -e "Server:  $LLAMACPP_SERVER_PATH"
-echo ""
-echo -e "${BLUE}========================================${NC}"
-echo ""
-
-# Start server in background
-echo -e "${YELLOW}Starting llama-server...${NC}"
-export LLAMACPP_BUILD_TYPE="$BUILD_TYPE"
-
-case "$BUILD_TYPE" in
-    rocm)
-        export ROCBLAS_USE_HIPBLASLT=1
-        export HSA_XNACK=1
-        ;;
-    vulkan)
-        export VK_ICD_FILENAMES=""
-        ;;
-esac
-
-# Start server
-"$LLAMACPP_SERVER_PATH" \
-  -m "$MODEL_PATH" \
-  -ngl 99 \
-  -c 122144 \
-  -fa on \
-  --temp 0.3 \
-  --top-p 0.95 \
-  --top-k 20 \
-  --threads $(nproc) \
-  --no-mmap \
-  --host 0.0.0.0 \
-  --port 40801 \
-  --api-key ollama-local \
-  --jinja \
-  --swa-full \
-  > "$HOME/llama-server-$BUILD_TYPE.log" 2>&1 &
-
-SERVER_PID=$!
-
-# Wait for server to start
-echo -e "${YELLOW}Waiting for server to start...${NC}"
-sleep 5
-
-# Check if server is running
-if ! kill -0 $SERVER_PID 2>/dev/null; then
-    echo -e "${RED}❌ Server failed to start${NC}"
-    echo ""
-    echo "Check logs:"
-    echo "  cat $HOME/llama-server-$BUILD_TYPE.log"
-    exit 1
-fi
-
-echo -e "${GREEN}✅ Server running (PID: $SERVER_PID)${NC}"
-echo ""
-
-# Benchmark function
-benchmark() {
+run_test() {
     local test_name="$1"
-    local prompt="$2"
-    local max_tokens="$3"
+    local context_tokens="$2"
+    local gen_tokens="$3"
 
-    echo -e "${BLUE}Test: $test_name${NC}"
-    echo -e "Prompt: $prompt"
-    echo -e "Max tokens: $max_tokens"
-    echo ""
+    printf "  %-25s " "$test_name..."
 
-    # Start timer
-    START_TIME=$(date +%s.%N)
+    # Build the request JSON via python to handle escaping properly
+    python3 - "$MODEL" "$context_tokens" "$gen_tokens" "$TMPDIR_BENCH/request.json" <<'PYSCRIPT'
+import json, sys
 
-    # Send request with timeout
-    response=$(curl -s -m 300 -X POST http://localhost:40801/v1/chat/completions \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer ollama-local" \
-        -d "{
-            \"model\": \"$(basename "$MODEL_PATH")\",
-            \"messages\": [
-                {\"role\": \"user\", \"content\": \"$prompt\"}
-            ],
-            \"max_tokens\": $max_tokens,
-            \"temperature\": 0.3,
-            \"top_p\": 0.95,
-            \"top_k\": 20
-        }")
+model = sys.argv[1]
+ctx_tokens = int(sys.argv[2])
+gen_tokens = int(sys.argv[3])
+out_path = sys.argv[4]
 
-    # End timer
-    END_TIME=$(date +%s.%N)
-    DURATION=$(awk "BEGIN {print $END_TIME - $START_TIME}")
+if ctx_tokens > 100:
+    words_needed = int(ctx_tokens / 1.3)
+    base = "The quick brown fox jumps over the lazy dog while birds sing in the trees nearby and the wind blows gently through the meadow carrying the scent of wildflowers across the rolling hills toward the distant mountains where snow caps glisten in the afternoon sunlight creating a breathtaking panorama of natural beauty that stretches as far as the eye can see".split()
+    filler = " ".join(base[i % len(base)] for i in range(words_needed))
+    content = f"Here is some reference text:\n\n{filler}\n\nNow count from 1 to 200, one number per line."
+else:
+    content = "Count from 1 to 200, one number per line."
 
-    # Extract tokens per second
-    tokens_per_sec=$(awk "BEGIN {print $max_tokens / $DURATION}")
-
-    # Extract completion tokens from response using jq
-    completion_tokens=$(echo "$response" | jq -r '.completion_tokens // 0' 2>/dev/null || echo "0")
-
-    # Extract total tokens from response using jq
-    total_tokens=$(echo "$response" | jq -r '.total_tokens // 0' 2>/dev/null || echo "0")
-
-    echo -e "Duration: ${YELLOW}${DURATION}s${NC}"
-    echo -e "Tokens generated: ${GREEN}${completion_tokens}${NC}"
-    echo -e "Total tokens: ${GREEN}${total_tokens}${NC}"
-    echo -e "Tokens/sec: ${GREEN}${tokens_per_sec}${NC}"
-    echo ""
-
-    # Print first 200 chars of response
-    if echo "$response" | jq -e '.choices[0].message.content' >/dev/null 2>&1; then
-        echo -e "Response preview:"
-        echo "$response" | jq -r '.choices[0].message.content' | cut -c1-200
-        echo "..."
-    else
-        echo -e "Response preview: (error parsing response)"
-        echo "$response" | head -c 200
-        echo "..."
-    fi
-    echo ""
-
-    # Save results
-    echo "$BUILD_TYPE|$test_name|$DURATION|$completion_tokens|$total_tokens|$tokens_per_sec" >> "$HOME/benchmark-results.csv"
-
-    echo -e "${BLUE}----------------------------------------${NC}"
-    echo ""
+body = {
+    "model": model,
+    "messages": [{"role": "user", "content": content}],
+    "max_tokens": gen_tokens,
+    "temperature": 0.1,
 }
 
-# Run benchmarks
-echo -e "${BLUE}Running benchmarks...${NC}"
+with open(out_path, "w") as f:
+    json.dump(body, f)
+PYSCRIPT
+
+    # Send request
+    local response
+    response=$(curl -sf "$BASE_URL/v1/chat/completions" \
+        -H "Authorization: Bearer $API_KEY" \
+        -H "Content-Type: application/json" \
+        --max-time 600 \
+        -d @"$TMPDIR_BENCH/request.json" 2>/dev/null) || { echo "FAILED (curl)"; return 1; }
+
+    # Parse response
+    echo "$response" > "$TMPDIR_BENCH/response.json"
+    python3 - "$test_name" "$context_tokens" "$TMPDIR_BENCH/response.json" "$RESULTS_FILE" <<'PYSCRIPT'
+import json, sys
+
+test_name = sys.argv[1]
+target_ctx = int(sys.argv[2])
+resp_path = sys.argv[3]
+results_path = sys.argv[4]
+
+with open(resp_path) as f:
+    r = json.load(f)
+
+if "error" in r:
+    print(f"FAILED: {r['error']}")
+    sys.exit(1)
+
+t = r.get("timings", {})
+pp = t.get("prompt_per_second", 0)
+tg = t.get("predicted_per_second", 0)
+pn = t.get("prompt_n", 0)
+tn = t.get("predicted_n", 0)
+pm = t.get("prompt_ms", 0)
+tm = t.get("predicted_ms", 0)
+
+print(f"pp={pp:.1f} tok/s ({pn} tok) | tg={tg:.1f} tok/s ({tn} tok)")
+
+entry = {
+    "test": test_name,
+    "target_ctx": target_ctx,
+    "actual_prompt_tokens": pn,
+    "gen_tokens": tn,
+    "prompt_tok_s": round(pp, 2),
+    "gen_tok_s": round(tg, 2),
+    "prompt_ms": round(pm),
+    "gen_ms": round(tm),
+}
+with open(results_path, "a") as f:
+    f.write(json.dumps(entry) + "\n")
+PYSCRIPT
+}
+
+# Write header
+python3 -c "
+import json
+header = {'type': 'header', 'label': '$LABEL', 'model': '$MODEL', 'timestamp': '$(date -Iseconds)'}
+with open('$RESULTS_FILE', 'w') as f:
+    f.write(json.dumps(header) + '\n')
+"
+
+echo "── Short context (prompt < 100 tokens) ──"
+run_test "short-gen50" 0 50
+run_test "short-gen200" 0 200
+run_test "short-gen500" 0 500
 echo ""
 
-# Set timeout for the entire benchmark (in seconds)
-BENCHMARK_TIMEOUT=600
-
-# Run benchmarks with timeout
-(
-    benchmark "Short response" "What is 2+2?" 100
-    benchmark "Medium response" "Explain quantum computing in simple terms." 500
-    benchmark "Long response" "Write a detailed essay about the history of artificial intelligence." 1000
-) &
-BENCHMARK_PID=$!
-
-# Wait for benchmarks to complete or timeout
-if ! wait $BENCHMARK_PID; then
-    echo -e "${YELLOW}⚠️  Benchmark timed out or failed${NC}"
-    kill $SERVER_PID 2>/dev/null || true
-    exit 1
-fi
-
-# Stop server
-echo -e "${YELLOW}Stopping server...${NC}"
-kill $SERVER_PID
-wait $SERVER_PID 2>/dev/null || true
-
-echo -e "${GREEN}✅ Benchmark complete${NC}"
+echo "── Medium context (~4k prompt) ──"
+run_test "med4k-gen200" 4000 200
+run_test "med4k-gen500" 4000 500
 echo ""
-echo "Results saved to: $HOME/benchmark-results.csv"
+
+echo "── Large context (~16k prompt) ──"
+run_test "large16k-gen200" 16000 200
+run_test "large16k-gen500" 16000 500
 echo ""
-echo "Summary:"
-echo "  Backend | Test | Duration | Tokens | Total | Tokens/sec"
-cat "$HOME/benchmark-results.csv" | column -t -s '|'
+
+echo "── XL context (~64k prompt) ──"
+run_test "xl64k-gen200" 64000 200
+run_test "xl64k-gen500" 64000 500
+echo ""
+
+echo "── XXL context (~128k prompt) ──"
+run_test "xxl128k-gen500" 128000 500
+echo ""
+
+echo ""
+echo "=== Summary ==="
+python3 - "$RESULTS_FILE" <<'PYSCRIPT'
+import json, sys
+
+results = []
+with open(sys.argv[1]) as f:
+    for line in f:
+        r = json.loads(line)
+        if r.get("type") == "header":
+            continue
+        results.append(r)
+
+print(f"{'Test':<25} {'Prompt':>8} {'PP tok/s':>10} {'TG tok/s':>10}")
+print("-" * 58)
+for r in results:
+    print(f"{r['test']:<25} {r['actual_prompt_tokens']:>8} {r['prompt_tok_s']:>10.1f} {r['gen_tok_s']:>10.1f}")
+PYSCRIPT
+echo ""
+echo "Results: $RESULTS_FILE"

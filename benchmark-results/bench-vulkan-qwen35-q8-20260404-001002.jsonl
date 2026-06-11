@@ -1,0 +1,11 @@
+{"type": "header", "label": "vulkan-qwen35-q8", "model": "Qwen3.5-35B-A3B-H-v2-Q8_0.gguf", "timestamp": "2026-04-04T00:10:02+08:00"}
+{"test": "short-gen50", "target_ctx": 0, "actual_prompt_tokens": 25, "gen_tokens": 50, "prompt_tok_s": 198.95, "gen_tok_s": 52.94, "prompt_ms": 126, "gen_ms": 944}
+{"test": "short-gen200", "target_ctx": 0, "actual_prompt_tokens": 25, "gen_tokens": 200, "prompt_tok_s": 198.67, "gen_tok_s": 52.25, "prompt_ms": 126, "gen_ms": 3828}
+{"test": "short-gen500", "target_ctx": 0, "actual_prompt_tokens": 25, "gen_tokens": 500, "prompt_tok_s": 198.89, "gen_tok_s": 52.02, "prompt_ms": 126, "gen_ms": 9611}
+{"test": "med4k-gen200", "target_ctx": 4000, "actual_prompt_tokens": 3261, "gen_tokens": 200, "prompt_tok_s": 931.43, "gen_tok_s": 51.33, "prompt_ms": 3501, "gen_ms": 3896}
+{"test": "med4k-gen500", "target_ctx": 4000, "actual_prompt_tokens": 4, "gen_tokens": 500, "prompt_tok_s": 94.87, "gen_tok_s": 51.29, "prompt_ms": 42, "gen_ms": 9749}
+{"test": "large16k-gen200", "target_ctx": 16000, "actual_prompt_tokens": 10202, "gen_tokens": 200, "prompt_tok_s": 862.76, "gen_tok_s": 49.48, "prompt_ms": 11825, "gen_ms": 4042}
+{"test": "large16k-gen500", "target_ctx": 16000, "actual_prompt_tokens": 4, "gen_tokens": 500, "prompt_tok_s": 88.32, "gen_tok_s": 49.43, "prompt_ms": 45, "gen_ms": 10115}
+{"test": "xl64k-gen200", "target_ctx": 64000, "actual_prompt_tokens": 39254, "gen_tokens": 200, "prompt_tok_s": 562.66, "gen_tok_s": 44.2, "prompt_ms": 69765, "gen_ms": 4525}
+{"test": "xl64k-gen500", "target_ctx": 64000, "actual_prompt_tokens": 4, "gen_tokens": 500, "prompt_tok_s": 68.28, "gen_tok_s": 44.21, "prompt_ms": 59, "gen_ms": 11309}
+{"test": "xxl128k-gen500", "target_ctx": 128000, "actual_prompt_tokens": 52168, "gen_tokens": 500, "prompt_tok_s": 338.67, "gen_tok_s": 38.77, "prompt_ms": 154036, "gen_ms": 12896}
