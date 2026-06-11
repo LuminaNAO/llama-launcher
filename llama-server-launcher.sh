@@ -269,9 +269,9 @@ settings_menu() {
         echo ""
         echo "Settings ($CONFIG_FILE)"
         echo "  1) Models directory          ${LLAMACPP_MODELS_DIR:-}"
-        echo "  2) Slot save directory       ${LLAMACPP_SLOT_SAVE_PATH:-}"
-        echo "  3) Min free disk GB          ${MIN_FREE_GB:-100}"
-        echo "  4) Max total slot GB         ${MAX_TOTAL_SLOTS_GB:-200}"
+        echo "  2) HDD cache slot save dir   ${LLAMACPP_SLOT_SAVE_PATH:-}"
+        echo "  3) HDD cache min free GB     ${MIN_FREE_GB:-100}"
+        echo "  4) HDD cache max total GB    ${MAX_TOTAL_SLOTS_GB:-200}"
         echo "  5) Public port               ${PORT:-40801}"
         echo "  6) Internal port             ${INTERNAL_PORT:-40802}"
         echo "  7) Bind host                 ${HOST:-0.0.0.0}"
@@ -285,10 +285,10 @@ settings_menu() {
             1) prompt_config_path LLAMACPP_MODELS_DIR "Models directory" "$DEFAULT_MODELS_DIR" ;;
             2)
                 default_slots="$(dirname "${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}")/llama-slots"
-                prompt_config_path LLAMACPP_SLOT_SAVE_PATH "Slot save directory" "$default_slots"
+                prompt_config_path LLAMACPP_SLOT_SAVE_PATH "HDD cache slot save directory" "$default_slots"
                 ;;
-            3) prompt_config_number MIN_FREE_GB "Minimum free disk GB" 100 0 100000 ;;
-            4) prompt_config_number MAX_TOTAL_SLOTS_GB "Max total slot cache GB" 200 0 100000 ;;
+            3) prompt_config_number MIN_FREE_GB "HDD slot-cache minimum free disk GB" 100 0 100000 ;;
+            4) prompt_config_number MAX_TOTAL_SLOTS_GB "HDD slot-cache maximum total GB" 200 0 100000 ;;
             5) prompt_config_number PORT "Public port" 40801 1 65535 ;;
             6) prompt_config_number INTERNAL_PORT "Internal port" 40802 1 65535 ;;
             7) prompt_config_text HOST "Bind host" "0.0.0.0" ;;
@@ -309,28 +309,6 @@ settings_menu() {
         esac
     done
 }
-
-if [[ "$ORIGINAL_ARGC" -eq 0 ]]; then
-    echo "llama-launcher"
-    echo "  1) Launch"
-    echo "  2) Settings"
-    echo "  0) Quit"
-    echo ""
-    read -rp "Choice [default=1]: " _launcher_choice
-    _launcher_choice="${_launcher_choice:-1}"
-    case "$_launcher_choice" in
-        1) ;;
-        2)
-            settings_menu
-            echo ""
-            read -rp "Launch now? [Y/n] " _launch_after_settings
-            _launch_after_settings="${_launch_after_settings:-y}"
-            [[ "$_launch_after_settings" =~ ^[Yy]$ ]] || exit 0
-            ;;
-        0) exit 0 ;;
-        *) echo "Invalid selection"; exit 1 ;;
-    esac
-fi
 
 # ── Launch history: quick relaunch ──────────────────────────────────────────
 # Show recent launches if no CLI args were given (fully interactive mode)
@@ -355,35 +333,44 @@ if [[ "$ORIGINAL_ARGC" -eq 0 && -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && 
     done < <(tac "$LAUNCH_HISTORY")
 
     if [[ ${#recent[@]} -gt 0 ]]; then
-        echo "🕐 Recent launches:"
-        for i in "${!recent[@]}"; do
-            tune_display="${recent_tune[$i]}"
-            [[ -z "$tune_display" ]] && tune_display="(no tune)"
-            extras_display="${recent_extras[$i]}"
-            [[ -n "$extras_display" ]] && extras_display="  [$extras_display]"
-            printf "  %d) %-12s  %-40s  %s%s\n" $((i+1)) "${recent_build[$i]}" "$(basename "${recent_model[$i]}")" "$tune_display" "$extras_display"
+        while true; do
+            echo "🕐 Recent launches:"
+            for i in "${!recent[@]}"; do
+                tune_display="${recent_tune[$i]}"
+                [[ -z "$tune_display" ]] && tune_display="(no tune)"
+                extras_display="${recent_extras[$i]}"
+                [[ -n "$extras_display" ]] && extras_display="  [$extras_display]"
+                printf "  %d) %-12s  %-40s  %s%s\n" $((i+1)) "${recent_build[$i]}" "$(basename "${recent_model[$i]}")" "$tune_display" "$extras_display"
+            done
+            echo "  0) New launch"
+            echo "  s) Settings"
+            echo ""
+            read -rp "Relaunch? [0=new, s=settings, default=1]: " hist_sel
+            hist_sel="${hist_sel:-1}"
+            if [[ "$hist_sel" =~ ^[Ss]$ ]]; then
+                settings_menu
+                echo ""
+                continue
+            fi
+            if [[ "$hist_sel" =~ ^[1-9]$ ]] && [[ "$hist_sel" -le ${#recent[@]} ]]; then
+                idx=$((hist_sel - 1))
+                ARG_BUILD_TYPE="${recent_build[$idx]}"
+                ARG_MODEL_PATH="${recent_model[$idx]}"
+                [[ -n "${recent_tune[$idx]}" ]] && ARG_TUNE="${recent_tune[$idx]}"
+                # Apply saved flag state (only explicit opt-ins)
+                extras="${recent_extras[$idx]}"
+                if [[ -n "$extras" ]]; then LOG_FLAGS_TOUCHED=1; fi
+                [[ " $extras " == *" --log "* ]] && NO_LOG=0
+                [[ " $extras " == *" --proxy "* ]] && NO_PROXY=0
+                [[ " $extras " == *" --deep-log "* ]] && NO_DEEP_LOG=0
+                [[ " $extras " == *" --hdd-cache "* ]] && { HDD_CACHE_MODE="on"; HDD_CACHE_TOUCHED=1; }
+                [[ " $extras " == *" --no-hdd-cache "* ]] && { HDD_CACHE_MODE="off"; HDD_CACHE_TOUCHED=1; }
+                echo ""
+                echo "🔄 Relaunching: $ARG_BUILD_TYPE / $(basename "$ARG_MODEL_PATH") / ${ARG_TUNE:-(no tune)}${extras:+  [$extras]}"
+                echo ""
+            fi
+            break
         done
-        echo "  0) New launch"
-        echo ""
-        read -rp "Relaunch? [0=new, default=1]: " hist_sel
-        hist_sel="${hist_sel:-1}"
-        if [[ "$hist_sel" =~ ^[1-9]$ ]] && [[ "$hist_sel" -le ${#recent[@]} ]]; then
-            idx=$((hist_sel - 1))
-            ARG_BUILD_TYPE="${recent_build[$idx]}"
-            ARG_MODEL_PATH="${recent_model[$idx]}"
-            [[ -n "${recent_tune[$idx]}" ]] && ARG_TUNE="${recent_tune[$idx]}"
-            # Apply saved flag state (only explicit opt-ins)
-            extras="${recent_extras[$idx]}"
-            if [[ -n "$extras" ]]; then LOG_FLAGS_TOUCHED=1; fi
-            [[ " $extras " == *" --log "* ]] && NO_LOG=0
-            [[ " $extras " == *" --proxy "* ]] && NO_PROXY=0
-            [[ " $extras " == *" --deep-log "* ]] && NO_DEEP_LOG=0
-            [[ " $extras " == *" --hdd-cache "* ]] && { HDD_CACHE_MODE="on"; HDD_CACHE_TOUCHED=1; }
-            [[ " $extras " == *" --no-hdd-cache "* ]] && { HDD_CACHE_MODE="off"; HDD_CACHE_TOUCHED=1; }
-            echo ""
-            echo "🔄 Relaunching: $ARG_BUILD_TYPE / $(basename "$ARG_MODEL_PATH") / ${ARG_TUNE:-(no tune)}${extras:+  [$extras]}"
-            echo ""
-        fi
     fi
 fi
 
@@ -425,17 +412,26 @@ else
         BUILD_TYPE="${available_builds[0]}"
         echo "🔧 Using only available build: $BUILD_TYPE"
     else
-        echo "Available builds:"
-        for i in "${!available_builds[@]}"; do
-            printf "  %d) %s\n" $((i+1)) "${available_builds[$i]}"
+        while true; do
+            echo "Available builds:"
+            for i in "${!available_builds[@]}"; do
+                printf "  %d) %s\n" $((i+1)) "${available_builds[$i]}"
+            done
+            echo "  s) Settings"
+            echo ""
+            read -rp "Select build [1-${#available_builds[@]}, s=settings]: " build_sel
+            if [[ "$build_sel" =~ ^[Ss]$ ]]; then
+                settings_menu
+                echo ""
+                continue
+            fi
+            if [[ "$build_sel" =~ ^[0-9]+$ ]] && [ "$build_sel" -ge 1 ] && [ "$build_sel" -le ${#available_builds[@]} ]; then
+                BUILD_TYPE="${available_builds[$((build_sel-1))]}"
+                break
+            else
+                echo "❌ Invalid selection"; exit 1
+            fi
         done
-        echo ""
-        read -rp "Select build [1-${#available_builds[@]}]: " build_sel
-        if [[ "$build_sel" =~ ^[0-9]+$ ]] && [ "$build_sel" -ge 1 ] && [ "$build_sel" -le ${#available_builds[@]} ]; then
-            BUILD_TYPE="${available_builds[$((build_sel-1))]}"
-        else
-            echo "❌ Invalid selection"; exit 1
-        fi
     fi
 fi
 
