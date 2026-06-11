@@ -27,17 +27,21 @@ Scripts resolve their own location via `readlink -f`, so the launcher can be sym
 ./install.sh
 ```
 
-Symlinks `llama-launcher` into `/usr/local/bin` (if root) or `~/.local/bin` (otherwise), creating the directory if needed and warning if it isn't on `PATH`. Then call `llama-launcher …` from anywhere.
+The installer is interactive. It checks `LLAMACPP_MODELS_DIR` and `LLAMACPP_SLOT_SAVE_PATH`, scans common GGUF locations including the Hugging Face cache, suggests defaults, creates missing directories when approved, and saves the result to `.llama-launcher-config`.
+
+It symlinks `llama-launcher` into `/usr/local/bin` (if root) or `~/.local/bin` (otherwise), then installs a managed shell startup block for bash, zsh, or fish so `PATH` and the launcher environment are available in new shells.
 
 ## Scripts
 
-### `utils/build.sh <rocm|vulkan|cuda> [gpu-arch]`
+### `build-llamacpp.sh <rocm|vulkan|cuda> [gpu-arch]`
 
 Builds llama.cpp into `builds/<backend>/`. GPU arch (gfx target or CUDA compute cap) is auto-detected via `rocminfo` / `nvidia-smi` and can be overridden.
 
 ### `llama-server-launcher.sh`
 
 Interactive launcher with per-model configs and launch history.
+
+Run without flags to choose `Launch` or `Settings`. Settings edits the repo-local `.llama-launcher-config` for global defaults such as model directory, slot-cache directory, slot-cache disk limits, ports, bind host, API key, log colors, and default build type.
 
 **Flags:**
 
@@ -65,7 +69,7 @@ llama-launcher stop      # SIGINT llama-server and deep proxy; SIGTERM after 10s
 
 **Per-model configs:** `model-configs/<model>.conf`. CLI flags override saved values; use `--save` to persist.
 
-**Models directory:** scanned from `LLAMACPP_MODELS_DIR` or `/usr/local/share/llama.cpp/models`. Path is saved to `.llama-launcher-config` on first run. Existing `.llamacpp-helper-config` files are still read as a fallback.
+**Models directory:** scanned from `LLAMACPP_MODELS_DIR` or `/usr/local/share/llama.cpp/models`. Global settings are saved to `.llama-launcher-config`.
 
 ### `llama-deep-proxy.mjs <listen-port> <backend-port> [log-file]`
 

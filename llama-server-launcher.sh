@@ -104,8 +104,11 @@ ARG_INTERNAL_PORT=""
 PORT_FLAGS_TOUCHED=0
 HDD_CACHE_MODE="default"
 HDD_CACHE_TOUCHED=0
+MIN_FREE_GB_TOUCHED=0
+MAX_TOTAL_SLOTS_GB_TOUCHED=0
 LOG_FLAGS_TOUCHED=0  # tracks whether any of --proxy/--log/--deep-log was passed on CLI;
                      # used to decide whether to show the interactive logging-mode prompt
+ORIGINAL_ARGC=$#
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --seed) SEED="$2"; shift 2 ;;
@@ -118,8 +121,8 @@ while [[ $# -gt 0 ]]; do
         --port) ARG_PORT="$2"; PORT_FLAGS_TOUCHED=1; shift 2 ;;
         --internal-port) ARG_INTERNAL_PORT="$2"; PORT_FLAGS_TOUCHED=1; shift 2 ;;
         --hdd-cache) HDD_CACHE_MODE="on"; HDD_CACHE_TOUCHED=1; shift ;;
-        --min-free-gb) MIN_FREE_GB="$2"; shift 2 ;;
-        --max-total-slots-gb) MAX_TOTAL_SLOTS_GB="$2"; shift 2 ;;
+        --min-free-gb) MIN_FREE_GB="$2"; MIN_FREE_GB_TOUCHED=1; shift 2 ;;
+        --max-total-slots-gb) MAX_TOTAL_SLOTS_GB="$2"; MAX_TOTAL_SLOTS_GB_TOUCHED=1; shift 2 ;;
         --no-hdd-cache) HDD_CACHE_MODE="off"; HDD_CACHE_TOUCHED=1; shift ;;
         --proxy) NO_PROXY=0; LOG_FLAGS_TOUCHED=1; shift ;;
         --log) NO_LOG=0; LOG_FLAGS_TOUCHED=1; shift ;;
@@ -130,13 +133,208 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
-LEGACY_CONFIG_FILE="$SCRIPT_DIR/.llamacpp-helper-config"
 LLAMA_LAUNCHER_DIR="$SCRIPT_DIR"
 LAUNCH_HISTORY="$SCRIPT_DIR/.launch-history"
+DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
+
+# Load installer defaults early so non-interactive launches also see them.
+# Explicit environment variables still win over the repo-local config.
+_env_models_dir="${LLAMACPP_MODELS_DIR:-}"
+_env_slot_save_path="${LLAMACPP_SLOT_SAVE_PATH:-}"
+_cli_min_free_gb="${MIN_FREE_GB:-}"
+_cli_max_total_slots_gb="${MAX_TOTAL_SLOTS_GB:-}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    source "$CONFIG_FILE"
+fi
+[ -n "$_env_models_dir" ] && LLAMACPP_MODELS_DIR="$_env_models_dir"
+[ -n "$_env_slot_save_path" ] && LLAMACPP_SLOT_SAVE_PATH="$_env_slot_save_path"
+[ "$MIN_FREE_GB_TOUCHED" -eq 1 ] && MIN_FREE_GB="$_cli_min_free_gb"
+[ "$MAX_TOTAL_SLOTS_GB_TOUCHED" -eq 1 ] && MAX_TOTAL_SLOTS_GB="$_cli_max_total_slots_gb"
+unset _env_models_dir _env_slot_save_path _cli_min_free_gb _cli_max_total_slots_gb
+
+config_quote() {
+    printf '%q' "$1"
+}
+
+config_set() {
+    local key="$1"
+    local value="$2"
+    local line tmp
+
+    line="$key=$(config_quote "$value")"
+    tmp="$(mktemp)"
+    if [ ! -f "$CONFIG_FILE" ]; then
+        {
+            echo "# llama-launcher settings"
+            echo "# Edited by llama-launcher Settings."
+        } > "$CONFIG_FILE"
+    fi
+    awk -v key="$key" -v line="$line" '
+        BEGIN { done = 0 }
+        $0 ~ "^" key "=" {
+            if (!done) {
+                print line
+                done = 1
+            }
+            next
+        }
+        { print }
+        END {
+            if (!done) {
+                print line
+            }
+        }
+    ' "$CONFIG_FILE" > "$tmp"
+    mv "$tmp" "$CONFIG_FILE"
+}
+
+config_default() {
+    local key="$1"
+    local value="$2"
+    if [ -z "${!key:-}" ]; then
+        printf -v "$key" '%s' "$value"
+        config_set "$key" "$value"
+    fi
+}
+
+prompt_config_path() {
+    local key="$1"
+    local label="$2"
+    local default="$3"
+    local value
+
+    read -rp "$label [${!key:-$default}]: " value
+    value="${value:-${!key:-$default}}"
+    value="${value/#\~/$HOME}"
+    value="${value%/}"
+    printf -v "$key" '%s' "$value"
+    config_set "$key" "$value"
+    if [ ! -d "$value" ]; then
+        read -rp "Create $value? [Y/n] " _create_dir
+        _create_dir="${_create_dir:-y}"
+        if [[ "$_create_dir" =~ ^[Yy]$ ]]; then
+            mkdir -p "$value"
+        fi
+    fi
+}
+
+prompt_config_number() {
+    local key="$1"
+    local label="$2"
+    local default="$3"
+    local min="$4"
+    local max="$5"
+    local value
+
+    read -rp "$label [${!key:-$default}]: " value
+    value="${value:-${!key:-$default}}"
+    if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -lt "$min" ] || [ "$value" -gt "$max" ]; then
+        echo "Invalid value: $value"
+        return 1
+    fi
+    printf -v "$key" '%s' "$value"
+    config_set "$key" "$value"
+}
+
+prompt_config_text() {
+    local key="$1"
+    local label="$2"
+    local default="$3"
+    local value
+
+    read -rp "$label [${!key:-$default}]: " value
+    value="${value:-${!key:-$default}}"
+    printf -v "$key" '%s' "$value"
+    config_set "$key" "$value"
+}
+
+settings_menu() {
+    local default_models="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
+    local default_slots="${LLAMACPP_SLOT_SAVE_PATH:-$(dirname "$default_models")/llama-slots}"
+    local choice build_default
+
+    config_default LLAMACPP_MODELS_DIR "$default_models"
+    config_default LLAMACPP_SLOT_SAVE_PATH "$default_slots"
+    config_default MIN_FREE_GB "${MIN_FREE_GB:-100}"
+    config_default MAX_TOTAL_SLOTS_GB "${MAX_TOTAL_SLOTS_GB:-200}"
+    config_default PORT "${PORT:-40801}"
+    config_default INTERNAL_PORT "${INTERNAL_PORT:-40802}"
+    config_default HOST "${HOST:-0.0.0.0}"
+    config_default API_KEY "${API_KEY:-ollama-local}"
+    config_default LOG_COLORS "${LOG_COLORS:-1}"
+
+    while true; do
+        build_default="${LLAMACPP_BUILD_TYPE:-prompt each launch}"
+        echo ""
+        echo "Settings ($CONFIG_FILE)"
+        echo "  1) Models directory          ${LLAMACPP_MODELS_DIR:-}"
+        echo "  2) Slot save directory       ${LLAMACPP_SLOT_SAVE_PATH:-}"
+        echo "  3) Min free disk GB          ${MIN_FREE_GB:-100}"
+        echo "  4) Max total slot GB         ${MAX_TOTAL_SLOTS_GB:-200}"
+        echo "  5) Public port               ${PORT:-40801}"
+        echo "  6) Internal port             ${INTERNAL_PORT:-40802}"
+        echo "  7) Bind host                 ${HOST:-0.0.0.0}"
+        echo "  8) API key                   ${API_KEY:-ollama-local}"
+        echo "  9) Log colors                ${LOG_COLORS:-1}"
+        echo " 10) Default build type        $build_default"
+        echo "  0) Back"
+        echo ""
+        read -rp "Select setting: " choice
+        case "$choice" in
+            1) prompt_config_path LLAMACPP_MODELS_DIR "Models directory" "$DEFAULT_MODELS_DIR" ;;
+            2)
+                default_slots="$(dirname "${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}")/llama-slots"
+                prompt_config_path LLAMACPP_SLOT_SAVE_PATH "Slot save directory" "$default_slots"
+                ;;
+            3) prompt_config_number MIN_FREE_GB "Minimum free disk GB" 100 0 100000 ;;
+            4) prompt_config_number MAX_TOTAL_SLOTS_GB "Max total slot cache GB" 200 0 100000 ;;
+            5) prompt_config_number PORT "Public port" 40801 1 65535 ;;
+            6) prompt_config_number INTERNAL_PORT "Internal port" 40802 1 65535 ;;
+            7) prompt_config_text HOST "Bind host" "0.0.0.0" ;;
+            8) prompt_config_text API_KEY "API key" "ollama-local" ;;
+            9) prompt_config_number LOG_COLORS "Log colors (1 on, 0 off)" 1 0 1 ;;
+            10)
+                read -rp "Default build type (blank = prompt each launch) [${LLAMACPP_BUILD_TYPE:-}]: " choice
+                if [ -z "$choice" ]; then
+                    LLAMACPP_BUILD_TYPE=""
+                    config_set LLAMACPP_BUILD_TYPE ""
+                else
+                    LLAMACPP_BUILD_TYPE="$(canonical_build_type "$choice")"
+                    config_set LLAMACPP_BUILD_TYPE "$LLAMACPP_BUILD_TYPE"
+                fi
+                ;;
+            0|"") break ;;
+            *) echo "Invalid selection" ;;
+        esac
+    done
+}
+
+if [[ "$ORIGINAL_ARGC" -eq 0 ]]; then
+    echo "llama-launcher"
+    echo "  1) Launch"
+    echo "  2) Settings"
+    echo "  0) Quit"
+    echo ""
+    read -rp "Choice [default=1]: " _launcher_choice
+    _launcher_choice="${_launcher_choice:-1}"
+    case "$_launcher_choice" in
+        1) ;;
+        2)
+            settings_menu
+            echo ""
+            read -rp "Launch now? [Y/n] " _launch_after_settings
+            _launch_after_settings="${_launch_after_settings:-y}"
+            [[ "$_launch_after_settings" =~ ^[Yy]$ ]] || exit 0
+            ;;
+        0) exit 0 ;;
+        *) echo "Invalid selection"; exit 1 ;;
+    esac
+fi
 
 # ── Launch history: quick relaunch ──────────────────────────────────────────
 # Show recent launches if no CLI args were given (fully interactive mode)
-if [[ -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && -z "$ARG_TUNE" && -f "$LAUNCH_HISTORY" ]]; then
+if [[ "$ORIGINAL_ARGC" -eq 0 && -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && -z "$ARG_TUNE" && -f "$LAUNCH_HISTORY" ]]; then
     # Read up to 5 most recent unique launches (newest first)
     recent=()
     while IFS=$'\t' read -r ts build model tune extras; do
@@ -191,6 +389,10 @@ fi
 
 # ── Build type selection ─────────────────────────────────────────────────────
 
+if [ -z "$ARG_BUILD_TYPE" ] && [ -n "${LLAMACPP_BUILD_TYPE:-}" ]; then
+    ARG_BUILD_TYPE="$LLAMACPP_BUILD_TYPE"
+fi
+
 if [ -n "$ARG_BUILD_TYPE" ]; then
     # Build type passed via CLI
     BUILD_TYPE="$(canonical_build_type "$ARG_BUILD_TYPE")"
@@ -217,7 +419,7 @@ else
 
     if [ ${#available_builds[@]} -eq 0 ]; then
         echo "❌ No builds found in $LLAMA_LAUNCHER_DIR/builds/"
-        echo "   Run build first: bash utils/build.sh [rocm|vulkan]"
+        echo "   Run build first: bash build-llamacpp.sh [rocm|vulkan]"
         exit 1
     elif [ ${#available_builds[@]} -eq 1 ]; then
         BUILD_TYPE="${available_builds[0]}"
@@ -242,7 +444,7 @@ LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
 
 if [ ! -f "$LLAMACPP_SERVER_PATH" ]; then
     echo "❌ llama-server not found at $LLAMACPP_SERVER_PATH"
-    echo "   Run: bash utils/build.sh $BUILD_TYPE"
+    echo "   Run: bash build-llamacpp.sh $BUILD_TYPE"
     exit 1
 fi
 
@@ -263,14 +465,6 @@ if [ -n "$ARG_MODEL_PATH" ]; then
     MODELS_DIR="$(dirname "$MODEL_FOLDER")"
 else
     # Interactive: scan model folders and let user pick
-    DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
-
-    # Load saved models dir from config
-    if [ -f "$CONFIG_FILE" ]; then
-        eval "$(cat "$CONFIG_FILE")"
-    elif [ -f "$LEGACY_CONFIG_FILE" ]; then
-        eval "$(cat "$LEGACY_CONFIG_FILE")"
-    fi
     export LLAMACPP_MODELS_DIR
     MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
 
@@ -297,7 +491,8 @@ else
         echo "❌ No model folders found at $MODELS_DIR"
         echo ""
         read -rp "Enter path to models directory: " new_path
-        echo "LLAMACPP_MODELS_DIR=$new_path" > "$CONFIG_FILE"
+        config_set LLAMACPP_MODELS_DIR "$new_path"
+        LLAMACPP_MODELS_DIR="$new_path"
         echo "✅ Path saved to $CONFIG_FILE for next launch"
         echo ""
         MODELS_DIR="$new_path"

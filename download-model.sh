@@ -19,11 +19,41 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/.llama-launcher-config"
-LEGACY_CONFIG_FILE="$SCRIPT_DIR/.llamacpp-helper-config"
 DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
 TMPDIR="${TMPDIR:-/tmp}"
 PARSE_FILE="$(mktemp "$TMPDIR/download-model.XXXXXX.json")"
 trap 'rm -f "$PARSE_FILE"' EXIT
+
+quote_sh() {
+    printf '%q' "$1"
+}
+
+config_set() {
+    local key="$1"
+    local value="$2"
+    local line tmp
+
+    line="$key=$(quote_sh "$value")"
+    tmp="$(mktemp)"
+    touch "$CONFIG_FILE"
+    awk -v key="$key" -v line="$line" '
+        BEGIN { done = 0 }
+        $0 ~ "^" key "=" {
+            if (!done) {
+                print line
+                done = 1
+            }
+            next
+        }
+        { print }
+        END {
+            if (!done) {
+                print line
+            }
+        }
+    ' "$CONFIG_FILE" > "$tmp"
+    mv "$tmp" "$CONFIG_FILE"
+}
 
 # ── Parse input ──────────────────────────────────────────────────────────────
 REPO_INPUT="${1:-}"
@@ -57,8 +87,6 @@ echo ""
 # ── Resolve models directory ────────────────────────────────────────────────
 if [ -f "$CONFIG_FILE" ]; then
     eval "$(cat "$CONFIG_FILE")"
-elif [ -f "$LEGACY_CONFIG_FILE" ]; then
-    eval "$(cat "$LEGACY_CONFIG_FILE")"
 fi
 MODELS_DIR="${LLAMACPP_MODELS_DIR:-$DEFAULT_MODELS_DIR}"
 MODELS_DIR="${MODELS_DIR%/}"
@@ -113,7 +141,7 @@ if [ ! -d "$MODELS_DIR" ]; then
     fi
 
     # Save to config so we don't ask again
-    echo "LLAMACPP_MODELS_DIR=\"$MODELS_DIR\"" > "$CONFIG_FILE"
+    config_set LLAMACPP_MODELS_DIR "$MODELS_DIR"
     echo "Saved to $CONFIG_FILE"
     echo ""
 fi
