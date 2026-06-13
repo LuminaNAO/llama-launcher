@@ -182,6 +182,9 @@ DEEP_LOG="$LLAMA_LAUNCHER_DIR/llama-deep.log"
 MODEL_CONFIG_DIR="$LLAMA_LAUNCHER_DIR/model-configs"
 DEFAULT_MODELS_DIR="$HOME/llama-launcher/models"
 DEFAULT_SLOTS_DIR="$HOME/llama-launcher/slots"
+# User-facing, shareable tunes live next to models so users can drop in or pass
+# around .yaml tunes without touching system paths. Override: LLAMACPP_TUNES_DIR.
+DEFAULT_TUNES_DIR="$HOME/llama-launcher/tunes"
 DOWNLOAD_MODEL_SCRIPT="${LLAMA_LAUNCHER_DOWNLOAD_MODEL:-}"
 if [[ -z "$DOWNLOAD_MODEL_SCRIPT" || ! -x "$DOWNLOAD_MODEL_SCRIPT" ]]; then
     DOWNLOAD_MODEL_SCRIPT=""
@@ -234,6 +237,7 @@ AUTHOR_BEST_PICK_TUNE="${AUTHOR_BEST_PICK_TUNE:-Qwen3.6-27B-MTP.64gb-q4-140k-cod
 # Explicit environment variables still win over the repo-local config.
 _env_models_dir="${LLAMACPP_MODELS_DIR:-}"
 _env_slot_save_path="${LLAMACPP_SLOT_SAVE_PATH:-}"
+_env_tunes_dir="${LLAMACPP_TUNES_DIR:-}"
 _cli_min_free_gb="${MIN_FREE_GB:-}"
 _cli_max_total_slots_gb="${MAX_TOTAL_SLOTS_GB:-}"
 if [ -f "$CONFIG_FILE" ]; then
@@ -242,9 +246,32 @@ if [ -f "$CONFIG_FILE" ]; then
 fi
 [ -n "$_env_models_dir" ] && LLAMACPP_MODELS_DIR="$_env_models_dir"
 [ -n "$_env_slot_save_path" ] && LLAMACPP_SLOT_SAVE_PATH="$_env_slot_save_path"
+[ -n "$_env_tunes_dir" ] && LLAMACPP_TUNES_DIR="$_env_tunes_dir"
 [ "$MIN_FREE_GB_TOUCHED" -eq 1 ] && MIN_FREE_GB="$_cli_min_free_gb"
 [ "$MAX_TOTAL_SLOTS_GB_TOUCHED" -eq 1 ] && MAX_TOTAL_SLOTS_GB="$_cli_max_total_slots_gb"
-unset _env_models_dir _env_slot_save_path _cli_min_free_gb _cli_max_total_slots_gb
+unset _env_models_dir _env_slot_save_path _env_tunes_dir _cli_min_free_gb _cli_max_total_slots_gb
+
+# Resolve the user-facing tunes directory and seed it from bundled tunes on first
+# run. Packages ship read-only tunes under $BUNDLED_MODEL_CONFIG_DIR; we copy them
+# here once so users see, edit, and share them from ~/llama-launcher/tunes.
+TUNES_DIR="${LLAMACPP_TUNES_DIR:-$DEFAULT_TUNES_DIR}"
+mkdir -p "$TUNES_DIR"
+if [ -z "$(ls -A "$TUNES_DIR" 2>/dev/null)" ]; then
+    for _seed_dir in "$BUNDLED_MODEL_CONFIG_DIR" "$MODEL_CONFIG_DIR"; do
+        [ -d "$_seed_dir" ] || continue
+        compgen -G "$_seed_dir/*.yaml" >/dev/null 2>&1 || continue
+        cp -n "$_seed_dir"/*.yaml "$TUNES_DIR"/ 2>/dev/null || true
+        [ -f "$_seed_dir/author-best-picks.sh" ] && \
+            cp -n "$_seed_dir/author-best-picks.sh" "$TUNES_DIR"/ 2>/dev/null || true
+        echo "🎚️  Seeded shareable tunes into $TUNES_DIR" >&2
+        break
+    done
+fi
+# Tunes the user creates/saves land in the shareable dir by default. Keep the
+# previous location (~/.local/share/llama-launcher/model-configs) discoverable so
+# tunes saved by older versions still show up.
+LEGACY_TUNE_DIR="$MODEL_CONFIG_DIR"
+MODEL_CONFIG_DIR="$TUNES_DIR"
 
 config_quote() {
     printf '%q' "$1"
@@ -1032,6 +1059,7 @@ model_config_search_dirs() {
         fi
     fi
     for dir in \
+        "$TUNES_DIR" \
         "$cache_root"/yay/llama-launcher*/model-configs \
         "$cache_root"/yay/llama-launcher*/src/model-configs \
         "$cache_root"/yay/llama-launcher*/src/*/model-configs \
@@ -1040,6 +1068,7 @@ model_config_search_dirs() {
         "$cache_root"/paru/clone/llama-launcher*/src/*/model-configs \
         "$BUNDLED_MODEL_CONFIG_DIR" \
         "$MODEL_CONFIG_DIR" \
+        "$LEGACY_TUNE_DIR" \
         "$LLAMA_LAUNCHER_LIB_DIR/model-configs" \
         "$SCRIPT_DIR/model-configs"; do
         [[ -d "$dir" ]] || continue
@@ -1130,12 +1159,12 @@ collect_tunes
 HAS_MODEL_CONFIG=0
 if [ ${#tune_configs[@]} -eq 0 ]; then
     if [ -n "$ARG_TUNE" ]; then
-        echo "❌ No YAML tunes found for '$ARG_TUNE'. Expected: model-configs/${selected_folder_name}[.<tune>].yaml"
+        echo "❌ No YAML tunes found for '$ARG_TUNE'. Expected: $TUNES_DIR/${selected_folder_name}[.<tune>].yaml"
         exit 1
     fi
     echo "📋 Tune: none (using system profile)"
-    echo "   Expected: model-configs/${selected_folder_name}.yaml"
-    echo "   Save one with: $(basename "$0") --save, or create one interactively."
+    echo "   Expected: $TUNES_DIR/${selected_folder_name}.yaml"
+    echo "   Drop a shared tune .yaml into $TUNES_DIR, save one with: $(basename "$0") --save, or create one interactively."
     if [ "$ORIGINAL_ARGC" -eq 0 ]; then
         read -rp "Create a tune now? [y/N] " _create_tune
         if [[ "$_create_tune" =~ ^[Yy]$ ]]; then
