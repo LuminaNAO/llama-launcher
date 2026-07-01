@@ -41,6 +41,7 @@ It symlinks `llama-launcher`, `llama-build`, and `llama-download-model` into `/u
 
 Builds llama.cpp into `builds/<backend>/`. For GPU backends, the GPU arch (gfx target or CUDA compute cap) is auto-detected via `rocminfo` / `nvidia-smi` and can be overridden.
 When installed, this script is available as `llama-build`.
+For packaged installs, source discovery also checks AUR helper build caches such as `~/.cache/paru/clone/llama-hdd/src/llama-hdd` and `~/.cache/yay/llama-hdd/src/llama-hdd`.
 
 ### `llama-server-launcher.sh`
 

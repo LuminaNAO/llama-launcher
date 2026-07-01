@@ -90,9 +90,20 @@ else
     #   ~/code/llama.cpp-*          (suffix style, e.g. llama.cpp-v4flash)
     #   ~/code/llama*/llama.cpp     (nested style, e.g. llama-mtp/llama.cpp)
     #   ~/code/llama*               (flat style, e.g. llama-mtp/ with CMakeLists at root)
+    #   ~/.cache/paru/clone/llama-hdd/src/llama-hdd
+    #   ~/.cache/yay/llama-hdd/src/llama-hdd
     search_roots=()
     if [ "$PACKAGED_INSTALL" -eq 1 ]; then
-        search_roots+=("$PWD" "$(dirname "$PWD")" "$HOME/code" "$HOME/src" "$HOME")
+        cache_root="${XDG_CACHE_HOME:-$HOME/.cache}"
+        search_roots+=(
+            "$PWD"
+            "$(dirname "$PWD")"
+            "$HOME/code"
+            "$HOME/src"
+            "$HOME"
+            "$cache_root/paru/clone/llama-hdd/src"
+            "$cache_root/yay/llama-hdd/src"
+        )
     else
         search_roots+=("$(dirname "$ROOT_DIR")")
     fi
