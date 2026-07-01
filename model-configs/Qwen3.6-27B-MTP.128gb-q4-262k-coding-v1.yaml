@@ -1,11 +1,11 @@
 kind: llama-launcher-tune
 version: 1
-name: "128gb-q4-262k-coding-v1"
+name: "128gb-q4-262k-coding-v2"
 model: "Qwen3"
 metadata:
   shareable: true
   notes: |-
-    Tune: 128gb-q4-262k-coding-v1
+    Tune: 128gb-q4-262k-coding-v2
     Per-model config for: Qwen3.6-27B-MTP (hybrid Gated-DeltaNet + Gated-Attention,
     trained with multi-token prediction). Tuned for coding / agentic tasks.
     Source: https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF
