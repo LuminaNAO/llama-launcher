@@ -31,7 +31,7 @@ Scripts resolve their own location via `readlink -f`, so the launcher can be sym
 
 The installer is interactive. It checks `LLAMACPP_MODELS_DIR` and `LLAMACPP_SLOT_SAVE_PATH`, scans common GGUF locations including the Hugging Face cache, suggests defaults, creates missing directories when approved, and saves the result to `.llama-launcher-config`.
 
-On first install it also offers the author best pick from `model-configs/author-best-picks.sh`. The current pick is `Qwen3.6-27B-MTP.64gb-q4-140k-coding-v1.yaml` with `Qwen3.6-27B-UD-Q4_K_XL.gguf`, downloaded through `download-model.sh` when approved.
+On first install it also offers the author best pick from `model-configs/author-best-picks.sh`. The current pick is `Ornith-1.0-35B-NVFP4-MTP-GGUF.32gb-mxfp4-mtp-draft-coding-v1.yaml` with `ornith-1.0-35b-MXFP4_MOE-MTP.gguf`, downloaded through `download-model.sh` when approved.
 
 It symlinks `llama-launcher`, `llama-build`, and `llama-download-model` into `/usr/local/bin` (if root) or `~/.local/bin` (otherwise), then installs a managed shell startup block for bash, zsh, or fish so `PATH` and the launcher environment are available in new shells.
 

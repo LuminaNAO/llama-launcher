@@ -1,0 +1,85 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-mxfp4-mtp-draft-coding-v1"
+model: "Ornith-1.0-35B-NVFP4-MTP-GGUF"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-mxfp4-mtp-draft-coding-v1
+    Per-model config for: s-batman/Ornith-1.0-35B-NVFP4-MTP-GGUF
+    Primary GGUF: ornith-1.0-35b-MXFP4_MOE-MTP.gguf
+    Target: NVIDIA GeForce RTX 5090, 32 GB GDDR7, Blackwell / sm_120.
+    Backend: CUDA llama.cpp with Blackwell FP4 support.
+
+    This is the aggressive first draft for the 5090 rather than the safest
+    fallback. The MXFP4_MOE file is the preferred starting point because the
+    model card reports identical Blackwell throughput to NVFP4 with smaller
+    storage, while keeping the grafted MTP block for speculative decoding.
+    Switch to ornith-1.0-35b-NVFP4-MTP.gguf only if you want the slightly
+    tighter NVFP4 quantization error and can accept the larger file.
+
+    Model recap:
+    - Ornith-1.0-35B is a Qwen3.5-MoE derived coding/agentic model.
+    - 35B total parameters, roughly 3B active per token.
+    - Native context is 262144, but 32 GB VRAM is better spent on headroom,
+      stable flash-attn scratch, and MTP draft work for real coding sessions.
+    - The MTP head is grafted from Qwen3.6-35B-A3B and adds roughly 488 MB.
+
+    Context choice:
+    CONTEXT=65536 is the first serious 5090 target. It is large enough for
+    agentic coding sessions and much less fragile than chasing full 262k on a
+    32 GB card. If a long repo task OOMs or slows badly, launch with
+    --context 32768. If monitoring shows several GB free after warmup, try
+    --context 98304 or 131072.
+
+    KV choice:
+    q4_0 K/V keeps the 64k KV cache small and fast enough for a single 5090.
+    This mirrors the recent MTP/Qwen launcher tunes where q4 KV plus rotor is
+    the practical quality/speed/memory balance. If tool-calling quality looks
+    degraded, test q8_0 KV before changing the weight quant.
+
+    MTP runtime:
+    --spec-type draft-mtp --spec-draft-n-max 3
+    Use a current llama.cpp. The MTP repo card reports draft-mtp as the modern
+    flag spelling. Depth 3 is the best first attempt for the 35B-A3B MoE path:
+    it is high enough to show a decode win when acceptance is good, but not so
+    high that draft overhead dominates. If token/s is worse than non-MTP,
+    reduce to 2 first, then disable MTP.
+
+    Batching:
+    -ub 512 -b 1024 is a moderate CUDA/Blackwell starting point. It should keep
+    prefill reasonable without betting the whole 32 GB budget on scratch space.
+    For maximum stability, use -ub 256 -b 512. For benchmarking, try
+    -ub 1024 -b 2048 after checking VRAM headroom.
+
+    Sampling:
+    Use the DeepReinforce / AtomicChat coding recommendation: temp=0.6,
+    top_p=0.95, top_k=20. Benchmark reproduction may use temp=1.0, but this
+    tune is for day-to-day coding quality, not leaderboard reproduction.
+
+    JINJA=1 is required so the Ornith/Qwen chat template is applied. The model
+    is a reasoning model; REASONING=auto lets llama-server expose supported
+    reasoning fields when the runtime/template supports them.
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "32768"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "48"
+  CHECKPOINT_MIN_STEP: "2048"
+  CONTEXT: "65536"
+  DIO: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 3 -ub 512 -b 1024"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  JINJA: "1"
+  KV_UNIFIED: "1"
+  NGL: "99"
+  NO_MMAP: "1"
+  PARALLEL: "1"
+  PORT: "40801"
+  REASONING: "auto"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

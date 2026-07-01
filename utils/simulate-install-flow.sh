@@ -69,8 +69,9 @@ while [ "\$#" -gt 0 ]; do
     *) repo="\$1"; shift ;;
   esac
 done
-mkdir -p "\$LLAMACPP_MODELS_DIR/Qwen3.6-27B-MTP"
-: > "\$LLAMACPP_MODELS_DIR/Qwen3.6-27B-MTP/\$filename"
+repo_name="\${repo##*/}"
+mkdir -p "\$LLAMACPP_MODELS_DIR/\$repo_name"
+: > "\$LLAMACPP_MODELS_DIR/\$repo_name/\$filename"
 echo "$marker repo=\$repo filename=\$filename dir=\$LLAMACPP_MODELS_DIR"
 EOF
     chmod +x "$dest"
@@ -106,10 +107,10 @@ simulate_git_clone_install() {
 
     assert_contains "$install_out" "Installed: $home_dir/.local/bin/llama-launcher -> $clone/llama-server-launcher.sh"
     assert_contains "$install_out" "Installed: $home_dir/.local/bin/llama-download-model -> $clone/download-model.sh"
-    assert_contains "$launch_out" "Download author best pick: Qwen3.6-27B-MTP 64GB coding (Qwen3.6-27B-UD-Q4_K_XL.gguf)"
-    assert_contains "$launch_out" "FAKE_CLONE_DOWNLOAD repo=unsloth/Qwen3.6-27B-MTP-GGUF filename=Qwen3.6-27B-UD-Q4_K_XL.gguf"
-    assert_contains "$launch_out" "64gb-q4-140k-coding-v1"
-    assert_contains "$launch_out" "Slot save namespace: $home_dir/llama-launcher/slots/Qwen3.6-27B-UD-Q4_K_XL"
+    assert_contains "$launch_out" "Download author best pick: Ornith-1.0-35B MXFP4 MTP 5090 coding (ornith-1.0-35b-MXFP4_MOE-MTP.gguf)"
+    assert_contains "$launch_out" "FAKE_CLONE_DOWNLOAD repo=s-batman/Ornith-1.0-35B-NVFP4-MTP-GGUF filename=ornith-1.0-35b-MXFP4_MOE-MTP.gguf"
+    assert_contains "$launch_out" "32gb-mxfp4-mtp-draft-coding-v1"
+    assert_contains "$launch_out" "Slot save namespace: $home_dir/llama-launcher/slots/ornith-1.0-35b-MXFP4_MOE-MTP"
     assert_contains "$launch_out" "FAKE_CLONE_LLAMA_SERVER"
 
     echo "ok: git clone install flow"
@@ -144,10 +145,10 @@ simulate_packaged_aur_install() {
             LLAMA_LAUNCHER_MODEL_CONFIG_DIR="$share_dir" \
             llama-launcher > "$launch_out" 2>&1
 
-    assert_contains "$launch_out" "Download author best pick: Qwen3.6-27B-MTP 64GB coding (Qwen3.6-27B-UD-Q4_K_XL.gguf)"
-    assert_contains "$launch_out" "FAKE_AUR_DOWNLOAD repo=unsloth/Qwen3.6-27B-MTP-GGUF filename=Qwen3.6-27B-UD-Q4_K_XL.gguf"
-    assert_contains "$launch_out" "64gb-q4-140k-coding-v1"
-    assert_contains "$launch_out" "Slot save namespace: $home_dir/llama-launcher/llama-slots/Qwen3.6-27B-UD-Q4_K_XL"
+    assert_contains "$launch_out" "Download author best pick: Ornith-1.0-35B MXFP4 MTP 5090 coding (ornith-1.0-35b-MXFP4_MOE-MTP.gguf)"
+    assert_contains "$launch_out" "FAKE_AUR_DOWNLOAD repo=s-batman/Ornith-1.0-35B-NVFP4-MTP-GGUF filename=ornith-1.0-35b-MXFP4_MOE-MTP.gguf"
+    assert_contains "$launch_out" "32gb-mxfp4-mtp-draft-coding-v1"
+    assert_contains "$launch_out" "Slot save namespace: $home_dir/llama-launcher/llama-slots/ornith-1.0-35b-MXFP4_MOE-MTP"
     assert_contains "$launch_out" "FAKE_AUR_LLAMA_SERVER"
 
     echo "ok: packaged/AUR install flow"
