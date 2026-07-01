@@ -2,11 +2,12 @@
 # Build llama.cpp in the builds/ directory
 # Usage: build-llamacpp.sh <build-type> [gpu-arch]
 #
-# <build-type> is <backend>[-<tag>], where <backend> ∈ {rocm,vulkan,cuda}.
+# <build-type> is <backend>[-<tag>], where <backend> ∈ {cpu,rocm,vulkan,cuda}.
 # The optional -tag suffix selects a parallel output directory under builds/
 # so experimental variants of the same backend can coexist.
 #   ./build-llamacpp.sh rocm           # -> builds/rocm (default mainline source)
 #   ./build-llamacpp.sh rocm-test      # -> builds/rocm-test
+#   ./build-llamacpp.sh cpu            # -> builds/cpu
 #
 # To build from a non-default llama.cpp source tree,
 # set LLAMACPP_SRC:
@@ -49,9 +50,10 @@ GPU_ARCH_OVERRIDE="${2:-}"
 if [ -z "$BUILD_TYPE" ]; then
     echo "❌ Build type required."
     echo ""
-    echo "Usage: build-llamacpp.sh <rocm|vulkan|cuda>[-tag] [gpu-arch]"
+    echo "Usage: build-llamacpp.sh <cpu|rocm|vulkan|cuda>[-tag] [gpu-arch]"
     echo ""
     echo "Examples:"
+    echo "  ./build-llamacpp.sh cpu             # CPU-only backend"
     echo "  ./build-llamacpp.sh vulkan          # Vulkan backend (any GPU)"
     echo "  ./build-llamacpp.sh rocm            # ROCm/HIP backend (auto-detect GPU)"
     echo "  ./build-llamacpp.sh rocm gfx1100    # ROCm for RX 7900 series"
@@ -186,6 +188,11 @@ command -v git >/dev/null 2>&1 || MISSING+=("git|git — version control")
 command -v pkg-config >/dev/null 2>&1 || MISSING+=("pkg-config|pkgconf (Arch) / pkg-config (Debian)")
 
 case "$BACKEND" in
+    cpu)
+        if [ -n "$GPU_ARCH_OVERRIDE" ]; then
+            echo "⚠️  GPU arch argument ignored for CPU builds: $GPU_ARCH_OVERRIDE"
+        fi
+        ;;
     vulkan)
         # Check Vulkan headers (needed at compile time — vulkan-headers package)
         if [ ! -f /usr/include/vulkan/vulkan.h ] && [ ! -f /usr/local/include/vulkan/vulkan.h ]; then
@@ -249,9 +256,10 @@ case "$BACKEND" in
     *)
         echo "❌ Unknown backend: $BACKEND (derived from build type '$BUILD_TYPE')"
         echo ""
-        echo "Usage: build-llamacpp.sh <rocm|vulkan|cuda>[-tag]"
+        echo "Usage: build-llamacpp.sh <cpu|rocm|vulkan|cuda>[-tag]"
         echo ""
         echo "Examples:"
+        echo "  ./build-llamacpp.sh cpu       # CPU-only backend"
         echo "  ./build-llamacpp.sh vulkan    # Recommended for Strix Halo / RDNA 3.5"
         echo "  ./build-llamacpp.sh rocm      # ROCm/HIP backend"
         echo "  ./build-llamacpp.sh cuda      # NVIDIA CUDA backend"
@@ -274,6 +282,7 @@ if [ ${#MISSING[@]} -gt 0 ]; then
     if command -v pacman >/dev/null 2>&1; then
         echo "Arch/CachyOS quick install:"
         case "$BACKEND" in
+            cpu)    echo "  sudo pacman -S base-devel cmake pkgconf git" ;;
             vulkan) echo "  sudo pacman -S vulkan-headers vulkan-icd-loader shaderc vulkan-tools" ;;
             rocm)   echo "  sudo pacman -S rocm-hip-sdk rocblas hipblas rocminfo" ;;
             cuda)   echo "  sudo pacman -S cuda" ;;
@@ -281,6 +290,7 @@ if [ ${#MISSING[@]} -gt 0 ]; then
     elif command -v apt-get >/dev/null 2>&1; then
         echo "Debian/Ubuntu quick install:"
         case "$BACKEND" in
+            cpu)    echo "  sudo apt-get install build-essential cmake pkg-config git" ;;
             vulkan) echo "  sudo apt-get install libvulkan-dev vulkan-tools glslc" ;;
             rocm)   echo "  See https://rocm.docs.amd.com for ROCm installation" ;;
             cuda)   echo "  sudo apt-get install nvidia-cuda-toolkit libcublas-dev" ;;
@@ -431,6 +441,11 @@ fi
 
 # ── Configure and build ────────────────────────────────────────────────────
 case "$BACKEND" in
+    cpu)
+        cmake -S . -B "$BUILD_DIR" \
+          -DGGML_NATIVE=ON \
+          -DCMAKE_BUILD_TYPE=Release
+        ;;
     cuda)
         CMAKE_CUDA_ARGS=(-DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release)
         if [ "$CUDA_ARCH" != "native" ]; then

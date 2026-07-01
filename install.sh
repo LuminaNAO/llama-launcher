@@ -21,6 +21,11 @@ if [[ ! -x "$DOWNLOAD_TARGET" ]]; then
     echo "ERROR: Downloader not found or not executable: $DOWNLOAD_TARGET"
     exit 1
 fi
+BUILD_TARGET="$SCRIPT_DIR/build-llamacpp.sh"
+if [[ ! -x "$BUILD_TARGET" ]]; then
+    echo "ERROR: Builder not found or not executable: $BUILD_TARGET"
+    exit 1
+fi
 
 if ! command -v yq >/dev/null 2>&1; then
     echo "ERROR: llama-launcher YAML tunes require yq (the Python jq-wrapper YAML processor)."
@@ -448,6 +453,7 @@ LINK="$LINK_DIR/llama-launcher"
 LOG_LINK="$LINK_DIR/llama-launcher-log"
 DOWNLOAD_LINK="$LINK_DIR/llama-download-model"
 DOWNLOAD_COMPAT_LINK="$LINK_DIR/download-model.sh"
+BUILD_LINK="$LINK_DIR/llama-build"
 
 if [[ -e "$LINK" || -L "$LINK" ]]; then
     if [[ -L "$LINK" && "$(readlink -f "$LINK")" == "$TARGET" ]]; then
@@ -498,6 +504,21 @@ for _download_link in "$DOWNLOAD_LINK" "$DOWNLOAD_COMPAT_LINK"; do
     fi
 done
 unset _download_link
+
+if [[ -e "$BUILD_LINK" || -L "$BUILD_LINK" ]]; then
+    if [[ -L "$BUILD_LINK" && "$(readlink -f "$BUILD_LINK")" == "$BUILD_TARGET" ]]; then
+        echo "Already installed: $BUILD_LINK -> $BUILD_TARGET"
+    else
+        echo "WARNING: $BUILD_LINK exists and points elsewhere, or is a regular file."
+        read -rp "Overwrite? [y/N] " ans
+        [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 1; }
+        ln -sfn "$BUILD_TARGET" "$BUILD_LINK"
+        echo "Updated: $BUILD_LINK -> $BUILD_TARGET"
+    fi
+else
+    ln -s "$BUILD_TARGET" "$BUILD_LINK"
+    echo "Installed: $BUILD_LINK -> $BUILD_TARGET"
+fi
 
 SHELL_NAME="$(detect_shell_name)"
 PROFILE="$(shell_profile_path "$SHELL_NAME")"

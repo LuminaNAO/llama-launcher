@@ -10,7 +10,7 @@
 #   llama-server-launcher.sh --build rocm --model /path/to/model  # non-interactive
 #
 # Options:
-#   --build <type>   Build type (rocm, vulkan, etc.) — skips build selection
+#   --build <type>   Build type (cpu, rocm, vulkan, etc.) — skips build selection
 #   --model <path>   Full path to .gguf model file — skips model selection
 #   --tune <name>    Select a specific tune (e.g., "64gb", "128gb") — skips tune menu
 #   --seed <N>       Override the random seed (default: 42)
@@ -500,7 +500,7 @@ else
 
     if [ ${#available_builds[@]} -eq 0 ]; then
         echo "❌ No builds found in $LLAMA_LAUNCHER_DIR/builds/"
-        echo "   Run build first: bash build-llamacpp.sh [rocm|vulkan]"
+        echo "   Run build first: bash build-llamacpp.sh [cpu|rocm|vulkan|cuda]"
         exit 1
     elif [ ${#available_builds[@]} -eq 1 ]; then
         BUILD_TYPE="${available_builds[0]}"

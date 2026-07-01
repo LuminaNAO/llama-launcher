@@ -33,13 +33,14 @@ The installer is interactive. It checks `LLAMACPP_MODELS_DIR` and `LLAMACPP_SLOT
 
 On first install it also offers the author best pick from `model-configs/author-best-picks.sh`. The current pick is `Qwen3.6-27B-MTP.64gb-q4-140k-coding-v1.yaml` with `Qwen3.6-27B-UD-Q4_K_XL.gguf`, downloaded through `download-model.sh` when approved.
 
-It symlinks `llama-launcher` into `/usr/local/bin` (if root) or `~/.local/bin` (otherwise), then installs a managed shell startup block for bash, zsh, or fish so `PATH` and the launcher environment are available in new shells.
+It symlinks `llama-launcher`, `llama-build`, and `llama-download-model` into `/usr/local/bin` (if root) or `~/.local/bin` (otherwise), then installs a managed shell startup block for bash, zsh, or fish so `PATH` and the launcher environment are available in new shells.
 
 ## Scripts
 
-### `build-llamacpp.sh <rocm|vulkan|cuda> [gpu-arch]`
+### `build-llamacpp.sh <cpu|rocm|vulkan|cuda> [gpu-arch]`
 
-Builds llama.cpp into `builds/<backend>/`. GPU arch (gfx target or CUDA compute cap) is auto-detected via `rocminfo` / `nvidia-smi` and can be overridden.
+Builds llama.cpp into `builds/<backend>/`. For GPU backends, the GPU arch (gfx target or CUDA compute cap) is auto-detected via `rocminfo` / `nvidia-smi` and can be overridden.
+When installed, this script is available as `llama-build`.
 
 ### `llama-server-launcher.sh`
 
@@ -51,7 +52,7 @@ Run without flags for the interactive launcher. Enter `s` from the recent-launch
 
 | Flag | Description |
 |------|-------------|
-| `--build <type>` | rocm / vulkan / cuda (skips build menu) |
+| `--build <type>` | cpu / rocm / vulkan / cuda (skips build menu) |
 | `--model <path>` | Path to `.gguf` (skips model menu) |
 | `--tune <name>`  | Named tune from model's `.yaml` |
 | `--seed <N>`     | Override seed |

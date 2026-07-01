@@ -182,7 +182,7 @@ fi
 
 if [ ${#available_builds[@]} -eq 0 ]; then
     echo "ERROR: No builds found in $ROOT_DIR/builds/"
-    echo "Run: bash build-llamacpp.sh [rocm|vulkan|cuda]"
+    echo "Run: bash build-llamacpp.sh [cpu|rocm|vulkan|cuda]"
     exit 1
 elif [ -n "${LLAMACPP_BUILD_TYPE:-}" ] && [ -f "$ROOT_DIR/builds/$LLAMACPP_BUILD_TYPE/bin/llama-server" ]; then
     BUILD_TYPE="$(canonical_build_type "$LLAMACPP_BUILD_TYPE")"
