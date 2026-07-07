@@ -44,6 +44,90 @@ case "$SCRIPT_DIR" in
 esac
 DEFAULT_LLAMACPP_DIR="$(dirname "$ROOT_DIR")/llama.cpp"
 
+ldconfig_has() {
+    # Avoid grep -q in a pipe under pipefail: grep can exit early after a
+    # match, SIGPIPE ldconfig, and make a present library look missing.
+    local needle="$1"
+    ldconfig -p 2>/dev/null | awk -v needle="$needle" 'index($0, needle) { found=1 } END { exit found ? 0 : 1 }'
+}
+
+spirv_headers_config_found() {
+    local dir prefix
+    local dirs=(
+        /usr/share/cmake/SPIRV-Headers
+        /usr/lib/cmake/SPIRV-Headers
+        /usr/lib/x86_64-linux-gnu/cmake/SPIRV-Headers
+        /usr/local/share/cmake/SPIRV-Headers
+        /usr/local/lib/cmake/SPIRV-Headers
+    )
+
+    if [ -n "${CMAKE_PREFIX_PATH:-}" ]; then
+        IFS=':' read -r -a prefixes <<< "$CMAKE_PREFIX_PATH"
+        for prefix in "${prefixes[@]}"; do
+            [ -n "$prefix" ] || continue
+            dirs+=(
+                "$prefix/share/cmake/SPIRV-Headers"
+                "$prefix/lib/cmake/SPIRV-Headers"
+                "$prefix/lib/x86_64-linux-gnu/cmake/SPIRV-Headers"
+            )
+        done
+    fi
+
+    for dir in "${dirs[@]}"; do
+        [ -f "$dir/SPIRV-HeadersConfig.cmake" ] && return 0
+        [ -f "$dir/spirv-headers-config.cmake" ] && return 0
+    done
+
+    return 1
+}
+
+nvcc_supported_cuda_archs() {
+    command -v nvcc >/dev/null 2>&1 || return 0
+    nvcc --list-gpu-arch 2>/dev/null \
+        | sed -n 's/^compute_\([0-9][0-9a-z]*\)$/\1/p' \
+        | sort -uV
+}
+
+nvcc_supports_cuda_arch() {
+    local arch="$1"
+    [ "$arch" = "native" ] && return 0
+    nvcc_supported_cuda_archs | awk -v arch="$arch" '$0 == arch { found=1 } END { exit found ? 0 : 1 }'
+}
+
+nvcc_best_cuda_arch_for() {
+    local requested="$1"
+    local best=""
+    local arch
+    [ "$requested" = "native" ] && { printf '%s\n' "$requested"; return 0; }
+    while IFS= read -r arch; do
+        [ -n "$arch" ] || continue
+        [ "$arch" = "$requested" ] && { printf '%s\n' "$arch"; return 0; }
+        if [[ "$requested" =~ ^[0-9]+$ && "$arch" =~ ^[0-9]+$ ]] && [ "$arch" -lt "$requested" ]; then
+            best="$arch"
+        fi
+    done < <(nvcc_supported_cuda_archs)
+    [ -n "$best" ] && printf '%s\n' "$best"
+}
+
+# Find an installed CUDA toolkit whose nvcc supports the requested arch when
+# the one on PATH doesn't (e.g. distro nvcc 12.x vs /usr/local/cuda 13.x).
+nvcc_alternate_supporting() {
+    local cap="$1" nv real seen="" path_nvcc
+    path_nvcc="$(realpath "$(command -v nvcc 2>/dev/null || echo /nonexistent)" 2>/dev/null || true)"
+    for nv in /usr/local/cuda/bin/nvcc /usr/local/cuda-*/bin/nvcc /opt/cuda/bin/nvcc; do
+        [ -x "$nv" ] || continue
+        real="$(realpath "$nv" 2>/dev/null || echo "$nv")"
+        case " $seen " in *" $real "*) continue ;; esac
+        seen="$seen $real"
+        [ "$real" = "$path_nvcc" ] && continue
+        if "$nv" --list-gpu-arch 2>/dev/null | awk -v want="compute_$cap" '$0 == want { found=1 } END { exit found ? 0 : 1 }'; then
+            printf '%s\n' "$nv"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # ── Build type argument (required) ──────────────────────────────────────────
 BUILD_TYPE="${1:-}"
 GPU_ARCH_OVERRIDE="${2:-}"
@@ -145,28 +229,37 @@ else
         [ "$(realpath "${candidates[$i]}" 2>/dev/null || echo "${candidates[$i]}")" = "$(realpath "$DEFAULT_LLAMACPP_DIR" 2>/dev/null || echo "$DEFAULT_LLAMACPP_DIR")" ] && { default_sel=$((i+1)); break; }
     done
 
-    echo "🔍 Available llama.cpp source trees:"
-    for i in "${!candidates[@]}"; do
-        label=""
-        [ "${candidates[$i]}" = "$DEFAULT_LLAMACPP_DIR" ] && label="$label (default)"
-        if [ -d "${candidates[$i]}/.git" ]; then
-            branch=$(git -C "${candidates[$i]}" branch --show-current 2>/dev/null || true)
-            [ -n "$branch" ] && label="$label [$branch]"
-        fi
-        printf "  %d) %s%s\n" $((i+1)) "${candidates[$i]}" "$label"
-    done
-    echo "  c) Custom path"
-    echo ""
-
-    read -rp "Select source [1-${#candidates[@]}, c=custom, default=$default_sel]: " src_sel
-    src_sel="${src_sel:-$default_sel}"
-    if [[ "$src_sel" == "c" || "$src_sel" == "C" ]]; then
-        read -rp "Enter llama.cpp source path: " LLAMACPP_DIR
-    elif [[ "$src_sel" =~ ^[0-9]+$ ]] && [ "$src_sel" -ge 1 ] && [ "$src_sel" -le ${#candidates[@]} ]; then
-        LLAMACPP_DIR="${candidates[$((src_sel-1))]}"
+    if [ ${#candidates[@]} -eq 1 ]; then
+        LLAMACPP_DIR="${candidates[0]}"
     else
-        echo "❌ Invalid selection: $src_sel"
-        exit 1
+        echo "🔍 Available llama.cpp source trees:"
+        for i in "${!candidates[@]}"; do
+            label=""
+            [ "${candidates[$i]}" = "$DEFAULT_LLAMACPP_DIR" ] && label="$label (default)"
+            if [ -d "${candidates[$i]}/.git" ]; then
+                branch=$(git -C "${candidates[$i]}" branch --show-current 2>/dev/null || true)
+                [ -n "$branch" ] && label="$label [$branch]"
+            fi
+            printf "  %d) %s%s\n" $((i+1)) "${candidates[$i]}" "$label"
+        done
+        echo "  c) Custom path"
+        echo ""
+
+        if [ ! -t 0 ]; then
+            LLAMACPP_DIR="${candidates[$((default_sel-1))]}"
+            echo "ℹ️  Non-interactive input; using default source: $LLAMACPP_DIR"
+        else
+            read -rp "Select source [1-${#candidates[@]}, c=custom, default=$default_sel]: " src_sel
+            src_sel="${src_sel:-$default_sel}"
+            if [[ "$src_sel" == "c" || "$src_sel" == "C" ]]; then
+                read -rp "Enter llama.cpp source path: " LLAMACPP_DIR
+            elif [[ "$src_sel" =~ ^[0-9]+$ ]] && [ "$src_sel" -ge 1 ] && [ "$src_sel" -le ${#candidates[@]} ]; then
+                LLAMACPP_DIR="${candidates[$((src_sel-1))]}"
+            else
+                echo "❌ Invalid selection: $src_sel"
+                exit 1
+            fi
+        fi
     fi
     LLAMACPP_DIR="$(realpath "$LLAMACPP_DIR")"
 fi
@@ -210,7 +303,7 @@ case "$BACKEND" in
             MISSING+=("vulkan headers|vulkan-headers (Arch) / libvulkan-dev (Debian/Ubuntu)")
         fi
         # Check Vulkan ICD loader (runtime library)
-        if ! ldconfig -p 2>/dev/null | grep -q libvulkan.so && [ ! -f /usr/lib/libvulkan.so ] && [ ! -f /usr/lib64/libvulkan.so ]; then
+        if ! ldconfig_has "libvulkan.so" && [ ! -f /usr/lib/libvulkan.so ] && [ ! -f /usr/lib64/libvulkan.so ]; then
             MISSING+=("vulkan loader|vulkan-icd-loader (Arch) / libvulkan1 (Debian/Ubuntu)")
         fi
         # Check for a Vulkan driver
@@ -223,6 +316,10 @@ case "$BACKEND" in
         fi
         # Check glslc (shader compiler) — needed at build time
         command -v glslc >/dev/null 2>&1 || MISSING+=("glslc|shaderc (Arch) / glslc (Debian) — Vulkan shader compiler")
+        # llama.cpp's Vulkan CMake also requires glslangValidator and SPIR-V package metadata.
+        command -v glslangValidator >/dev/null 2>&1 || MISSING+=("glslangValidator|glslang (Arch) / glslang-tools (Debian/Ubuntu) — Vulkan GLSL validator")
+        command -v spirv-as >/dev/null 2>&1 || MISSING+=("spirv-tools|spirv-tools (Arch/Debian/Ubuntu) — SPIR-V tools")
+        spirv_headers_config_found || MISSING+=("SPIRV-Headers|spirv-headers (Arch/Debian/Ubuntu) — SPIR-V CMake package config")
         ;;
     cuda)
         # Check CUDA toolkit (nvcc compiler)
@@ -234,7 +331,7 @@ case "$BACKEND" in
             MISSING+=("nvidia-smi|nvidia (Arch) / nvidia-driver (Debian/Ubuntu) — NVIDIA GPU driver")
         fi
         # Check cublas
-        if ! ldconfig -p 2>/dev/null | grep -q libcublas && [ ! -f /usr/local/cuda/lib64/libcublas.so ]; then
+        if ! ldconfig_has "libcublas" && [ ! -f /usr/local/cuda/lib64/libcublas.so ]; then
             MISSING+=("cublas|cuda (Arch) / libcublas-dev (Debian/Ubuntu) — CUDA BLAS library")
         fi
         ;;
@@ -256,11 +353,11 @@ case "$BACKEND" in
             MISSING+=("rocminfo|rocminfo (Arch/Debian) — ROCm GPU info tool (needed for arch detection)")
         fi
         # Check rocblas
-        if [ ! -f /opt/rocm/lib/librocblas.so ] && ! ldconfig -p 2>/dev/null | grep -q librocblas; then
+        if [ ! -f /opt/rocm/lib/librocblas.so ] && ! ldconfig_has "librocblas"; then
             MISSING+=("rocblas|rocblas (Arch) / rocm-libs (Debian) — ROCm BLAS library")
         fi
         # Check hipblas
-        if [ ! -f /opt/rocm/lib/libhipblas.so ] && ! ldconfig -p 2>/dev/null | grep -q libhipblas; then
+        if [ ! -f /opt/rocm/lib/libhipblas.so ] && ! ldconfig_has "libhipblas"; then
             MISSING+=("hipblas|hipblas (Arch) / rocm-libs (Debian) — HIP BLAS library")
         fi
         ;;
@@ -294,7 +391,7 @@ if [ ${#MISSING[@]} -gt 0 ]; then
         echo "Arch/CachyOS quick install:"
         case "$BACKEND" in
             cpu)    echo "  sudo pacman -S base-devel cmake pkgconf git" ;;
-            vulkan) echo "  sudo pacman -S vulkan-headers vulkan-icd-loader shaderc vulkan-tools" ;;
+            vulkan) echo "  sudo pacman -S vulkan-headers vulkan-icd-loader shaderc glslang spirv-tools spirv-headers vulkan-tools" ;;
             rocm)   echo "  sudo pacman -S rocm-hip-sdk rocblas hipblas rocminfo" ;;
             cuda)   echo "  sudo pacman -S cuda" ;;
         esac
@@ -302,7 +399,7 @@ if [ ${#MISSING[@]} -gt 0 ]; then
         echo "Debian/Ubuntu quick install:"
         case "$BACKEND" in
             cpu)    echo "  sudo apt-get install build-essential cmake pkg-config git" ;;
-            vulkan) echo "  sudo apt-get install libvulkan-dev vulkan-tools glslc" ;;
+            vulkan) echo "  sudo apt-get install libvulkan-dev vulkan-tools glslc glslang-tools spirv-tools spirv-headers" ;;
             rocm)   echo "  See https://rocm.docs.amd.com for ROCm installation" ;;
             cuda)   echo "  sudo apt-get install nvidia-cuda-toolkit libcublas-dev" ;;
         esac
@@ -416,6 +513,7 @@ fi
 
 # ── GPU architecture detection (CUDA) ─────────────────────────────────────
 if [ "$BACKEND" = "cuda" ]; then
+    CUDA_ARCH_AUTO=0
     if [ -n "$GPU_ARCH_OVERRIDE" ]; then
         CUDA_ARCH="$GPU_ARCH_OVERRIDE"
         echo "🎯 CUDA compute capability (override): $CUDA_ARCH"
@@ -427,11 +525,50 @@ if [ "$BACKEND" = "cuda" ]; then
             CUDA_ARCH="native"
         else
             CUDA_ARCH=$(echo "$DETECTED_CAPS" | tr '\n' ';' | sed 's/;$//')
+            CUDA_ARCH_AUTO=1
             echo "🎯 CUDA compute capability (auto-detected): $CUDA_ARCH"
         fi
     else
         echo "⚠️  nvidia-smi not found — using native detection."
         CUDA_ARCH="native"
+    fi
+
+    if [ "$CUDA_ARCH" != "native" ]; then
+        resolved_archs=()
+        for cap in $(echo "$CUDA_ARCH" | tr ';' ' '); do
+            if nvcc_supports_cuda_arch "$cap"; then
+                resolved_archs+=("$cap")
+                continue
+            fi
+
+            alt_nvcc="$(nvcc_alternate_supporting "$cap" || true)"
+            if [ -n "$alt_nvcc" ]; then
+                echo "❌ nvcc on PATH does not support compute_$cap, but $alt_nvcc does."
+                echo "   Refusing PTX fallback: kernels JIT-compiled from an older toolkit"
+                echo "   can crash at model load on newer GPUs."
+                echo "   Rebuild with the newer toolkit:"
+                echo "   PATH=\"$(dirname "$alt_nvcc"):\$PATH\" CUDACXX=\"$alt_nvcc\" $0 $BUILD_TYPE${GPU_ARCH_OVERRIDE:+ $GPU_ARCH_OVERRIDE}"
+                exit 1
+            fi
+
+            if [ "$CUDA_ARCH_AUTO" -eq 0 ]; then
+                echo "❌ CUDA compute capability '$cap' is not supported by this nvcc."
+                echo "   Supported: $(nvcc_supported_cuda_archs | paste -sd ' ' -)"
+                exit 1
+            fi
+
+            fallback_cap="$(nvcc_best_cuda_arch_for "$cap")"
+            if [ -z "$fallback_cap" ]; then
+                echo "❌ CUDA compute capability '$cap' is not supported by this nvcc, and no fallback was found."
+                echo "   Supported: $(nvcc_supported_cuda_archs | paste -sd ' ' -)"
+                exit 1
+            fi
+            echo "⚠️  nvcc does not support compute_$cap; using compute_$fallback_cap PTX fallback."
+            echo "   PTX JIT from an older toolkit may fail or crash on newer GPUs."
+            echo "   If llama-server aborts at model load, install a newer CUDA toolkit and rebuild."
+            resolved_archs+=("$fallback_cap")
+        done
+        CUDA_ARCH="$(printf '%s\n' "${resolved_archs[@]}" | sort -uV | tr '\n' ';' | sed 's/;$//')"
     fi
 
     # Pretty-print detected targets
