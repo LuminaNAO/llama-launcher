@@ -1,0 +1,74 @@
+kind: llama-launcher-tune
+version: 1
+name: "64gb-q5-131k-agentic-v1"
+model: "Qwopus"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 64gb-q5-131k-agentic-v1
+    Per-model config for: Jackrong/Qwopus3.6-35B-A3B-Coder-MTP-GGUF
+    Primary GGUF: Qwopus3.6-35B-A3B-Coder-MTP-Q5_K_M.gguf (23.6 GB)
+    Target: Strix Halo / AMD Ryzen AI Max+ 395 - 64 GB unified memory
+    Backend: rocm (llama-hdd b9864)
+
+    Model recap:
+    - Qwopus3.6 is a Qwen3.6-35B-A3B post-train for agentic coding:
+      tool-calling stability, multi-turn debugging, repo-level edits.
+    - Hybrid sparse MoE, 35B total / ~3B active per token, MTP head included.
+    - Author benchmark: 62.4% SWE-bench (300 cases) at Q5_K_M with thinking
+      DISABLED - that is the validated operating mode. --reasoning-budget 0
+      alone does NOT stop this template from opening a think block; thinking
+      must be turned off at the template level via
+      --chat-template-kwargs {"enable_thinking":false} (kept in EXTRA_ARGS,
+      REASONING_BUDGET=0 kept as belt-and-braces). Remove both to re-enable.
+    - ~3B active means decode should be well above the dense 27B's ~21 t/s
+      on this memory bandwidth; MTP adds ~1.4-2.2x per the model card.
+
+    Quant choice: Q5_K_M matches the benchmark quant. Weights are ~5.7 GB
+    larger than the 27B UD-Q4_K_XL, paid back by trimming CHECKPOINT_MAX
+    64 -> 48 and context 140k -> 128k. If tool-calling quality looks off,
+    do NOT drop weight quant first; test q8_0 KV like the other tunes.
+
+    Context rationale: CONTEXT=131072 covers observed ~95k coding prompts
+    with margin. 131072 / 48 checkpoints = 2730 -> CHECKPOINT_MIN_STEP=2048
+    (same step as the 27B tune, slightly sparser coverage).
+
+    Budget sketch at 131k ctx, q4_0 KV (measure after first real session):
+    weights (file-backed, DIO):            ~23.6 GB
+    48 checkpoints, if sized like the 27B: ~14 GB worst case
+    KV + scratch + ROCm margin:             ~6 GB
+    ~44 GB target, comparable to the 27B tune's corrected worst case.
+    If it swaps, reduce CHECKPOINT_MAX to 32 before reducing context.
+
+    Keep mmap enabled (NO_MMAP=0): on unified-memory ROCm, --no-mmap caused
+    anonymous host copies to compete with GPU-visible allocations.
+    JINJA=1 launcher default applies the Qwen3.6 chat template / tool calls.
+    n-max=2 matches the current Qwen3.6 MTP configs; try 3 if acceptance
+    looks high in logs, drop MTP if token/s regresses.
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "48"
+  CHECKPOINT_MIN_STEP: "2048"
+  # llama-hdd only: thin slot-save sidecars to <=10 checkpoints (geometric
+  # spacing from the tail). Cuts high-context save/restore IO ~5x.
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "131072"
+  DIO: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 2 --chat-template-kwargs {\"enable_thinking\":false}"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "99"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  REASONING_BUDGET: "0"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"
