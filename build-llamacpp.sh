@@ -208,6 +208,30 @@ else
         done
     done
 
+    # Packaged install with no source anywhere (e.g. paru cleaned its src/
+    # dir): offer to clone llama-hdd, preferring makepkg's local mirror.
+    if [ ${#candidates[@]} -eq 0 ] && [ "$PACKAGED_INSTALL" -eq 1 ] && [ -t 0 ]; then
+        clone_dest="$HOME/code/llama-hdd.cpp"
+        clone_upstream="https://codeberg.org/LuminaNAO/llama-hdd.cpp.git"
+        clone_src="$clone_upstream"
+        for mirror in "$cache_root/paru/clone/llama-hdd/llama-hdd" "$cache_root/yay/llama-hdd/llama-hdd"; do
+            if git -C "$mirror" rev-parse --git-dir >/dev/null 2>&1; then
+                clone_src="$mirror"
+                break
+            fi
+        done
+        echo "ℹ️  No llama.cpp source trees found (looked in: ${search_roots[*]})"
+        read -rp "Clone llama-hdd source from $clone_src to $clone_dest? [Y/n]: " clone_ans
+        if [[ ! "$clone_ans" =~ ^[Nn] ]]; then
+            mkdir -p "$(dirname "$clone_dest")"
+            if git clone "$clone_src" "$clone_dest"; then
+                # Future pulls should track upstream, not a package cache path.
+                git -C "$clone_dest" remote set-url origin "$clone_upstream"
+                candidates+=("$clone_dest")
+            fi
+        fi
+    fi
+
     if [ ${#candidates[@]} -eq 0 ]; then
         echo "❌ No llama.cpp source trees found."
         if [ "$PACKAGED_INSTALL" -eq 1 ]; then
