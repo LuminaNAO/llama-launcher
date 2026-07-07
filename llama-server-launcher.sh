@@ -1674,8 +1674,22 @@ cleanup_proxy() {
         kill "$PROXY_PID" 2>/dev/null
         wait "$PROXY_PID" 2>/dev/null
     fi
+    PROXY_PID=""
 }
+
+signal_exit() {
+    local sig="$1"
+    local status="$2"
+    echo "❌ llama-server-launcher received SIG$sig"
+    cleanup_proxy
+    trap - EXIT
+    exit "$status"
+}
+
 trap cleanup_proxy EXIT
+trap 'signal_exit TERM 143' TERM
+trap 'signal_exit INT 130' INT
+trap 'signal_exit HUP 129' HUP
 
 if [ "$NO_PROXY" -eq 0 ]; then
     EFFECTIVE_DEEP_LOG="/dev/null"
@@ -1780,8 +1794,27 @@ LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
   ${EXTRA_ARGS:+$EXTRA_ARGS}
 )
 
+tee_status=0
 if [ "$NO_LOG" -eq 1 ]; then
     "${LAUNCH_CMD[@]}" 2>&1
+    server_status=$?
+    launch_status=$server_status
 else
     "${LAUNCH_CMD[@]}" 2>&1 | tee -a "$LLAMA_LOG_FILE"
+    launch_pipe_status=("${PIPESTATUS[@]}")
+    server_status="${launch_pipe_status[0]:-1}"
+    tee_status="${launch_pipe_status[1]:-0}"
+    launch_status=$server_status
+    if [ "$launch_status" -eq 0 ] && [ "$tee_status" -ne 0 ]; then
+        launch_status=$tee_status
+    fi
 fi
+
+if [ "$server_status" -ne 0 ]; then
+    echo "❌ llama-server exited with status $server_status"
+fi
+if [ "$tee_status" -ne 0 ]; then
+    echo "❌ llama.log tee exited with status $tee_status"
+fi
+
+exit "$launch_status"
