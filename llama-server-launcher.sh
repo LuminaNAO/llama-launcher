@@ -10,7 +10,8 @@
 #   llama-server-launcher.sh --build rocm --model /path/to/model  # non-interactive
 #
 # Options:
-#   --build <type>   Build type (cpu, rocm, vulkan, etc.) — skips build selection
+#   --build <type>   Build type (cpu, rocm, vulkan, system, etc.) — skips build
+#                    selection; "system" uses the package-installed llama-server
 #   --model <path>   Full path to .gguf model file — skips model selection
 #   --tune <name>    Select a specific tune (e.g., "64gb", "128gb") — skips tune menu
 #   --seed <N>       Override the random seed (default: 42)
@@ -498,9 +499,16 @@ else
         done
     fi
 
+    # Package-installed llama-hdd (e.g. paru -S llama-hdd) works without any
+    # local build: expose it as build type "system".
+    if [ -x /usr/bin/llama-server ]; then
+        available_builds+=("system")
+    fi
+
     if [ ${#available_builds[@]} -eq 0 ]; then
-        echo "❌ No builds found in $LLAMA_LAUNCHER_DIR/builds/"
-        echo "   Run build first: bash build-llamacpp.sh [cpu|rocm|vulkan|cuda]"
+        echo "❌ No builds found in $LLAMA_LAUNCHER_DIR/builds/ and no system llama-server."
+        echo "   Either install the llama-hdd package, or build locally:"
+        echo "   bash build-llamacpp.sh [cpu|rocm|vulkan|cuda]"
         exit 1
     elif [ ${#available_builds[@]} -eq 1 ]; then
         BUILD_TYPE="${available_builds[0]}"
@@ -529,13 +537,24 @@ else
     fi
 fi
 
-BUILD_DIR="$LLAMA_LAUNCHER_DIR/builds/$BUILD_TYPE"
-LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
+if [ "$BUILD_TYPE" = "system" ]; then
+    # Package-installed llama-hdd: system binary, system libs, no BUILD_DIR.
+    BUILD_DIR=""
+    LLAMACPP_SERVER_PATH="/usr/bin/llama-server"
+    if [ ! -x "$LLAMACPP_SERVER_PATH" ]; then
+        echo "❌ No system llama-server at $LLAMACPP_SERVER_PATH"
+        echo "   Install the llama-hdd package, or run: bash build-llamacpp.sh <backend>"
+        exit 1
+    fi
+else
+    BUILD_DIR="$LLAMA_LAUNCHER_DIR/builds/$BUILD_TYPE"
+    LLAMACPP_SERVER_PATH="$BUILD_DIR/bin/llama-server"
 
-if [ ! -f "$LLAMACPP_SERVER_PATH" ]; then
-    echo "❌ llama-server not found at $LLAMACPP_SERVER_PATH"
-    echo "   Run: bash build-llamacpp.sh $BUILD_TYPE"
-    exit 1
+    if [ ! -f "$LLAMACPP_SERVER_PATH" ]; then
+        echo "❌ llama-server not found at $LLAMACPP_SERVER_PATH"
+        echo "   Run: bash build-llamacpp.sh $BUILD_TYPE"
+        exit 1
+    fi
 fi
 
 echo "🔧 Build: $BUILD_TYPE ($LLAMACPP_SERVER_PATH)"
@@ -1321,6 +1340,9 @@ case "${BUILD_TYPE%%-*}" in
         # Force llama.cpp to use only the Vulkan backend libs, not system ROCm.
         # Without this, the binary auto-detects ROCm and ignores Vulkan.
         export LD_LIBRARY_PATH="$BUILD_DIR/bin:$BUILD_DIR/lib"
+        ;;
+    system)
+        # Package install: libs resolve via ldconfig.
         ;;
     *)
         echo "⚠️  No special environment variables set for $BUILD_TYPE"
