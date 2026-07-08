@@ -346,7 +346,20 @@ case "$BACKEND" in
         spirv_headers_config_found || MISSING+=("SPIRV-Headers|spirv-headers (Arch/Debian/Ubuntu) — SPIR-V CMake package config")
         ;;
     cuda)
-        # Check CUDA toolkit (nvcc compiler)
+        # Check CUDA toolkit (nvcc compiler). Toolkits often install outside
+        # PATH (Arch: /opt/cuda, profile.d only applies on next login;
+        # NVIDIA runfile: /usr/local/cuda) — pick nvcc up from known prefixes.
+        if ! command -v nvcc >/dev/null 2>&1; then
+            for _nvcc in /opt/cuda/bin/nvcc /usr/local/cuda/bin/nvcc /usr/local/cuda-*/bin/nvcc; do
+                if [ -x "$_nvcc" ]; then
+                    export PATH="$(dirname "$_nvcc"):$PATH"
+                    export CUDACXX="$_nvcc"
+                    echo "ℹ️  nvcc not on PATH; using $_nvcc"
+                    break
+                fi
+            done
+            unset _nvcc
+        fi
         if ! command -v nvcc >/dev/null 2>&1; then
             MISSING+=("nvcc|cuda (Arch) / nvidia-cuda-toolkit (Debian/Ubuntu) — CUDA compiler")
         fi
@@ -355,7 +368,7 @@ case "$BACKEND" in
             MISSING+=("nvidia-smi|nvidia (Arch) / nvidia-driver (Debian/Ubuntu) — NVIDIA GPU driver")
         fi
         # Check cublas
-        if ! ldconfig_has "libcublas" && [ ! -f /usr/local/cuda/lib64/libcublas.so ]; then
+        if ! ldconfig_has "libcublas" && [ ! -f /usr/local/cuda/lib64/libcublas.so ] && [ ! -f /opt/cuda/lib64/libcublas.so ]; then
             MISSING+=("cublas|cuda (Arch) / libcublas-dev (Debian/Ubuntu) — CUDA BLAS library")
         fi
         ;;
