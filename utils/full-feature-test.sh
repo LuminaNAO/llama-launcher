@@ -2,48 +2,85 @@
 # Full-feature test of the packaged llama-launcher + llama-hdd in a fresh
 # Arch container — the "did we break the AUR user" test, without AUR.
 #
-#   1. makepkg both packages from the LOCAL repos (file:// source override)
-#   2. pacman -U them in a pristine archlinux container
-#   3. assert: tunes shipped, system build discovered, tune menu lists the
-#      smoke tune, full launch (proxy + HDD cache) on a ~1 MB model,
-#      /health, a completion, slot-cache write, clean stop
+# Modes:
+#   (default)  fast: makepkg on the host, pacman -U in the container
+#   --paru     the real thing: build paru from the AUR inside the container,
+#              paru -S freeclaw (real AUR), paru -Bi the local packages —
+#              the full `paru -S freeclaw llama-hdd llama-launcher` journey
+#   --keep     keep the work dir for inspection
 #
-# Usage: full-feature-test.sh [--keep]   (--keep leaves the work dir behind)
+# Asserts: tunes shipped, system build discovered, tune menu lists the smoke
+# tune, full launch (proxy + HDD cache) on a ~1 MB model, /health, a
+# completion, session-switch slot-cache write, clean stop.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 HDD_SRC="$(realpath "$(dirname "$ROOT_DIR")/llama-hdd.cpp")"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/llama-fft.XXXXXX")"
-KEEP=0; [ "${1:-}" = "--keep" ] && KEEP=1
+KEEP=0 MODE=fast
+for arg in "$@"; do
+    case "$arg" in
+        --keep) KEEP=1 ;;
+        --paru) MODE=paru ;;
+        *) echo "unknown arg: $arg"; exit 1 ;;
+    esac
+done
 cleanup() { [ "$KEEP" -eq 1 ] || rm -rf "$WORK"; }
 trap cleanup EXIT
 
-docker_cmd=(docker)
-docker info >/dev/null 2>&1 || docker_cmd=(sg docker -c)
 run_docker() {
-    if [ "${docker_cmd[0]}" = "docker" ]; then docker "$@"; else sg docker -c "docker $*"; fi
+    if docker info >/dev/null 2>&1; then docker "$@"; else sg docker -c "docker $*"; fi
 }
 
-echo "=== 1/3 build packages from local sources"
-mkdir -p "$WORK/hdd" "$WORK/launcher"
-cp "$HDD_SRC/aur/PKGBUILD" "$WORK/hdd/"
-sed -i "s|git+https://[^\"#]*#tag=v\${pkgver}|git+file://$HDD_SRC#branch=$(git -C "$HDD_SRC" branch --show-current)|" "$WORK/hdd/PKGBUILD"
-cp "$ROOT_DIR/PKGBUILD" "$WORK/launcher/"
-sed -i "s|git+https://[^\"#]*#tag=\"v\${pkgver}\"|git+file://$ROOT_DIR#branch=$(git -C "$ROOT_DIR" branch --show-current)|" "$WORK/launcher/PKGBUILD"
-(cd "$WORK/hdd" && LLAMA_HDD_BACKEND=cpu makepkg -fd > makepkg.log 2>&1) || { tail -20 "$WORK/hdd/makepkg.log"; exit 1; }
-(cd "$WORK/launcher" && makepkg -fd > makepkg.log 2>&1) || { tail -20 "$WORK/launcher/makepkg.log"; exit 1; }
-echo "   $(ls "$WORK"/hdd/*.pkg.tar.* | xargs -n1 basename)"
-echo "   $(ls "$WORK"/launcher/*.pkg.tar.* | xargs -n1 basename)"
+launcher_branch="$(git -C "$ROOT_DIR" branch --show-current)"
+hdd_branch="$(git -C "$HDD_SRC" branch --show-current)"
 
-echo "=== 2/3 write container test"
-cat > "$WORK/inner.sh" << 'INNER'
+if [ "$MODE" = "fast" ]; then
+    echo "=== build packages on host (fast mode)"
+    mkdir -p "$WORK/hdd" "$WORK/launcher"
+    cp "$HDD_SRC/aur/PKGBUILD" "$WORK/hdd/"
+    sed -i "s|git+https://[^\"#]*#tag=v\${pkgver}|git+file://$HDD_SRC#branch=$hdd_branch|" "$WORK/hdd/PKGBUILD"
+    cp "$ROOT_DIR/PKGBUILD" "$WORK/launcher/"
+    sed -i "s|git+https://[^\"#]*#tag=\"v\${pkgver}\"|git+file://$ROOT_DIR#branch=$launcher_branch|" "$WORK/launcher/PKGBUILD"
+    (cd "$WORK/hdd" && LLAMA_HDD_BACKEND=cpu makepkg -fd > makepkg.log 2>&1) || { tail -20 "$WORK/hdd/makepkg.log"; exit 1; }
+    (cd "$WORK/launcher" && makepkg -fd > makepkg.log 2>&1) || { tail -20 "$WORK/launcher/makepkg.log"; exit 1; }
+fi
+
+cat > "$WORK/inner.sh" << INNERVARS
 #!/bin/bash
+INSTALL_MODE="$MODE"
+HDD_BRANCH="$hdd_branch"
+LAUNCHER_BRANCH="$launcher_branch"
+INNERVARS
+cat >> "$WORK/inner.sh" << 'INNER'
 set -uo pipefail
 fail() { echo "FAIL: $*"; exit 1; }
 pass() { echo "PASS: $*"; }
 
-pacman -Syu --noconfirm --needed gcc-libs glibc openmp curl bash cmake git jq yq bc nodejs openssh util-linux > /pacman.log 2>&1 || fail "base install"
-pacman -U --noconfirm /work/hdd/llama-hdd-*.pkg.tar.* /work/launcher/llama-launcher-*.pkg.tar.* >> /pacman.log 2>&1 || fail "package install"
+RUNTIME_DEPS="gcc-libs glibc openmp curl bash cmake git jq yq bc nodejs openssh util-linux"
+
+if [ "$INSTALL_MODE" = "paru" ]; then
+    pacman -Syu --noconfirm --needed base-devel git sudo $RUNTIME_DEPS > /pacman.log 2>&1 || fail "base install"
+    useradd -m builder && echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+    sudo -u builder bash -ec 'cd ~ && git clone -q https://aur.archlinux.org/paru.git && cd paru && makepkg -si --noconfirm' >> /pacman.log 2>&1 || { tail -20 /pacman.log; fail "paru source build"; }
+    pass "paru installed: $(paru --version | head -1)"
+
+    sudo -u builder paru -S --noconfirm freeclaw >> /pacman.log 2>&1 || { tail -20 /pacman.log; fail "paru -S freeclaw"; }
+    pass "freeclaw from real AUR: $(pacman -Q freeclaw)"
+
+    sudo -u builder bash -ec "
+    mkdir -p ~/aur/llama-hdd ~/aur/llama-launcher
+    cp /srv/llama-hdd.cpp/aur/PKGBUILD ~/aur/llama-hdd/
+    sed -i 's|git+https://[^\"#]*#tag=v\${pkgver}|git+file:///srv/llama-hdd.cpp#branch=$HDD_BRANCH|' ~/aur/llama-hdd/PKGBUILD
+    cp /srv/llama-launcher/PKGBUILD ~/aur/llama-launcher/
+    sed -i 's|git+https://[^\"#]*#tag=\"v\${pkgver}\"|git+file:///srv/llama-launcher#branch=$LAUNCHER_BRANCH|' ~/aur/llama-launcher/PKGBUILD
+    cd ~/aur/llama-hdd && LLAMA_HDD_BACKEND=cpu paru -Bi --noconfirm . > ~/paru-hdd.log 2>&1 || { tail -20 ~/paru-hdd.log; exit 1; }
+    cd ~/aur/llama-launcher && paru -Bi --noconfirm . > ~/paru-launcher.log 2>&1 || { tail -20 ~/paru-launcher.log; exit 1; }
+    " || fail "paru -Bi local packages"
+else
+    pacman -Syu --noconfirm --needed $RUNTIME_DEPS > /pacman.log 2>&1 || fail "base install"
+    pacman -U --noconfirm /work/hdd/llama-hdd-*.pkg.tar.* /work/launcher/llama-launcher-*.pkg.tar.* >> /pacman.log 2>&1 || fail "package install"
+fi
 pass "packages installed: $(pacman -Q llama-hdd llama-launcher | tr '\n' ' ')"
 
 # tunes shipped?
@@ -91,14 +128,37 @@ comp="$(curl -s -m 30 http://127.0.0.1:40801/v1/chat/completions \
 echo "$comp" | grep -q '"content"' || fail "no completion content: $comp"
 pass "completion ok: $(echo "$comp" | head -c 120)..."
 
-# anthropic endpoint + HDD slot cache write
+# anthropic endpoint + HDD slot cache: the proxy saves ONLY on session
+# switch (or shutdown), keyed by x-openclaw-session-id — run session A,
+# then session B to force A's save.
+msg="$(curl -s -m 30 http://127.0.0.1:40801/v1/messages \
+    -H "x-api-key: ollama-local" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
+    -H "x-openclaw-session-id: aaaaaaaaaaaa-aaaaaaaaaaaa" \
+    -d '{"model":"stories","max_tokens":8,"messages":[{"role":"user","content":"The cat sat"}]}')"
+echo "$msg" | grep -q '"type":"message"\|content' || fail "/v1/messages (session A) failed: $msg"
 curl -s -m 30 http://127.0.0.1:40801/v1/messages \
     -H "x-api-key: ollama-local" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
-    -d '{"model":"stories","max_tokens":8,"messages":[{"role":"user","content":"The cat"}]}' > /dev/null
-sleep 3
-slots=$(ls /root/llama-launcher/slots/stories260K/ 2>/dev/null | wc -l)
-[ "$slots" -ge 1 ] || fail "no HDD slot cache files written"
-pass "HDD cache wrote $slots slot file(s)"
+    -H "x-openclaw-session-id: bbbbbbbbbbbb-bbbbbbbbbbbb" \
+    -d '{"model":"stories","max_tokens":8,"messages":[{"role":"user","content":"The dog ran"}]}' > /dev/null
+slots=0
+for i in $(seq 1 15); do
+    slots=$(find /root/llama-launcher -path "*slots*" -name "*.meta.json" 2>/dev/null | wc -l)
+    [ "$slots" -ge 1 ] && break
+    sleep 1
+done
+if [ "$slots" -lt 1 ]; then
+    echo "--- launch.log preamble:"; head -50 /launch.log
+    echo "--- proxy/cache lines in llama.log:"
+    grep -a "llama-deep-proxy\|REQUEST POST\|HDD CACHE" /root/.local/share/llama-launcher/llama.log 2>/dev/null | head -20
+    fail "no HDD slot cache files written"
+fi
+pass "HDD cache wrote $slots slot file(s) on session switch"
+
+# freeclaw smoke (paru mode) — the freeclaw package installs bin/openclaw
+if [ "$INSTALL_MODE" = "paru" ]; then
+    fv="$(sudo -u builder openclaw --version 2>&1 | head -1)" || fail "freeclaw (openclaw) --version: $fv"
+    pass "freeclaw runs: openclaw $fv"
+fi
 
 # clean stop
 llama-launcher stop > /stop.log 2>&1
@@ -110,5 +170,9 @@ echo "ALL-TESTS-PASSED"
 INNER
 chmod +x "$WORK/inner.sh"
 
-echo "=== 3/3 run in fresh archlinux container"
-run_docker run --rm -v "$WORK:/work:ro" archlinux:latest bash /work/inner.sh
+echo "=== run in fresh archlinux container ($MODE mode)"
+if [ "$MODE" = "paru" ]; then
+    run_docker run --rm -v "$WORK:/work:ro" -v "$HDD_SRC:/srv/llama-hdd.cpp:ro" -v "$ROOT_DIR:/srv/llama-launcher:ro" archlinux:latest bash /work/inner.sh
+else
+    run_docker run --rm -v "$WORK:/work:ro" archlinux:latest bash /work/inner.sh
+fi
