@@ -15,6 +15,7 @@
 #   --model <path>   Full path to .gguf model file — skips model selection
 #   --tune <name>    Select a specific tune (e.g., "64gb", "128gb") — skips tune menu
 #   --seed <N>       Override the random seed (default: 42)
+#   --force          Skip all dependency and version checks (yq etc.)
 #   --context <N>    Override context size
 #   --parallel <N>   Override number of parallel slots
 #   --port <N>       Public port (default: from tune or 40801)
@@ -135,6 +136,7 @@ HDD_CACHE_MODE="default"
 HDD_CACHE_TOUCHED=0
 MIN_FREE_GB_TOUCHED=0
 MAX_TOTAL_SLOTS_GB_TOUCHED=0
+FORCE_SKIP_CHECKS=0  # --force: skip dependency/version checks (yq etc.)
 LOG_FLAGS_TOUCHED=0  # tracks whether any of --proxy/--log/--deep-log was passed on CLI;
                      # used to decide whether to show the interactive logging-mode prompt
 ORIGINAL_ARGC=$#
@@ -144,6 +146,7 @@ while [[ $# -gt 0 ]]; do
         --context) CONTEXT_OVERRIDE="$2"; shift 2 ;;
         --parallel) PARALLEL_OVERRIDE="$2"; shift 2 ;;
         --save) SAVE_CONFIG=1; shift ;;
+        --force) FORCE_SKIP_CHECKS=1; shift ;;
         --build) ARG_BUILD_TYPE="$2"; shift 2 ;;
         --model) ARG_MODEL_PATH="$2"; shift 2 ;;
         --tune) ARG_TUNE="$2"; shift 2 ;;
@@ -224,7 +227,9 @@ unset _author_pick_candidate
 
 # yq (Python jq-wrapper, 3.x) is required to read tunes; fail loudly up
 # front instead of erroring after a long build or model download.
-if ! command -v yq >/dev/null 2>&1; then
+if [ "$FORCE_SKIP_CHECKS" -eq 1 ]; then
+    echo "⚠️  --force: skipping dependency and version checks"
+elif ! command -v yq >/dev/null 2>&1; then
     echo "╔══════════════════════════════════════════════════════════════════╗"
     echo "║  ⚠️  MISSING DEPENDENCY: yq — llama-launcher cannot read tunes     ║"
     echo "╚══════════════════════════════════════════════════════════════════╝"
@@ -236,20 +241,22 @@ if ! command -v yq >/dev/null 2>&1; then
 fi
 # Judge yq by behavior, not version string: Arch's python-yq can report
 # "yq 0.0.0" (build lost its SCM version metadata) while working fine.
-_yq_version="$(yq --version 2>/dev/null || true)"
-_yq_probe="$(printf 'settings:\n  PORT: "40801"\n' | yq -r '.settings.PORT // ""' 2>/dev/null || true)"
-if [[ "$_yq_version" == *mikefarah* || "$_yq_probe" != "40801" ]]; then
-    echo "╔══════════════════════════════════════════════════════════════════╗"
-    echo "║  ⚠️  INCOMPATIBLE yq — llama-launcher cannot read tunes            ║"
-    echo "╚══════════════════════════════════════════════════════════════════╝"
-    echo "Found: ${_yq_version:-unknown}"
-    echo "Needed: the Python jq-wrapper yq (kislyuk/yq; go-yq is not compatible)."
-    echo "    Arch/CachyOS:   sudo pacman -S yq        (NOT go-yq)"
-    echo "    Debian/Ubuntu:  sudo apt install yq"
-    echo "    pipx:           pipx install yq"
-    exit 1
+if [ "$FORCE_SKIP_CHECKS" -eq 0 ]; then
+    _yq_version="$(yq --version 2>/dev/null || true)"
+    _yq_probe="$(printf 'settings:\n  PORT: "40801"\n' | yq -r '.settings.PORT // ""' 2>/dev/null || true)"
+    if [[ "$_yq_version" == *mikefarah* || "$_yq_probe" != "40801" ]]; then
+        echo "╔══════════════════════════════════════════════════════════════════╗"
+        echo "║  ⚠️  INCOMPATIBLE yq — llama-launcher cannot read tunes            ║"
+        echo "╚══════════════════════════════════════════════════════════════════╝"
+        echo "Found: ${_yq_version:-unknown}"
+        echo "Needed: the Python jq-wrapper yq (kislyuk/yq; go-yq is not compatible)."
+        echo "    Arch/CachyOS:   sudo pacman -S yq        (NOT go-yq)"
+        echo "    Debian/Ubuntu:  sudo apt install yq"
+        echo "    pipx:           pipx install yq"
+        exit 1
+    fi
+    unset _yq_version _yq_probe
 fi
-unset _yq_version _yq_probe
 
 if [[ -f "$AUTHOR_BEST_PICKS_FILE" ]]; then
     # shellcheck disable=SC1090
@@ -838,6 +845,7 @@ TUNE_KEYS=(
 
 require_yq() {
     local version probe
+    [ "${FORCE_SKIP_CHECKS:-0}" -eq 1 ] && return 0
     if ! command -v yq >/dev/null 2>&1; then
         echo "❌ YAML tunes require yq (the Python jq-wrapper YAML processor). Install yq and re-run."
         exit 1
