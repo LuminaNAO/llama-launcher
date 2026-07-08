@@ -1,0 +1,27 @@
+kind: llama-launcher-tune
+version: 1
+name: "cpu-smoke-v1"
+model: "stories260K"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: cpu-smoke-v1
+    Smoke-test tune for the ~1 MB ggml-org/models tinyllamas stories260K.gguf.
+    Used by utils/full-feature-test.sh to exercise the whole launcher stack
+    (build selection, tune discovery, proxy, HDD cache, health, completion)
+    on any CPU in seconds. Not for real inference: the model tells toddler
+    stories at best.
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "256"
+  CACHE_TYPE_K: "f16"
+  CACHE_TYPE_V: "f16"
+  CONTEXT: "512"
+  FLASH_ATTN: "0"
+  HOST: "127.0.0.1"
+  JINJA: "0"
+  NGL: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.6"
+  TIMEOUT: "300"
