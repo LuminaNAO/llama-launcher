@@ -32,12 +32,16 @@ if ! command -v yq >/dev/null 2>&1; then
     echo "Install yq and re-run install.sh."
     exit 1
 fi
+# Judge yq by behavior, not version string: Arch's python-yq can report
+# "yq 0.0.0" (build lost its SCM version metadata) while working fine.
 _yq_version="$(yq --version 2>/dev/null || true)"
-if [[ "$_yq_version" != yq\ 3.* ]]; then
-    echo "ERROR: llama-launcher YAML tunes require the Python/jq-wrapper yq 3.x; found: ${_yq_version:-unknown}"
+_yq_probe="$(printf 'a: "1"\n' | yq -r '.a // ""' 2>/dev/null || true)"
+if [[ "$_yq_version" == *mikefarah* || "$_yq_probe" != "1" ]]; then
+    echo "ERROR: llama-launcher YAML tunes require the Python/jq-wrapper yq (kislyuk/yq); found: ${_yq_version:-unknown}"
+    echo "On Arch: sudo pacman -S yq   (NOT go-yq)"
     exit 1
 fi
-unset _yq_version
+unset _yq_version _yq_probe
 
 _env_models_dir="${LLAMACPP_MODELS_DIR:-}"
 _env_slot_save_path="${LLAMACPP_SLOT_SAVE_PATH:-}"

@@ -222,6 +222,35 @@ for _author_pick_candidate in \
 done
 unset _author_pick_candidate
 
+# yq (Python jq-wrapper, 3.x) is required to read tunes; fail loudly up
+# front instead of erroring after a long build or model download.
+if ! command -v yq >/dev/null 2>&1; then
+    echo "╔══════════════════════════════════════════════════════════════════╗"
+    echo "║  ⚠️  MISSING DEPENDENCY: yq — llama-launcher cannot read tunes     ║"
+    echo "╚══════════════════════════════════════════════════════════════════╝"
+    echo "Install yq (the Python jq-wrapper YAML processor, 3.x) and re-run:"
+    echo "    Arch/CachyOS:   sudo pacman -S yq        (NOT go-yq)"
+    echo "    Debian/Ubuntu:  sudo apt install yq"
+    echo "    pipx:           pipx install yq"
+    exit 1
+fi
+# Judge yq by behavior, not version string: Arch's python-yq can report
+# "yq 0.0.0" (build lost its SCM version metadata) while working fine.
+_yq_version="$(yq --version 2>/dev/null || true)"
+_yq_probe="$(printf 'settings:\n  PORT: "40801"\n' | yq -r '.settings.PORT // ""' 2>/dev/null || true)"
+if [[ "$_yq_version" == *mikefarah* || "$_yq_probe" != "40801" ]]; then
+    echo "╔══════════════════════════════════════════════════════════════════╗"
+    echo "║  ⚠️  INCOMPATIBLE yq — llama-launcher cannot read tunes            ║"
+    echo "╚══════════════════════════════════════════════════════════════════╝"
+    echo "Found: ${_yq_version:-unknown}"
+    echo "Needed: the Python jq-wrapper yq (kislyuk/yq; go-yq is not compatible)."
+    echo "    Arch/CachyOS:   sudo pacman -S yq        (NOT go-yq)"
+    echo "    Debian/Ubuntu:  sudo apt install yq"
+    echo "    pipx:           pipx install yq"
+    exit 1
+fi
+unset _yq_version _yq_probe
+
 if [[ -f "$AUTHOR_BEST_PICKS_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$AUTHOR_BEST_PICKS_FILE"
@@ -808,14 +837,15 @@ TUNE_KEYS=(
 )
 
 require_yq() {
-    local version
+    local version probe
     if ! command -v yq >/dev/null 2>&1; then
         echo "❌ YAML tunes require yq (the Python jq-wrapper YAML processor). Install yq and re-run."
         exit 1
     fi
     version="$(yq --version 2>/dev/null || true)"
-    if [[ "$version" != yq\ 3.* ]]; then
-        echo "❌ YAML tunes require the Python/jq-wrapper yq 3.x; found: ${version:-unknown}"
+    probe="$(printf 'a: "1"\n' | yq -r '.a // ""' 2>/dev/null || true)"
+    if [[ "$version" == *mikefarah* || "$probe" != "1" ]]; then
+        echo "❌ YAML tunes require the Python/jq-wrapper yq (kislyuk/yq); found: ${version:-unknown}"
         exit 1
     fi
 }
