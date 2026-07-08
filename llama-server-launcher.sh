@@ -1705,10 +1705,44 @@ DIO_FLAG=""
 KV_UNIFIED_FLAG="--no-kv-unified"
 [ "$KV_UNIFIED" = "1" ] && KV_UNIFIED_FLAG="--kv-unified"
 
+# A tune can reference flags the resolved llama-server is too old to know
+# (e.g. --slot-save-max-checkpoints predates llama-hdd's geometric thinning).
+# Probe the binary's --help once and drop unsupported flags with a warning
+# instead of dying on "error: invalid argument".
+SERVER_HELP="$("$LLAMACPP_SERVER_PATH" --help 2>&1 || true)"
+server_supports_flag() {
+    [[ "$SERVER_HELP" == *"$1"* ]]
+}
+
 # Checkpoint sidecar thinning needs llama-hdd; 0 keeps vanilla compatibility.
 SLOT_SAVE_MAX_CKPT_FLAG=""
 if [ "${SLOT_SAVE_MAX_CHECKPOINTS:-0}" -gt 0 ] 2>/dev/null; then
-    SLOT_SAVE_MAX_CKPT_FLAG="--slot-save-max-checkpoints $SLOT_SAVE_MAX_CHECKPOINTS"
+    if server_supports_flag "--slot-save-max-checkpoints"; then
+        SLOT_SAVE_MAX_CKPT_FLAG="--slot-save-max-checkpoints $SLOT_SAVE_MAX_CHECKPOINTS"
+    else
+        echo "⚠️  SLOT_SAVE_MAX_CHECKPOINTS=$SLOT_SAVE_MAX_CHECKPOINTS ignored: this llama-server"
+        echo "   has no --slot-save-max-checkpoints (older llama-hdd or vanilla llama.cpp)."
+    fi
+fi
+# Same guard for the other cache/checkpoint flags (missing from vanilla
+# llama.cpp and pre-sidecar llama-hdd builds).
+CACHE_RAM_FLAG=""
+if server_supports_flag "--cache-ram"; then
+    CACHE_RAM_FLAG="--cache-ram $CACHE_RAM"
+else
+    echo "⚠️  CACHE_RAM=$CACHE_RAM ignored: this llama-server has no --cache-ram."
+fi
+CKPT_MIN_STEP_FLAG=""
+if server_supports_flag "--checkpoint-min-step"; then
+    CKPT_MIN_STEP_FLAG="--checkpoint-min-step $CHECKPOINT_MIN_STEP"
+else
+    echo "⚠️  CHECKPOINT_MIN_STEP=$CHECKPOINT_MIN_STEP ignored: this llama-server has no --checkpoint-min-step."
+fi
+CTX_CKPT_FLAG=""
+if server_supports_flag "--ctx-checkpoints"; then
+    CTX_CKPT_FLAG="--ctx-checkpoints $CHECKPOINT_MAX"
+else
+    echo "⚠️  CHECKPOINT_MAX=$CHECKPOINT_MAX ignored: this llama-server has no --ctx-checkpoints."
 fi
 FA_FLAG=""
 [ "$FLASH_ATTN" = "1" ] && FA_FLAG="-fa on"
@@ -1838,11 +1872,11 @@ LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
   ${JINJA_FLAG:+$JINJA_FLAG}
   --parallel "$PARALLEL"
   ${KV_UNIFIED_FLAG:+$KV_UNIFIED_FLAG}
-  --cache-ram "$CACHE_RAM"
+  ${CACHE_RAM_FLAG:+$CACHE_RAM_FLAG}
   -ctk "$CACHE_TYPE_K"
   -ctv "$CACHE_TYPE_V"
-  --checkpoint-min-step "$CHECKPOINT_MIN_STEP"
-  --ctx-checkpoints "$CHECKPOINT_MAX"
+  ${CKPT_MIN_STEP_FLAG:+$CKPT_MIN_STEP_FLAG}
+  ${CTX_CKPT_FLAG:+$CTX_CKPT_FLAG}
   ${SLOT_SAVE_MAX_CKPT_FLAG:+$SLOT_SAVE_MAX_CKPT_FLAG}
   --seed "$SEED"
   ${MLOCK_FLAG:+$MLOCK_FLAG}
