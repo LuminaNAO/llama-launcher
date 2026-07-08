@@ -4,8 +4,18 @@
 
 set -euo pipefail
 
-UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(dirname "$UTIL_DIR")"
+UTIL_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+case "$UTIL_DIR" in
+    /usr/bin|/usr/local/bin|/bin)
+        # Packaged install: state lives in the launcher data dir
+        ROOT_DIR="${LLAMA_LAUNCHER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/llama-launcher}"
+        LAUNCHER_CMD=(llama-launcher)
+        ;;
+    *)
+        ROOT_DIR="$(dirname "$UTIL_DIR")"
+        LAUNCHER_CMD=(bash "$ROOT_DIR/llama-server-launcher.sh")
+        ;;
+esac
 MODEL="/mnt/storage/models/Qwen3.5-35B-A3B-H-v2-Q8_0.gguf"
 BUILD="vulkan"
 RESULTS_DIR="$UTIL_DIR/benchmark-results"
@@ -46,7 +56,7 @@ for BATCH_SIZE in 512 1024 2048 4096 8192; do
 
     # Build the launch command — inject -b via EXTRA_ARGS
     export EXTRA_ARGS="-b $BATCH_SIZE"
-    nohup bash "$ROOT_DIR/llama-server-launcher.sh" \
+    nohup "${LAUNCHER_CMD[@]}" \
         --build "$BUILD" \
         --model "$MODEL" \
         > /dev/null 2>&1 &

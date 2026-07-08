@@ -10,8 +10,18 @@
 
 set -euo pipefail
 
-UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(dirname "$UTIL_DIR")"
+UTIL_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+case "$UTIL_DIR" in
+    /usr/bin|/usr/local/bin|/bin)
+        # Packaged install: state lives in the launcher data dir
+        ROOT_DIR="${LLAMA_LAUNCHER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/llama-launcher}"
+        LAUNCHER_CMD=(llama-launcher)
+        ;;
+    *)
+        ROOT_DIR="$(dirname "$UTIL_DIR")"
+        LAUNCHER_CMD=(bash "$ROOT_DIR/llama-server-launcher.sh")
+        ;;
+esac
 CONFIG_FILE="$ROOT_DIR/.llama-launcher-config"
 SERVICE_NAME="llama-server"
 DEFAULT_MODELS_DIR="/usr/local/share/llama.cpp/models"
@@ -625,6 +635,7 @@ fi
 LOG_FILE="$ROOT_DIR/llama.log"
 DEEP_LOG="$ROOT_DIR/llama-deep.log"
 PROXY_SCRIPT="$ROOT_DIR/llama-deep-proxy.mjs"
+[ -f "$PROXY_SCRIPT" ] || PROXY_SCRIPT="/usr/lib/llama-launcher/llama-deep-proxy.mjs"
 NODE_BIN="$(command -v node || true)"
 if [ "$NO_PROXY" -eq 0 ] && [ -z "$NODE_BIN" ]; then
     echo "ERROR: node is required for proxy mode but was not found on PATH."

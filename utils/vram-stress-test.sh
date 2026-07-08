@@ -22,8 +22,18 @@
 
 set -euo pipefail
 
-UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(dirname "$UTIL_DIR")"
+UTIL_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+case "$UTIL_DIR" in
+    /usr/bin|/usr/local/bin|/bin)
+        # Packaged install: state lives in the launcher data dir
+        ROOT_DIR="${LLAMA_LAUNCHER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/llama-launcher}"
+        LAUNCHER_CMD=(llama-launcher)
+        ;;
+    *)
+        ROOT_DIR="$(dirname "$UTIL_DIR")"
+        LAUNCHER_CMD=(bash "$ROOT_DIR/llama-server-launcher.sh")
+        ;;
+esac
 RESULTS_DIR="$UTIL_DIR/benchmark-results"
 mkdir -p "$RESULTS_DIR"
 
@@ -267,7 +277,7 @@ if [ "$SKIP_LAUNCH" -eq 0 ]; then
     kill_server
 
     > "$HOME/llama.log"
-    nohup bash "$ROOT_DIR/llama-server-launcher.sh" \
+    nohup "${LAUNCHER_CMD[@]}" \
         --build "$BUILD_TYPE" \
         --model "$MODEL_PATH" \
         --tune "$TUNE_NAME" \

@@ -22,8 +22,18 @@ API_KEY="ollama-local"
 REMOTE=""
 ACTION=""
 
-UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(dirname "$UTIL_DIR")"
+UTIL_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+case "$UTIL_DIR" in
+    /usr/bin|/usr/local/bin|/bin)
+        # Packaged install: state lives in the launcher data dir
+        ROOT_DIR="${LLAMA_LAUNCHER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/llama-launcher}"
+        LAUNCHER_CMD=(llama-launcher)
+        ;;
+    *)
+        ROOT_DIR="$(dirname "$UTIL_DIR")"
+        LAUNCHER_CMD=(bash "$ROOT_DIR/llama-server-launcher.sh")
+        ;;
+esac
 TUNNEL_HISTORY="$ROOT_DIR/.tunnel-history"
 TUNNEL_PIDFILE="/tmp/llama-tunnel-${PORT}.pid"
 TUNNEL_REMOTEFILE="/tmp/llama-tunnel-${PORT}.remote"
