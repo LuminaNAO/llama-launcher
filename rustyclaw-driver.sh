@@ -66,7 +66,6 @@ send_turn() {
 
     local args=(
         agent
-        --agent "$AGENT"
         --message "$message"
         --timeout "$TURN_TIMEOUT"
         --thinking "$THINKING_LEVEL"
