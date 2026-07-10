@@ -10,7 +10,8 @@
 #   ssh-tunnel.sh --stop                    # stop active tunnel
 #
 # Options:
-#   --port <N>       Local and remote port (default: 40801)
+#   --port <N>       Local and remote llama-server port (default: 40801)
+#   --ssh-port <N>   Non-standard sshd port on the remote (default: ssh default/config)
 #   --api-key <key>  API key for health check (default: ollama-local)
 #   --status         Show tunnel status and exit
 #   --stop           Stop active tunnel and exit
@@ -35,16 +36,16 @@ case "$UTIL_DIR" in
         ;;
 esac
 TUNNEL_HISTORY="$ROOT_DIR/.tunnel-history"
-TUNNEL_PIDFILE="/tmp/llama-tunnel-${PORT}.pid"
-TUNNEL_REMOTEFILE="/tmp/llama-tunnel-${PORT}.remote"
 
 SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ServerAliveCountMax=3"
+SSH_PORT=""
 
 # ── Parse args ──────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --port)    PORT="$2"; shift 2 ;;
-        --api-key) API_KEY="$2"; shift 2 ;;
+        --port)     PORT="$2"; shift 2 ;;
+        --ssh-port) SSH_PORT="$2"; shift 2 ;;
+        --api-key)  API_KEY="$2"; shift 2 ;;
         --status)  ACTION="status"; shift ;;
         --stop)    ACTION="stop"; shift ;;
         -h|--help)
@@ -66,6 +67,9 @@ done
 # Update pidfile/remotefile paths if port was overridden
 TUNNEL_PIDFILE="/tmp/llama-tunnel-${PORT}.pid"
 TUNNEL_REMOTEFILE="/tmp/llama-tunnel-${PORT}.remote"
+
+# Non-standard sshd port (also configurable per-host via ~/.ssh/config)
+[[ -n "$SSH_PORT" ]] && SSH_OPTS="$SSH_OPTS -p $SSH_PORT"
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 tunnel_pid() {
