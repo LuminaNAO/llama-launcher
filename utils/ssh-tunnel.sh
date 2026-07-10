@@ -68,8 +68,6 @@ done
 TUNNEL_PIDFILE="/tmp/llama-tunnel-${PORT}.pid"
 TUNNEL_REMOTEFILE="/tmp/llama-tunnel-${PORT}.remote"
 
-# Non-standard sshd port (also configurable per-host via ~/.ssh/config)
-[[ -n "$SSH_PORT" ]] && SSH_OPTS="$SSH_OPTS -p $SSH_PORT"
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 tunnel_pid() {
@@ -365,7 +363,19 @@ if [[ -z "$REMOTE" ]]; then
             exit 1
         fi
     fi
+
+    # Optional non-standard sshd port (Enter keeps ssh default / ~/.ssh/config)
+    if [[ -z "$SSH_PORT" ]]; then
+        read -rp "SSH port [Enter = default/ssh config]: " SSH_PORT
+        if [[ -n "$SSH_PORT" && ! "$SSH_PORT" =~ ^[0-9]+$ ]]; then
+            echo "Invalid SSH port: $SSH_PORT" >&2
+            exit 1
+        fi
+    fi
 fi
+
+# Non-standard sshd port (also configurable per-host via ~/.ssh/config)
+[[ -n "$SSH_PORT" ]] && SSH_OPTS="$SSH_OPTS -p $SSH_PORT"
 
 # ── Pre-flight checks ──────────────────────────────────────────────────────
 echo ""
