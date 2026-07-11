@@ -2,7 +2,7 @@
 # Build llama.cpp in the builds/ directory
 # Usage: build-llamacpp.sh <build-type> [gpu-arch]
 #
-# <build-type> is <backend>[-<tag>], where <backend> ∈ {cpu,rocm,vulkan,cuda}.
+# <build-type> is <backend>[-<tag>], where <backend> ∈ {cpu,rocm,vulkan,cuda,metal}.
 # The optional -tag suffix selects a parallel output directory under builds/
 # so experimental variants of the same backend can coexist.
 #   ./build-llamacpp.sh rocm           # -> builds/rocm (default mainline source)
@@ -134,7 +134,7 @@ GPU_ARCH_OVERRIDE="${2:-}"
 if [ -z "$BUILD_TYPE" ]; then
     echo "❌ Build type required."
     echo ""
-    echo "Usage: build-llamacpp.sh <cpu|rocm|vulkan|cuda>[-tag] [gpu-arch]"
+    echo "Usage: build-llamacpp.sh <cpu|rocm|vulkan|cuda|metal>[-tag] [gpu-arch]"
     echo ""
     echo "Examples:"
     echo "  ./build-llamacpp.sh cpu             # CPU-only backend"
@@ -144,6 +144,7 @@ if [ -z "$BUILD_TYPE" ]; then
     echo "  ./build-llamacpp.sh rocm gfx1151    # ROCm for Strix Halo"
     echo "  ./build-llamacpp.sh cuda            # CUDA backend (auto-detect NVIDIA GPU)"
     echo "  ./build-llamacpp.sh cuda 89         # CUDA for Ada Lovelace (RTX 4090)"
+    echo "  ./build-llamacpp.sh metal           # Metal backend (macOS / Apple Silicon)"
     echo "  ./build-llamacpp.sh rocm-test       # Tagged ROCm build"
     exit 1
 fi
@@ -648,6 +649,11 @@ case "$BACKEND" in
     vulkan)
         cmake -S . -B "$BUILD_DIR" \
           -DGGML_VULKAN=ON \
+          -DCMAKE_BUILD_TYPE=Release
+        ;;
+    metal)
+        cmake -S . -B "$BUILD_DIR" \
+          -DGGML_METAL=ON \
           -DCMAKE_BUILD_TYPE=Release
         ;;
 esac
