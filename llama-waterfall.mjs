@@ -888,7 +888,7 @@ async function tui(args) {
         const view = evs.slice(Math.max(0, end - logSpace), end);
         for (const e of view) {
             const hh = new Date(e.ts).toTimeString().slice(0, 8);
-            L.push(` ${A.dim}${hh}${A.reset}  ${e.line}`.slice(0, cols + 20));
+            L.push(` ${A.dim}${hh}${A.reset}  ${e.line}`);
         }
         while (L.length < rows - footerLines) L.push("");
 
@@ -900,12 +900,26 @@ async function tui(args) {
         } else {
             L.push(` ${flash ? A.yellow + flash + A.reset : A.dim + "[?] help   j/k J/K a dd e x p t w u r q" + A.reset}`);
         }
-        out.write(A.clear + L.slice(0, rows).join("\n"));
+        out.write(A.clear + L.slice(0, rows).map(l => truncVis(l, cols - 1)).join("\n"));
     }
 
     function pad(s, n) {
         const vis = s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "");
         return s + " ".repeat(Math.max(1, n - vis.length));
+    }
+
+    // Truncate to `max` VISIBLE chars, preserving ANSI codes. Without this,
+    // long rows (model names, error strings) wrap onto extra physical lines
+    // and scroll the header off the top of the screen.
+    function truncVis(s, max) {
+        let vis = 0, out = "";
+        for (let i = 0; i < s.length;) {
+            const m = /^\x1b\[[0-9;?]*[a-zA-Z]/.exec(s.slice(i));
+            if (m) { out += m[0]; i += m[0].length; continue; }
+            if (vis >= max) break;
+            out += s[i]; vis++; i++;
+        }
+        return out + A.reset;
     }
 
     function say(msg) { flash = msg; render(); setTimeout(() => { if (flash === msg) { flash = ""; render(); } }, 3000); }
