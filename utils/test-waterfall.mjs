@@ -259,7 +259,39 @@ try {
     });
     ok(JSON.parse(statusOut).endpoints.length === 3, "status --json is valid and complete");
 
-    // 14. All tiers down → clean 503
+    // 14. CLI control surface (same operations, agent-friendly)
+    const cli = (...a) => new Promise((resolve) => {
+        const p = spawn(process.execPath, [WATERFALL, ...a, "--socket", sockPath]);
+        let o = "", e = "";
+        p.stdout.on("data", c => o += c);
+        p.stderr.on("data", c => e += c);
+        p.on("exit", (code) => resolve({ code, out: o, err: e }));
+    });
+    let cr = await cli("pin", "2", "--json");
+    ok(cr.code === 0 && JSON.parse(cr.out).pinned === 1, "CLI: pin 2 pins tier 2 (1-based ranks)");
+    r = await req(WF_PORT, "/v1/chat/completions", { method: "POST", body: '{"messages":[]}' });
+    ok(JSON.parse(r.body).served_by === "t2", "CLI pin affects live routing");
+    cr = await cli("pin", "off", "--json");
+    ok(JSON.parse(cr.out).pinned === null, "CLI: pin off clears the pin");
+    cr = await cli("disable", "1", "--json");
+    ok(JSON.parse(cr.out).endpoints[0].enabled === false, "CLI: disable 1 drains tier 1");
+    cr = await cli("enable", "1", "--json");
+    ok(JSON.parse(cr.out).endpoints[0].enabled === true, "CLI: enable 1 restores tier 1");
+    cr = await cli("add", "127.0.0.1:49998", "cli-ghost", "--rank", "1", "--json");
+    let cs = JSON.parse(cr.out);
+    ok(cs.endpoints[0].port === 49998 && cs.endpoints[0].label === "cli-ghost", "CLI: add --rank 1 inserts at top");
+    cr = await cli("move", "1", "4", "--json");
+    ok(JSON.parse(cr.out).endpoints[3].port === 49998, "CLI: move 1 4 reorders");
+    cr = await cli("remove", "4", "--json");
+    ok(JSON.parse(cr.out).endpoints.length === 3, "CLI: remove 4 deletes");
+    cr = await cli("reload", "--json");
+    ok(JSON.parse(cr.out).dirty === false, "CLI: reload clears dirty state");
+    cr = await cli("test", "1");
+    ok(cr.code === 0 && JSON.parse(cr.out).health?.status === 200, "CLI: test 1 probes health+completion");
+    cr = await cli("remove", "99");
+    ok(cr.code === 1, "CLI: bad rank exits non-zero");
+
+    // 15. All tiers down → clean 503
     backends.forEach(b => b.server.close());
     await sleep(1000);
     r = await req(WF_PORT, "/v1/chat/completions", { method: "POST", body: '{"messages":[]}' });

@@ -728,15 +728,9 @@ function connectControl(socketPath) {
     });
 }
 
-// ── status subcommand ─────────────────────────────────────────────────────
-async function statusCmd(args) {
-    const socketPath = args.socket || DEFAULT_SOCKET;
-    let ctl;
-    try { ctl = await connectControl(socketPath); }
-    catch { console.error(`waterfall not running (no socket at ${socketPath})`); process.exit(1); }
-    const s = await ctl.send("status");
-    ctl.conn.destroy();
-    if (args.json) { console.log(JSON.stringify(s, null, 2)); return; }
+// ── CLI control subcommands (the same surface the TUI drives) ─────────────
+// Ranks on the CLI are 1-based, matching the TUI display.
+function printStatus(s) {
     console.log(`waterfall :${s.listenPort}  uptime ${fmtUptime(s.uptimeSec)}${s.dirty ? "  [+unsaved]" : ""}${s.pinned !== null ? `  PINNED→${s.pinned + 1}` : ""}`);
     s.endpoints.forEach((ep, i) => {
         const flags = [
@@ -745,6 +739,54 @@ async function statusCmd(args) {
         ].filter(Boolean).join(",");
         console.log(`  ${i + 1}. ${ep.host}:${ep.port}${ep.label ? ` (${ep.label})` : ""} — ${ep.state}${ep.latencyMs != null ? ` ${ep.latencyMs}ms` : ""}  req=${ep.requests} fail=${ep.failures}${flags ? `  [${flags}]` : ""}${ep.lastError ? `  last-err: ${ep.lastError}` : ""}`);
     });
+}
+
+function rankToIndex(v) {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1) { console.error(`bad rank: ${v} (ranks are 1-based)`); process.exit(1); }
+    return n - 1;
+}
+
+async function ctlCmd(sub, args) {
+    const socketPath = args.socket || DEFAULT_SOCKET;
+    let ctl;
+    try { ctl = await connectControl(socketPath); }
+    catch { console.error(`waterfall not running (no socket at ${socketPath})`); process.exit(1); }
+
+    const p = args._;
+    let cmd, extra = {};
+    switch (sub) {
+        case "status": cmd = "status"; break;
+        case "pin":
+            cmd = "pin";
+            extra.index = (p[0] === "off" || p[0] === "none" || p[0] === undefined) ? null : rankToIndex(p[0]);
+            break;
+        case "disable": cmd = "setEnabled"; extra = { index: rankToIndex(p[0]), enabled: false, hard: Boolean(args.hard) }; break;
+        case "enable": cmd = "setEnabled"; extra = { index: rankToIndex(p[0]), enabled: true }; break;
+        case "add":
+            cmd = "add";
+            extra = { spec: p.join(" "), index: args.rank !== undefined ? rankToIndex(args.rank) : undefined };
+            break;
+        case "remove": cmd = "remove"; extra = { index: rankToIndex(p[0]) }; break;
+        case "move": cmd = "move"; extra = { index: rankToIndex(p[0]), to: rankToIndex(p[1]) }; break;
+        case "edit": cmd = "edit"; extra = { index: rankToIndex(p[0]), spec: p.slice(1).join(" ") }; break;
+        case "write": cmd = "write"; break;
+        case "reload": cmd = "reload"; break;
+        case "test": cmd = "test"; extra = { index: rankToIndex(p[0]) }; break;
+    }
+
+    let result;
+    try { result = await ctl.send(cmd, extra); }
+    catch (err) { console.error(`error: ${err.message}`); ctl.conn.destroy(); process.exit(1); }
+
+    if (cmd === "test") {
+        console.log(JSON.stringify(result, null, args.json ? 2 : 0));
+    } else if (args.json) {
+        console.log(JSON.stringify(result, null, 2));
+    } else {
+        printStatus(result);
+    }
+    ctl.conn.destroy();
 }
 
 function fmtUptime(sec) {
@@ -930,25 +972,41 @@ async function tui(args) {
 }
 
 // ── CLI entry ─────────────────────────────────────────────────────────────
+const BOOL_FLAGS = new Set(["json", "hard"]);
 function parseArgs(argv) {
     const args = { _: [] };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
-        if (a === "--json") args.json = true;
-        else if (a.startsWith("--")) args[a.slice(2)] = argv[++i];
+        if (a.startsWith("--")) {
+            const name = a.slice(2);
+            if (BOOL_FLAGS.has(name)) args[name] = true;
+            else args[name] = argv[++i];
+        }
         else args._.push(a);
     }
     return args;
 }
 
+const CTL_SUBS = new Set(["status", "pin", "disable", "enable", "add", "remove", "move", "edit", "write", "reload", "test"]);
 const [sub, ...rest] = process.argv.slice(2);
 const args = parseArgs(rest);
 if (sub === "serve") serve(args);
 else if (sub === "tui") tui(args);
-else if (sub === "status") statusCmd(args);
+else if (CTL_SUBS.has(sub)) ctlCmd(sub, args);
 else {
-    console.error("usage: llama-waterfall.mjs serve <listen-port> [--config <path>] [--socket <path>] [--api-key <key>] [--poll-interval <sec>] [--promote-after <n>] [--connect-timeout <ms>] [--max-body-mb <n>]");
-    console.error("       llama-waterfall.mjs tui    [--socket <path>]");
-    console.error("       llama-waterfall.mjs status [--json] [--socket <path>]");
+    console.error("usage: llama-waterfall.mjs serve <listen-port> [--config <path>] [--socket <path>] [--api-key <key>]");
+    console.error("                            [--poll-interval <sec>] [--promote-after <n>] [--connect-timeout <ms>] [--max-body-mb <n>]");
+    console.error("       llama-waterfall.mjs tui [--socket <path>]");
+    console.error("");
+    console.error("  control (ranks are 1-based, as shown in the TUI; all accept --json and --socket <path>):");
+    console.error("       llama-waterfall.mjs status");
+    console.error("       llama-waterfall.mjs pin <rank>|off        force all traffic to one tier / clear pin");
+    console.error("       llama-waterfall.mjs disable <rank> [--hard]   drain (or cut) a tier; enable <rank> restores");
+    console.error("       llama-waterfall.mjs add <host:port> [label…] [--rank <n>]");
+    console.error("       llama-waterfall.mjs remove <rank>");
+    console.error("       llama-waterfall.mjs move <rank> <new-rank>");
+    console.error("       llama-waterfall.mjs edit <rank> <host:port> [label…]");
+    console.error("       llama-waterfall.mjs write | reload        persist runtime list / re-read waterfall.conf");
+    console.error("       llama-waterfall.mjs test <rank>           health + 1-token completion probe");
     process.exit(sub ? 1 : 0);
 }

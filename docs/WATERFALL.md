@@ -97,13 +97,19 @@ local and remote, which keeps debugging sane.
 
 ## Components
 
-- `llama-waterfall.mjs` — zero-dependency Node, three subcommands:
+- `llama-waterfall.mjs` — zero-dependency Node:
   - `serve <port>` — the proxy + health poller + unix control socket
     (`waterfall.sock` in the launcher root; local-only by nature, no auth
     story, no second TCP port).
   - `tui` — vim-keyed live dashboard attached to the running proxy over
     the control socket (JSON-lines protocol; push events, no polling).
-  - `status [--json]` — scriptable one-shot state dump (waybar, cron).
+  - **CLI control** — the full TUI surface is also exposed as subcommands
+    so agents and scripts can drive it (ranks are 1-based, as displayed;
+    every command accepts `--json`):
+    `status`, `pin <rank>|off`, `disable <rank> [--hard]`, `enable <rank>`,
+    `add <host:port> [label…] [--rank <n>]`, `remove <rank>`,
+    `move <rank> <new-rank>`, `edit <rank> <host:port> [label…]`,
+    `write`, `reload`, `test <rank>`.
 - `waterfall.conf` — one `host:port  # label` per line, priority = line
   order, `#` comments. Lives in the launcher root next to
   `.tunnel-history`.

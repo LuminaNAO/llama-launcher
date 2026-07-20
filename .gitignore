@@ -10,6 +10,8 @@ launcher-restart.log
 .llama-launcher-config
 .launch-history
 .tunnel-history
+waterfall.conf
+waterfall.sock
 temp/
 
 # Build artifacts
