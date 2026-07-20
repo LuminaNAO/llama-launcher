@@ -37,6 +37,10 @@
 #                    llama-deep.log (in repo dir; default: off, since the file grows fast).
 #                    Useful for diagnostics / debugging template issues.
 #   --save           Save effective launch settings as a per-model config
+#   --waterfall      Run ONLY the llama-waterfall failover proxy (no local
+#                    inference). Routes across endpoints in waterfall.conf,
+#                    fastest first. Listens on --port (default 40800).
+#                    See docs/WATERFALL.md; TUI: node llama-waterfall.mjs tui
 #
 # Subcommands:
 #   stop             Gracefully stop a running llama-server (and deep proxy)
@@ -159,6 +163,7 @@ while [[ $# -gt 0 ]]; do
         --proxy) NO_PROXY=0; LOG_FLAGS_TOUCHED=1; shift ;;
         --log) NO_LOG=0; LOG_FLAGS_TOUCHED=1; shift ;;
         --deep-log) NO_DEEP_LOG=0; LOG_FLAGS_TOUCHED=1; shift ;;
+        --waterfall) WATERFALL_MODE=1; shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -179,6 +184,17 @@ case "$SCRIPT_DIR" in
         ;;
 esac
 mkdir -p "$LLAMA_LAUNCHER_DIR"
+
+# ── Waterfall-only mode: run the failover proxy, no local inference ─────────
+# Routes traffic across the endpoints in waterfall.conf (fastest first,
+# cascade on failure). See docs/WATERFALL.md. Drive it with:
+#   node llama-waterfall.mjs tui
+if [ "${WATERFALL_MODE:-0}" -eq 1 ]; then
+    exec node "$LLAMA_LAUNCHER_LIB_DIR/llama-waterfall.mjs" serve "${ARG_PORT:-40800}" \
+        --config "$LLAMA_LAUNCHER_DIR/waterfall.conf" \
+        --socket "$LLAMA_LAUNCHER_DIR/waterfall.sock"
+fi
+
 CONFIG_FILE="$LLAMA_LAUNCHER_DIR/.llama-launcher-config"
 LAUNCH_HISTORY="$LLAMA_LAUNCHER_DIR/.launch-history"
 LLAMA_LOG_FILE="$LLAMA_LAUNCHER_DIR/llama.log"
