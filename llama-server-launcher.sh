@@ -1716,8 +1716,6 @@ echo ""
 # ── Build launch flags from tuneable variables ──────────────────────────────
 MMAP_FLAG=""
 [ "$NO_MMAP" = "1" ] && MMAP_FLAG="--no-mmap"
-DIO_FLAG=""
-[ "$DIO" = "1" ] && DIO_FLAG="-dio"
 KV_UNIFIED_FLAG="--no-kv-unified"
 [ "$KV_UNIFIED" = "1" ] && KV_UNIFIED_FLAG="--kv-unified"
 
@@ -1753,6 +1751,14 @@ if server_supports_flag "--checkpoint-min-step"; then
     CKPT_MIN_STEP_FLAG="--checkpoint-min-step $CHECKPOINT_MIN_STEP"
 else
     echo "⚠️  CHECKPOINT_MIN_STEP=$CHECKPOINT_MIN_STEP ignored: this llama-server has no --checkpoint-min-step."
+fi
+DIO_FLAG=""
+if [ "$DIO" = "1" ]; then
+    if server_supports_flag "--direct-io"; then
+        DIO_FLAG="-dio"
+    else
+        echo "⚠️  DIO=1 ignored: this llama-server has no --direct-io."
+    fi
 fi
 CTX_CKPT_FLAG=""
 if server_supports_flag "--ctx-checkpoints"; then
