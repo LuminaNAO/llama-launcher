@@ -22,6 +22,7 @@ if [[ ! -x "$DOWNLOAD_TARGET" ]]; then
     exit 1
 fi
 BUILD_TARGET="$SCRIPT_DIR/build-llamacpp.sh"
+WATERFALL_TARGET="$SCRIPT_DIR/llama-waterfall.sh"
 if [[ ! -x "$BUILD_TARGET" ]]; then
     echo "ERROR: Builder not found or not executable: $BUILD_TARGET"
     exit 1
@@ -458,6 +459,7 @@ LOG_LINK="$LINK_DIR/llama-launcher-log"
 DOWNLOAD_LINK="$LINK_DIR/llama-download-model"
 DOWNLOAD_COMPAT_LINK="$LINK_DIR/download-model.sh"
 BUILD_LINK="$LINK_DIR/llama-build"
+WATERFALL_LINK="$LINK_DIR/llama-waterfall"
 
 if [[ -e "$LINK" || -L "$LINK" ]]; then
     if [[ -L "$LINK" && "$(readlink -f "$LINK")" == "$TARGET" ]]; then
@@ -524,6 +526,21 @@ else
     echo "Installed: $BUILD_LINK -> $BUILD_TARGET"
 fi
 
+if [[ -e "$WATERFALL_LINK" || -L "$WATERFALL_LINK" ]]; then
+    if [[ -L "$WATERFALL_LINK" && "$(readlink -f "$WATERFALL_LINK")" == "$WATERFALL_TARGET" ]]; then
+        echo "Already installed: $WATERFALL_LINK -> $WATERFALL_TARGET"
+    else
+        echo "WARNING: $WATERFALL_LINK exists and points elsewhere, or is a regular file."
+        read -rp "Overwrite? [y/N] " ans
+        [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 1; }
+        ln -sfn "$WATERFALL_TARGET" "$WATERFALL_LINK"
+        echo "Updated: $WATERFALL_LINK -> $WATERFALL_TARGET"
+    fi
+else
+    ln -s "$WATERFALL_TARGET" "$WATERFALL_LINK"
+    echo "Installed: $WATERFALL_LINK -> $WATERFALL_TARGET"
+fi
+
 SHELL_NAME="$(detect_shell_name)"
 PROFILE="$(shell_profile_path "$SHELL_NAME")"
 
@@ -549,3 +566,4 @@ echo "Run:  llama-launcher        # interactive"
 echo "      llama-launcher stop   # graceful shutdown"
 echo "      llama-launcher-log    # tail -f the repo-local llama.log"
 echo "      llama-download-model  # download GGUF models"
+echo "      llama-waterfall       # failover proxy (serve/tui/status/…)"

@@ -25,6 +25,7 @@ package() {
     install -Dm755 "${pkgname}/build-llamacpp.sh" "${pkgdir}/usr/bin/llama-build"
     install -Dm755 "${pkgname}/utils/install-service.sh" "${pkgdir}/usr/bin/llama-install-service"
     install -Dm755 "${pkgname}/utils/ssh-tunnel.sh" "${pkgdir}/usr/bin/llama-ssh-tunnel"
+    install -Dm755 "${pkgname}/llama-waterfall.sh" "${pkgdir}/usr/bin/llama-waterfall"
     install -Dm755 "${pkgname}/utils/mlock-fixer.sh" "${pkgdir}/usr/bin/llama-mlock-fixer"
     install -Dm755 "${pkgname}/utils/benchmark.sh" "${pkgdir}/usr/bin/llama-benchmark"
     install -Dm755 "${pkgname}/utils/bench-batch-sizes.sh" "${pkgdir}/usr/bin/llama-bench-batch-sizes"
