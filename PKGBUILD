@@ -4,7 +4,7 @@
 # refs, missing deps, and missing options three times. Verify after publish:
 # llama-launcher/utils/check-aur-sync.sh must report OK for all packages.
 pkgname=llama-launcher
-pkgver=18
+pkgver=19
 pkgrel=1
 pkgdesc="Helper scripts for building llama.cpp and running llama-server with per-model configs, launch history, benchmarking, and SSH tunneling"
 arch=(any)
