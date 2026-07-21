@@ -43,6 +43,19 @@ case "$SCRIPT_DIR" in
         ;;
 esac
 DEFAULT_LLAMACPP_DIR="$(dirname "$ROOT_DIR")/llama.cpp"
+DEFAULT_LLAMAHDD_DIR="$(dirname "$ROOT_DIR")/llama-hdd.cpp"
+
+# The llama-hdd fork carries the flags the launcher tunes expect (-dio,
+# --slot-save-max-checkpoints, --checkpoint-min-step); a vanilla checkout
+# builds fine but produces a server that rejects them. Match by checkout
+# name/remote first, then by an hdd-only source marker for renamed trees.
+is_llama_hdd_src() {
+    case "$(basename "$(realpath "$1" 2>/dev/null || echo "$1")")" in
+        *llama-hdd*) return 0 ;;
+    esac
+    git -C "$1" remote get-url origin 2>/dev/null | grep -q "llama-hdd" && return 0
+    grep -qs -- "slot-save-max-checkpoints" "$1/common/arg.cpp"
+}
 
 ldconfig_has() {
     # Avoid grep -q in a pipe under pipefail: grep can exit early after a
@@ -162,9 +175,12 @@ BUILD_TAG=""
 # Priority:
 #   1. LLAMACPP_SRC env var (explicit override — non-interactive)
 #   2. Plain BUILD_TYPE (no tag) with default source present → silent default
-#   3. Otherwise interactive picker (mainline default, custom-path option)
+#      (llama-hdd sibling wins over vanilla llama.cpp when both exist)
+#   3. Otherwise interactive picker (llama-hdd default, custom-path option)
 if [ -n "${LLAMACPP_SRC:-}" ]; then
     LLAMACPP_DIR="$LLAMACPP_SRC"
+elif [ -z "$BUILD_TAG" ] && [ -f "$DEFAULT_LLAMAHDD_DIR/CMakeLists.txt" ]; then
+    LLAMACPP_DIR="$DEFAULT_LLAMAHDD_DIR"
 elif [ -z "$BUILD_TAG" ] && [ -f "$DEFAULT_LLAMACPP_DIR/CMakeLists.txt" ]; then
     LLAMACPP_DIR="$DEFAULT_LLAMACPP_DIR"
 else
@@ -246,13 +262,20 @@ else
         exit 1
     fi
 
-    # Smart default: prefer the mainline sibling checkout. Tags select build
-    # output directories; they should not steer source selection now that
-    # upstream llama.cpp contains MTP.
-    default_sel=1
+    # Smart default: prefer an llama-hdd tree over vanilla llama.cpp — a
+    # vanilla build yields a server that rejects the launcher's hdd flags
+    # (-dio, slot-save checkpoints). Fall back to the mainline sibling
+    # checkout, then the first candidate found.
+    default_sel=0
+    mainline_sel=0
     for i in "${!candidates[@]}"; do
-        [ "$(realpath "${candidates[$i]}" 2>/dev/null || echo "${candidates[$i]}")" = "$(realpath "$DEFAULT_LLAMACPP_DIR" 2>/dev/null || echo "$DEFAULT_LLAMACPP_DIR")" ] && { default_sel=$((i+1)); break; }
+        if [ "$default_sel" -eq 0 ] && is_llama_hdd_src "${candidates[$i]}"; then
+            default_sel=$((i+1))
+        fi
+        [ "$mainline_sel" -eq 0 ] && [ "$(realpath "${candidates[$i]}" 2>/dev/null || echo "${candidates[$i]}")" = "$(realpath "$DEFAULT_LLAMACPP_DIR" 2>/dev/null || echo "$DEFAULT_LLAMACPP_DIR")" ] && mainline_sel=$((i+1))
     done
+    [ "$default_sel" -eq 0 ] && default_sel=$mainline_sel
+    [ "$default_sel" -eq 0 ] && default_sel=1
 
     if [ ${#candidates[@]} -eq 1 ]; then
         LLAMACPP_DIR="${candidates[0]}"
@@ -260,7 +283,8 @@ else
         echo "🔍 Available llama.cpp source trees:"
         for i in "${!candidates[@]}"; do
             label=""
-            [ "${candidates[$i]}" = "$DEFAULT_LLAMACPP_DIR" ] && label="$label (default)"
+            is_llama_hdd_src "${candidates[$i]}" && label="$label [llama-hdd]"
+            [ $((i+1)) -eq "$default_sel" ] && label="$label (default)"
             if [ -d "${candidates[$i]}/.git" ]; then
                 branch=$(git -C "${candidates[$i]}" branch --show-current 2>/dev/null || true)
                 [ -n "$branch" ] && label="$label [$branch]"
