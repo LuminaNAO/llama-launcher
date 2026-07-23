@@ -905,6 +905,11 @@ load_tune() {
         echo "❌ Invalid tune file: $(basename "$file") (kind must be llama-launcher-tune)"
         exit 1
     fi
+    # backend affinity is strictly per-tune: most tunes are hardware-agnostic
+    # and must not inherit a RECOMMENDED_BACKEND loaded earlier in the session
+    # (load_tune only overwrites declared keys, and the tune writer persists
+    # any non-empty variable)
+    RECOMMENDED_BACKEND=""
     for key in "${TUNE_KEYS[@]}"; do
         value="$(tune_setting "$file" "$key")"
         if [ -n "$value" ]; then
