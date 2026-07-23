@@ -856,6 +856,7 @@ TUNE_KEYS=(
     REASONING REASONING_BUDGET
     REPEAT_PENALTY REPEAT_LAST_N PRESENCE_PENALTY FREQUENCY_PENALTY
     DRY_MULTIPLIER DRY_BASE DRY_ALLOWED_LENGTH DRY_PENALTY_LAST_N
+    RECOMMENDED_BACKEND
     EXTRA_ARGS
 )
 
@@ -1740,6 +1741,22 @@ if [ "${SLOT_SAVE_MAX_CHECKPOINTS:-0}" -gt 0 ] 2>/dev/null; then
 fi
 # Same guard for the other cache/checkpoint flags (missing from vanilla
 # llama.cpp and pre-sidecar llama-hdd builds).
+# A tune can declare the backend it was tuned for (RECOMMENDED_BACKEND:
+# vulkan|hip|cuda|cpu). Warn when the resolved build lacks that backend's
+# ggml library so a tune expecting e.g. -dev Vulkan0 isn't silently run on
+# a HIP-only build with different performance characteristics.
+if [ -n "${RECOMMENDED_BACKEND:-}" ] && [ "${RECOMMENDED_BACKEND,,}" != "cpu" ]; then
+    rb="${RECOMMENDED_BACKEND,,}"
+    case "$rb" in
+        rocm) rb="hip" ;;
+    esac
+    if ! ls "$BUILD_DIR"/bin/libggml-"$rb".so* "$BUILD_DIR"/lib/libggml-"$rb".so* >/dev/null 2>&1; then
+        echo "⚠️  This tune recommends the '$RECOMMENDED_BACKEND' backend, but build '$BUILD_TYPE'"
+        echo "   has no libggml-$rb — it will run on whatever backends '$BUILD_TYPE' provides."
+        echo "   Performance and tune EXTRA_ARGS device selections may not apply."
+    fi
+fi
+
 CACHE_RAM_FLAG=""
 if server_supports_flag "--cache-ram"; then
     CACHE_RAM_FLAG="--cache-ram $CACHE_RAM"

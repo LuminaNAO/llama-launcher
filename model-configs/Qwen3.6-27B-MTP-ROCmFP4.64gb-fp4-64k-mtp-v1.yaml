@@ -1,0 +1,53 @@
+kind: llama-launcher-tune
+version: 1
+name: "64gb-fp4-64k-mtp-v1"
+model: "Qwen3"
+metadata:
+  shareable: false
+  notes: |-
+    Tune: 64gb-fp4-64k-mtp-v1
+    Per-model config for: Qwen3.6-27B-MTP quantized to ROCmFP4
+    (plunderstruck/Qwen3.6-27B-MTP-ROCmFP4-GGUF, STRIX imatrix embF16 headQ6,
+    ~4.82 bpw, 16.9 GB).
+    REQUIRES the rocmfpx build flavor (--build rocmfpx): the custom
+    q4_0_rocmfp4 tensor types do not load in stock llama.cpp or llama-hdd.
+    The rocmfpx build carries the llama-hdd slot sidecar graft (LSCKPT3):
+    slot saves persist checkpoints + MTP speculative state + draft-context
+    state, so --hdd-cache session restores survive server restarts and MTP
+    continues via full-prefix extension.
+    Target: Strix Halo / AMD Ryzen AI Max+ 395 - 64 GB unified memory.
+    Backend: Vulkan device (beats HIP on this format/hardware, ~+1.7x
+    prefill per upstream quant card); build still links both.
+    Context: 65536 (f16 KV; hybrid SSM keeps attention KV small). The model
+    supports 262K but 64 GB boxes should stay at 64K alongside checkpoints.
+    Checkpoint cadence: rocmfpx uses --checkpoint-every-n-tokens (-cpent)
+    instead of llama-hdd's --checkpoint-min-step; the launcher drops the
+    unknown flag and EXTRA_ARGS carries -cpent 2048 instead.
+    Measured on this box (2026-07-23): ~31-33 t/s decode short ctx,
+    ~30 t/s at 45K ctx, MTP draft acceptance 0.6-0.9, slot save ~2 s,
+    restore ~0.7 s incl. sidecar (4.4K-token session, sidecar ~505 MB).
+    Multi-turn cache reuse REQUIRES clients to echo reasoning_content and
+    NOT use inline <|think_off|> (template renders think-off turns
+    differently on replay, breaking MTP's strict full-prefix match).
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "f16"
+  CACHE_TYPE_V: "f16"
+  CHECKPOINT_MAX: "32"
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "65536"
+  EXTRA_ARGS: "-dev Vulkan0 -cpent 2048 -b 2048 -ub 256 --spec-type draft-mtp --spec-draft-device Vulkan0 --spec-draft-ngl all --spec-draft-type-k f16 --spec-draft-type-v f16 --spec-draft-n-max 5 --spec-draft-n-min 0 --spec-draft-p-min 0.0 --spec-draft-p-split 0.10 --chat-template-file /usr/local/share/llama.cpp/models/Qwen3.6-27B-MTP-ROCmFP4/chat_template.jinja --reasoning-format deepseek --chat-template-kwargs {\"preserve_thinking\":true}"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

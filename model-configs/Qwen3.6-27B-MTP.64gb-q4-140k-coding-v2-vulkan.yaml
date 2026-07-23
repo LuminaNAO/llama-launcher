@@ -1,0 +1,90 @@
+kind: llama-launcher-tune
+version: 1
+name: "64gb-q4-140k-coding-v2-vulkan"
+model: "Qwen3"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 64gb-q4-140k-coding-v2-vulkan
+    v2: draft depth raised to n-max 5 (acceptance 0.73-0.88 was capped at
+    mean len ~2.5 by n-max 2) and decode moved to the Vulkan backend
+    (-dev Vulkan0), which beats HIP on Strix Halo for this model family.
+    Requires a llama-hdd build with GGML_VULKAN=ON (rebuilt 2026-07-23).
+    Uses the upstream b9394+ checkpoint mechanic. Checkpoints land at
+    chat-template user-message boundaries, gated by
+    checkpoint coverage enabled by default for agent prompts that diverge
+    mid-prompt.
+    Sizing for 143360 ctx / 64 checkpoints:
+    uniform spacing = 143360 / 64 = 2240 → round to CHECKPOINT_MIN_STEP=2048
+    ceiling at min-step 2048: ~70 max checkpoints; LRU drops ~6 oldest at the
+    context head (rewinding that far is unrealistic).
+    Disk sidecar sizing: actual count is bounded by user-turn density
+    (one checkpoint per turn boundary, min 2048 tokens apart). For a 95k coding
+    session with ~20 user turns, expect ~20 checkpoints, so sidecar size is
+    roughly ~5 GB per saved prompt. Measure after first run.
+    Per-model config for: Qwen3.6-27B-MTP (hybrid Gated-DeltaNet + Gated-Attention,
+    trained with multi-token prediction). Tuned for coding / agentic tasks.
+    Source: https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF
+    Target: Strix Halo / AMD Ryzen AI Max+ 395 - 64 GB unified memory
+    Backend: rocm or vulkan mainline with MTP enabled by runtime flags
+    Memory model: keep GGUF weights file-backed so the kernel can page/cache them
+    instead of forcing a full anonymous host copy alongside GPU-visible
+    allocations. CHECKPOINT_MAX=64 bounds full-140k checkpoint worst case to
+    ~19.5 GB. MIN_FREE_GB / MAX_TOTAL_SLOTS_GB bound disk slot-cache growth
+    across model slot directories.
+    Corrected worst-case RAM budget at 143360 ctx, q4_0 KV with rotor:
+    Baseline model/runtime from v3 estimate:       ~21.6 GB
+    ROCm/driver/kernel/accounting margin:           ~4.0 GB
+    Active-slot checkpoints:
+    64 x ~305 MB at full 140k context:           ~19.5 GB
+    Corrected worst case target:                   ~45.1 GB
+    This leaves about 7 GB below the 52 GB operational target and about 19 GB
+    below physical 64 GB for OpenClaw, proxy, OS, filesystem cache, and variance.
+    If this still swaps on this machine, reduce CHECKPOINT_MAX to 48 before
+    reducing context.
+    Context rationale: CONTEXT=143360 (140k) keeps enough room for observed ~95k
+    coding prompts while avoiding the 262k KV allocation.
+    Per-checkpoint size scales with position (~150 MB at pos 0, ~305 MB at
+    pos 140k, slope ~1.1 MB per 1k pos; empirical measurement).
+    Disk sidecar sizing (per saved prompt, in the configured HDD cache slot directory):
+    .bin (active state @ 95k):               ~175 MB
+    .bin.ckpt (~20 checkpoints @ ~250 MB):  ~5 GB
+    So each saved prompt is roughly 5 GB on disk for typical 95k sessions.
+    q4_0 K/V with rotor activation rotation (auto-engaged: head_dim=256).
+    No CACHE_RAM: disk-backed slot cache is the source of truth for prompt
+    switching. This is intentional for 64 GB systems.
+    The launcher namespaces this by model basename before passing
+    See header for full rationale. 143360 / 64 = 2240 → CHECKPOINT_MIN_STEP=2048.
+    Keep mmap enabled. On unified-memory ROCm, --no-mmap caused anonymous host
+    copies to compete with GPU-visible allocations from the same physical pool.
+    JINJA=1 (launcher default) is needed for Qwen3's chat template / tool calls.
+    Reasoning=auto picks up the thinking block from the embedded template.
+    n-max=2 matches the current Qwen3.6 MTP configs.
+settings:
+  RECOMMENDED_BACKEND: "vulkan"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "64"
+  CHECKPOINT_MIN_STEP: "2048"
+  # llama-hdd only: thin slot-save sidecars to <=10 checkpoints (geometric
+  # spacing from the tail, earliest kept for post-compaction resume). Cuts
+  # high-context save/restore IO ~5x; in-RAM checkpoints stay at CHECKPOINT_MAX.
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "143360"
+  DIO: "1"
+  EXTRA_ARGS: "-dev Vulkan0 --spec-type draft-mtp --spec-draft-n-max 5 --spec-draft-device Vulkan0 --spec-draft-ngl all"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "99"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"
