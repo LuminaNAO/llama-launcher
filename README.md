@@ -147,7 +147,11 @@ See `utils/BENCHMARK-RESULTS.md` for recorded results.
 
 ## License
 
-AGPL-3.0-only. llama.cpp / llama-hdd remain MIT-licensed upstream projects; this repository's scripts and proxies are AGPL.
+Copyright (C) 2026 Lumina Nao.
+
+This program is licensed under the GNU Affero General Public License, version 3 **only** (AGPL-3.0-only), as published by the Free Software Foundation. See [LICENSE](LICENSE) for the full text.
+
+llama.cpp / llama-hdd remain MIT-licensed upstream projects; this repository's scripts and proxies are AGPL.
 
 ## GPG Signature
 
