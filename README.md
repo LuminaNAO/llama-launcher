@@ -147,7 +147,7 @@ See `utils/BENCHMARK-RESULTS.md` for recorded results.
 
 ## License
 
-MIT (same as llama.cpp).
+AGPL-3.0-only. llama.cpp / llama-hdd remain MIT-licensed upstream projects; this repository's scripts and proxies are AGPL.
 
 ## GPG Signature
 
