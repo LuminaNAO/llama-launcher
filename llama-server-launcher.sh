@@ -1755,7 +1755,11 @@ if [ -n "${RECOMMENDED_BACKEND:-}" ] && [ "${RECOMMENDED_BACKEND,,}" != "cpu" ];
     case "$rb" in
         rocm) rb="hip" ;;
     esac
-    if ! ls "$BUILD_DIR"/bin/libggml-"$rb".so* "$BUILD_DIR"/lib/libggml-"$rb".so* >/dev/null 2>&1; then
+    # Probe bin/ and lib/ separately: ls exits nonzero if ANY argument is an
+    # unmatched glob, so one combined call false-flags builds that keep their
+    # libs in only one of the two dirs.
+    if ! ls "$BUILD_DIR"/bin/libggml-"$rb".so* >/dev/null 2>&1 && \
+       ! ls "$BUILD_DIR"/lib/libggml-"$rb".so* >/dev/null 2>&1; then
         echo "⚠️  This tune recommends the '$RECOMMENDED_BACKEND' backend, but build '$BUILD_TYPE'"
         echo "   has no libggml-$rb — it will run on whatever backends '$BUILD_TYPE' provides."
         echo "   Performance and tune EXTRA_ARGS device selections may not apply."
