@@ -76,6 +76,8 @@ settings:
   DIO: "1"
   EXTRA_ARGS: "-dev Vulkan0 --spec-type draft-mtp --spec-draft-n-max 5 --spec-draft-device Vulkan0 --spec-draft-ngl all"
   FLASH_ATTN: "1"
+  # hdd cache on by default (launcher fills in the machine's default slots dir)
+  HDD_CACHE: "1"
   HOST: "0.0.0.0"
   KV_UNIFIED: "1"
   MAX_TOTAL_SLOTS_GB: "180"

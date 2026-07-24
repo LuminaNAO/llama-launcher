@@ -847,7 +847,7 @@ TUNE_KEYS=(
     CONTEXT PARALLEL
     CACHE_RAM CACHE_TYPE_K CACHE_TYPE_V KV_UNIFIED
     SLOT_SAVE_PATH MIN_FREE_GB MAX_TOTAL_SLOTS_GB
-    CHECKPOINT_MIN_STEP CHECKPOINT_MAX SLOT_SAVE_MAX_CHECKPOINTS
+    CHECKPOINT_MIN_STEP CHECKPOINT_MAX SLOT_SAVE_MAX_CHECKPOINTS HDD_CACHE
     NGL FLASH_ATTN
     TEMP TOP_P TOP_K
     HOST PORT API_KEY TIMEOUT THREADS
@@ -905,11 +905,12 @@ load_tune() {
         echo "❌ Invalid tune file: $(basename "$file") (kind must be llama-launcher-tune)"
         exit 1
     fi
-    # backend affinity is strictly per-tune: most tunes are hardware-agnostic
-    # and must not inherit a RECOMMENDED_BACKEND loaded earlier in the session
-    # (load_tune only overwrites declared keys, and the tune writer persists
-    # any non-empty variable)
+    # backend affinity and hdd-cache preference are strictly per-tune: most
+    # tunes are hardware-agnostic and must not inherit a RECOMMENDED_BACKEND
+    # or HDD_CACHE loaded earlier in the session (load_tune only overwrites
+    # declared keys, and the tune writer persists any non-empty variable)
     RECOMMENDED_BACKEND=""
+    HDD_CACHE=""
     for key in "${TUNE_KEYS[@]}"; do
         value="$(tune_setting "$file" "$key")"
         if [ -n "$value" ]; then
@@ -1613,6 +1614,17 @@ if [ -z "$_default_slot_save_path" ]; then
         _default_slot_save_path="$DEFAULT_SLOTS_DIR"
     fi
 fi
+# A tune can declare HDD_CACHE: "1" — hdd cache on by default without
+# hardcoding a machine-specific SLOT_SAVE_PATH: the default slots dir fills
+# in, so choice 1 (tune default) launches with the cache enabled.
+case "${HDD_CACHE:-}" in
+    1|[Oo][Nn]|[Yy][Ee][Ss]|[Tt][Rr][Uu][Ee])
+        if [ -z "$_tune_slot_save_path" ]; then
+            SLOT_SAVE_PATH="$_default_slot_save_path"
+            _tune_slot_save_path="$SLOT_SAVE_PATH"
+        fi
+        ;;
+esac
 
 if [ "$LOG_FLAGS_TOUCHED" -eq 0 ] && [ "$HDD_CACHE_TOUCHED" -eq 0 ]; then
     _tune_hdd_display="off"
