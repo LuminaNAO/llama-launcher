@@ -1,0 +1,62 @@
+kind: llama-launcher-tune
+version: 1
+name: "64gb-fp4-140k-mtp-v1"
+model: "Qwen3"
+metadata:
+  shareable: false
+  notes: |-
+    Tune: 64gb-fp4-140k-mtp-v1 (140K-context daily driver, from 64gb-fp4-64k-mtp-v1)
+    Per-model config for: Qwen3.6-27B-MTP quantized to ROCmFP4
+    (plunderstruck/Qwen3.6-27B-MTP-ROCmFP4-GGUF, STRIX imatrix embF16 headQ6,
+    ~4.82 bpw, 16.9 GB).
+    REQUIRES the rocmfpx build flavor (llama-rocmfpx-hdd source, e.g.
+    --build vulkan-rocmfpx-hdd): the custom q4_0_rocmfp4 tensor types do not
+    load in stock llama.cpp or llama-hdd.
+    Target: Strix Halo / AMD Ryzen AI Max+ 395 - 64 GB unified memory.
+    Backend: Vulkan device (beats HIP on this format/hardware).
+    Context: 143360 (f16 KV; hybrid SSM keeps attention KV small, ~1 GB at
+    full ctx). Model supports 262K; 64 GB boxes must not go above ~140K with
+    the checkpoint stack resident.
+    Checkpoint budget is THE memory constraint at this context: measured
+    ~182 MiB per checkpoint at 8K tokens growing ~4 MiB/1K tokens, so
+    ~700 MiB near 140K. CHECKPOINT_MAX 16 caps in-RAM checkpoints at ~11 GB
+    worst case; SLOT_SAVE_MAX_CHECKPOINTS 8 thins sidecar IO. Cadence via
+    -cpent 8192 (rocmfpx has no --checkpoint-min-step; the launcher drops
+    that flag) - larger than the 64k tune's 2048 to keep sidecar writes
+    (~0.7 GB each near full ctx) off the hot path.
+    NOT yet measured end-to-end at 143K (sizing extrapolated from the
+    2026-07-23 64K measurements: ~31-33 t/s decode short ctx, ~30 t/s at
+    45K, MTP draft acceptance 0.6-0.9). If the box OOMs near full context,
+    lower CHECKPOINT_MAX first, then CONTEXT.
+    Multi-turn cache reuse REQUIRES clients to echo reasoning_content and
+    NOT use inline <|think_off|> (template renders think-off turns
+    differently on replay, breaking MTP's strict full-prefix match).
+    --reasoning-format deepseek is llama.cpp's parser name for extracting
+    <think> blocks into reasoning_content (unrelated to DeepSeek models);
+    preserve_thinking keeps those blocks byte-identical on replay so the
+    prompt cache stays warm across session turns.
+settings:
+  RECOMMENDED_BACKEND: "vulkan"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "f16"
+  CACHE_TYPE_V: "f16"
+  CHECKPOINT_MAX: "16"
+  SLOT_SAVE_MAX_CHECKPOINTS: "8"
+  CONTEXT: "143360"
+  EXTRA_ARGS: "-dev Vulkan0 -cpent 8192 -b 2048 -ub 256 --spec-type draft-mtp --spec-draft-device Vulkan0 --spec-draft-ngl all --spec-draft-type-k f16 --spec-draft-type-v f16 --spec-draft-n-max 5 --spec-draft-n-min 0 --spec-draft-p-min 0.0 --spec-draft-p-split 0.10 --chat-template-file /usr/local/share/llama.cpp/models/Qwen3.6-27B-MTP-ROCmFP4/chat_template.jinja --reasoning-format deepseek --chat-template-kwargs {\"preserve_thinking\":true}"
+  FLASH_ATTN: "1"
+  # hdd cache on by default (launcher fills in the machine's default slots dir)
+  HDD_CACHE: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"
