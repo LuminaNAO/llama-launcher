@@ -9,6 +9,13 @@
 #   ./build-llamacpp.sh rocm-test      # -> builds/rocm-test
 #   ./build-llamacpp.sh cpu            # -> builds/cpu
 #
+# Run interactively, the script asks which server variant to build
+# (llama-hdd.cpp, llama-rocmfpx-hdd, or vanilla llama.cpp) and offers to
+# clone / paru -S whatever is missing, and to install missing build deps.
+# rocmfpx-hdd builds are staged as builds/<backend>-rocmfpx-hdd so they
+# never clobber stock backend builds. Non-interactive runs keep the silent
+# llama-hdd-first defaults.
+#
 # To build from a non-default llama.cpp source tree,
 # set LLAMACPP_SRC:
 #   LLAMACPP_SRC=/path/to/llama.cpp ./build-llamacpp.sh rocm-test
@@ -45,11 +52,24 @@ esac
 DEFAULT_LLAMACPP_DIR="$(dirname "$ROOT_DIR")/llama.cpp"
 DEFAULT_LLAMAHDD_DIR="$(dirname "$ROOT_DIR")/llama-hdd.cpp"
 
+# The llama-rocmfpx-hdd fork (ROCmFP4/MTP fork + the hdd-cache sidecar) is
+# the only tree that can load ROCmFP4-quantized models. Its ggml/rocmfpx/
+# directory is unique to it; name/remote checks cover trees without it built.
+is_rocmfpx_hdd_src() {
+    [ -d "$1/ggml/rocmfpx" ] && return 0
+    case "$(basename "$(realpath "$1" 2>/dev/null || echo "$1")")" in
+        *rocmfpx*) return 0 ;;
+    esac
+    git -C "$1" remote get-url origin 2>/dev/null | grep -q "rocmfpx"
+}
+
 # The llama-hdd fork carries the flags the launcher tunes expect (-dio,
 # --slot-save-max-checkpoints, --checkpoint-min-step); a vanilla checkout
 # builds fine but produces a server that rejects them. Match by checkout
 # name/remote first, then by an hdd-only source marker for renamed trees.
+# llama-rocmfpx-hdd trees carry those flags too, so that check must win.
 is_llama_hdd_src() {
+    is_rocmfpx_hdd_src "$1" && return 1
     case "$(basename "$(realpath "$1" 2>/dev/null || echo "$1")")" in
         *llama-hdd*) return 0 ;;
     esac
@@ -144,6 +164,24 @@ nvcc_alternate_supporting() {
 # ── Build type argument (required) ──────────────────────────────────────────
 BUILD_TYPE="${1:-}"
 GPU_ARCH_OVERRIDE="${2:-}"
+if [ -z "$BUILD_TYPE" ] && [ -t 0 ]; then
+    # No build type on an interactive run: suggest one from detected hardware.
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        suggested_type="cuda"
+    elif command -v vulkaninfo >/dev/null 2>&1 && vulkaninfo --summary 2>/dev/null | grep -q "deviceName"; then
+        suggested_type="vulkan"
+    elif command -v rocminfo >/dev/null 2>&1; then
+        suggested_type="rocm"
+    elif [ "$(uname)" = "Darwin" ]; then
+        suggested_type="metal"
+    else
+        suggested_type="cpu"
+    fi
+    echo "Build types: cpu, vulkan, rocm, cuda, metal — optionally with a -tag suffix (e.g. rocm-test)"
+    read -rp "Build type [default=$suggested_type]: " BUILD_TYPE
+    BUILD_TYPE="${BUILD_TYPE:-$suggested_type}"
+    echo ""
+fi
 if [ -z "$BUILD_TYPE" ]; then
     echo "❌ Build type required."
     echo ""
@@ -174,143 +212,259 @@ BUILD_TAG=""
 # ── Resolve llama.cpp source directory ──────────────────────────────────────
 # Priority:
 #   1. LLAMACPP_SRC env var (explicit override — non-interactive)
-#   2. Plain BUILD_TYPE (no tag) with default source present → silent default
-#      (llama-hdd sibling wins over vanilla llama.cpp when both exist)
-#   3. Otherwise interactive picker (llama-hdd default, custom-path option)
+#   2. Interactive: ask which server variant is wanted, then find a matching
+#      checkout — offering to clone (or paru -S) whatever is missing
+#   3. Non-interactive: plain BUILD_TYPE with default source present → silent
+#      default (llama-hdd sibling wins over vanilla llama.cpp when both
+#      exist), otherwise the candidate-preference order below
+cache_root="${XDG_CACHE_HOME:-$HOME/.cache}"
+
+variant_label() {
+    case "$1" in
+        vanilla)     echo "llama.cpp" ;;
+        llama-hdd)   echo "llama-hdd.cpp" ;;
+        rocmfpx-hdd) echo "llama-rocmfpx-hdd" ;;
+    esac
+}
+
+matches_variant() {
+    case "$2" in
+        llama-hdd)   is_llama_hdd_src "$1" ;;
+        rocmfpx-hdd) is_rocmfpx_hdd_src "$1" ;;
+        vanilla)     ! is_rocmfpx_hdd_src "$1" && ! is_llama_hdd_src "$1" ;;
+        *)           return 0 ;;
+    esac
+}
+
+# No checkout of the selected variant exists: walk the user through getting
+# one — paru -S for the packaged variant, otherwise a clone (preferring
+# makepkg's local mirror, falling back to a custom URL on failure).
+# On success sets RESOLVED_SRC to the new checkout path.
+resolve_variant_source() {
+    local variant="$1" canonical dest mirrors=() mirror src alt clone_ans hdd_ans
+    RESOLVED_SRC=""
+    case "$variant" in
+        vanilla)
+            canonical="https://github.com/ggml-org/llama.cpp.git"
+            dest="$HOME/code/llama.cpp"
+            ;;
+        llama-hdd)
+            canonical="https://codeberg.org/LuminaNAO/llama-hdd.cpp.git"
+            dest="$HOME/code/llama-hdd.cpp"
+            mirrors=("$cache_root/paru/clone/llama-hdd/llama-hdd" "$cache_root/yay/llama-hdd/llama-hdd")
+            ;;
+        rocmfpx-hdd)
+            canonical="${LLAMA_ROCMFPX_GIT_URL:-https://codeberg.org/LuminaNAO/llama-rocmfpx-hdd.git}"
+            dest="$HOME/code/llama-rocmfpx-hdd"
+            mirrors=("$cache_root/paru/clone/llama-rocmfpx-hdd/llama-rocmfpx-hdd" "$cache_root/yay/llama-rocmfpx-hdd/llama-rocmfpx-hdd")
+            ;;
+    esac
+    echo "ℹ️  No $(variant_label "$variant") checkout found."
+    if [ "$variant" = "llama-hdd" ] && command -v paru >/dev/null 2>&1; then
+        echo "  1) Clone the source to $dest and build here (default)"
+        echo "  2) paru -S llama-hdd — prebuilt package; llama-launcher then uses it as the 'system' build"
+        read -rp "Choice [1-2, default=1]: " hdd_ans
+        if [ "${hdd_ans:-1}" = "2" ]; then
+            if ! paru -S llama-hdd; then
+                echo "❌ paru -S llama-hdd failed"
+                return 1
+            fi
+            echo "✅ llama-hdd installed — no source build needed; pick the 'system' build in llama-launcher."
+            exit 0
+        fi
+    fi
+    src="$canonical"
+    for mirror in ${mirrors[@]+"${mirrors[@]}"}; do
+        if git -C "$mirror" rev-parse --git-dir >/dev/null 2>&1; then
+            src="$mirror"
+            break
+        fi
+    done
+    read -rp "Clone $(variant_label "$variant") from $src to $dest? [Y/n]: " clone_ans
+    [[ "$clone_ans" =~ ^[Nn] ]] && return 1
+    mkdir -p "$(dirname "$dest")"
+    if ! git clone "$src" "$dest"; then
+        echo "⚠️  Clone from $src failed (not published there yet, or no network access)."
+        read -rp "Alternate git URL (e.g. a private mirror; empty = give up): " alt
+        [ -z "$alt" ] && return 1
+        git clone "$alt" "$dest" || return 1
+        src="$alt"
+    fi
+    # Future pulls should track upstream, not a package cache path.
+    case "$src" in
+        "$cache_root"/*) git -C "$dest" remote set-url origin "$canonical" ;;
+    esac
+    RESOLVED_SRC="$dest"
+}
+
+VARIANT=""
 if [ -n "${LLAMACPP_SRC:-}" ]; then
     LLAMACPP_DIR="$LLAMACPP_SRC"
-elif [ -z "$BUILD_TAG" ] && [ -f "$DEFAULT_LLAMAHDD_DIR/CMakeLists.txt" ]; then
-    LLAMACPP_DIR="$DEFAULT_LLAMAHDD_DIR"
-elif [ -z "$BUILD_TAG" ] && [ -f "$DEFAULT_LLAMACPP_DIR/CMakeLists.txt" ]; then
-    LLAMACPP_DIR="$DEFAULT_LLAMACPP_DIR"
 else
-    # Discover candidate llama.cpp source trees near the helper or, for
-    # packaged installs, near normal user checkout locations.
-    # Patterns covered:
-    #   ~/code/llama.cpp            (default sibling)
-    #   ~/code/llama.cpp-*          (suffix style, e.g. llama.cpp-v4flash)
-    #   ~/code/llama*/llama.cpp     (nested style, e.g. llama-mtp/llama.cpp)
-    #   ~/code/llama*               (flat style, e.g. llama-mtp/ with CMakeLists at root)
-    #   ~/.cache/paru/clone/llama-hdd/src/llama-hdd
-    #   ~/.cache/yay/llama-hdd/src/llama-hdd
-    search_roots=()
-    if [ "$PACKAGED_INSTALL" -eq 1 ]; then
-        cache_root="${XDG_CACHE_HOME:-$HOME/.cache}"
-        search_roots+=(
-            "$PWD"
-            "$(dirname "$PWD")"
-            "$HOME/code"
-            "$HOME/src"
-            "$HOME"
-            "$cache_root/paru/clone/llama-hdd/src"
-            "$cache_root/yay/llama-hdd/src"
-        )
-    else
-        search_roots+=("$(dirname "$ROOT_DIR")")
-    fi
-    parent_dir="${search_roots[0]}"
-    candidates=()
-    for root in "${search_roots[@]}"; do
-        [ -d "$root" ] || continue
-        for c in "$root" "$root"/llama.cpp "$root"/llama.cpp-* "$root"/llama-hdd.cpp "$root"/llama*/llama.cpp "$root"/llama*; do
-            [ -f "$c/CMakeLists.txt" ] || continue
-            # Deduplicate (a glob can hit the same path twice)
-            c_real="$(realpath "$c" 2>/dev/null || echo "$c")"
-            seen=0
-            for s in "${candidates[@]}"; do
-                [ "$(realpath "$s" 2>/dev/null || echo "$s")" = "$c_real" ] && { seen=1; break; }
-            done
-            [ "$seen" -eq 1 ] && continue
-            candidates+=("$c")
-        done
-    done
-
-    # Packaged install with no source anywhere (e.g. paru cleaned its src/
-    # dir): offer to clone llama-hdd, preferring makepkg's local mirror.
-    if [ ${#candidates[@]} -eq 0 ] && [ "$PACKAGED_INSTALL" -eq 1 ] && [ -t 0 ]; then
-        clone_dest="$HOME/code/llama-hdd.cpp"
-        clone_upstream="https://codeberg.org/LuminaNAO/llama-hdd.cpp.git"
-        clone_src="$clone_upstream"
-        for mirror in "$cache_root/paru/clone/llama-hdd/llama-hdd" "$cache_root/yay/llama-hdd/llama-hdd"; do
-            if git -C "$mirror" rev-parse --git-dir >/dev/null 2>&1; then
-                clone_src="$mirror"
-                break
-            fi
-        done
-        echo "ℹ️  No llama.cpp source trees found (looked in: ${search_roots[*]})"
-        read -rp "Clone llama-hdd source from $clone_src to $clone_dest? [Y/n]: " clone_ans
-        if [[ ! "$clone_ans" =~ ^[Nn] ]]; then
-            mkdir -p "$(dirname "$clone_dest")"
-            if git clone "$clone_src" "$clone_dest"; then
-                # Future pulls should track upstream, not a package cache path.
-                git -C "$clone_dest" remote set-url origin "$clone_upstream"
-                candidates+=("$clone_dest")
-            fi
-        fi
-    fi
-
-    if [ ${#candidates[@]} -eq 0 ]; then
-        echo "❌ No llama.cpp source trees found."
-        if [ "$PACKAGED_INSTALL" -eq 1 ]; then
-            echo "   Looked in: ${search_roots[*]}"
-            echo "   Either clone one (e.g. git clone https://github.com/ggml-org/llama.cpp.git ~/code/llama.cpp)"
-        else
-            echo "   Looked near: $parent_dir"
-            echo "   Either clone one (e.g. git clone https://github.com/ggml-org/llama.cpp.git $DEFAULT_LLAMACPP_DIR)"
-        fi
-        echo "   or set LLAMACPP_SRC=/path/to/llama.cpp"
-        exit 1
-    fi
-
-    # Smart default: prefer an llama-hdd tree over vanilla llama.cpp — a
-    # vanilla build yields a server that rejects the launcher's hdd flags
-    # (-dio, slot-save checkpoints). Fall back to the mainline sibling
-    # checkout, then the first candidate found.
-    default_sel=0
-    mainline_sel=0
-    for i in "${!candidates[@]}"; do
-        if [ "$default_sel" -eq 0 ] && is_llama_hdd_src "${candidates[$i]}"; then
-            default_sel=$((i+1))
-        fi
-        [ "$mainline_sel" -eq 0 ] && [ "$(realpath "${candidates[$i]}" 2>/dev/null || echo "${candidates[$i]}")" = "$(realpath "$DEFAULT_LLAMACPP_DIR" 2>/dev/null || echo "$DEFAULT_LLAMACPP_DIR")" ] && mainline_sel=$((i+1))
-    done
-    [ "$default_sel" -eq 0 ] && default_sel=$mainline_sel
-    [ "$default_sel" -eq 0 ] && default_sel=1
-
-    if [ ${#candidates[@]} -eq 1 ]; then
-        LLAMACPP_DIR="${candidates[0]}"
-    else
-        echo "🔍 Available llama.cpp source trees:"
-        for i in "${!candidates[@]}"; do
-            label=""
-            is_llama_hdd_src "${candidates[$i]}" && label="$label [llama-hdd]"
-            [ $((i+1)) -eq "$default_sel" ] && label="$label (default)"
-            if [ -d "${candidates[$i]}/.git" ]; then
-                branch=$(git -C "${candidates[$i]}" branch --show-current 2>/dev/null || true)
-                [ -n "$branch" ] && label="$label [$branch]"
-            fi
-            printf "  %d) %s%s\n" $((i+1)) "${candidates[$i]}" "$label"
-        done
-        echo "  c) Custom path"
+    if [ -t 0 ]; then
+        echo "Which llama-server variant do you want to build?"
+        echo "  1) llama-hdd.cpp       — llama.cpp + persistent HDD prompt-cache (launcher default)"
+        echo "  2) llama-rocmfpx-hdd   — ROCmFP4/MTP fork + HDD cache (required for ROCmFP4 models)"
+        echo "  3) llama.cpp           — vanilla upstream (its server rejects the launcher's hdd-cache flags)"
+        read -rp "Select variant [1-3, default=1]: " variant_sel
+        case "${variant_sel:-1}" in
+            1) VARIANT="llama-hdd" ;;
+            2) VARIANT="rocmfpx-hdd" ;;
+            3) VARIANT="vanilla" ;;
+            *) echo "❌ Invalid selection: $variant_sel"; exit 1 ;;
+        esac
         echo ""
+    fi
 
-        if [ ! -t 0 ]; then
-            LLAMACPP_DIR="${candidates[$((default_sel-1))]}"
-            echo "ℹ️  Non-interactive input; using default source: $LLAMACPP_DIR"
+    if [ -z "$VARIANT" ] && [ -z "$BUILD_TAG" ] && [ -f "$DEFAULT_LLAMAHDD_DIR/CMakeLists.txt" ]; then
+        LLAMACPP_DIR="$DEFAULT_LLAMAHDD_DIR"
+    elif [ -z "$VARIANT" ] && [ -z "$BUILD_TAG" ] && [ -f "$DEFAULT_LLAMACPP_DIR/CMakeLists.txt" ]; then
+        LLAMACPP_DIR="$DEFAULT_LLAMACPP_DIR"
+    else
+        # Discover candidate llama.cpp source trees near the helper or, for
+        # packaged installs, near normal user checkout locations.
+        # Patterns covered:
+        #   ~/code/llama.cpp            (default sibling)
+        #   ~/code/llama.cpp-*          (suffix style, e.g. llama.cpp-v4flash)
+        #   ~/code/llama*/llama.cpp     (nested style, e.g. llama-mtp/llama.cpp)
+        #   ~/code/llama*               (flat style, e.g. llama-mtp/ with CMakeLists at root)
+        #   ~/.cache/{paru,yay} makepkg src dirs for llama-hdd / llama-rocmfpx-hdd
+        search_roots=()
+        if [ "$PACKAGED_INSTALL" -eq 1 ]; then
+            search_roots+=(
+                "$PWD"
+                "$(dirname "$PWD")"
+                "$HOME/code"
+                "$HOME/src"
+                "$HOME"
+                "$cache_root/paru/clone/llama-hdd/src"
+                "$cache_root/yay/llama-hdd/src"
+                "$cache_root/paru/clone/llama-rocmfpx-hdd/src"
+                "$cache_root/yay/llama-rocmfpx-hdd/src"
+            )
         else
-            read -rp "Select source [1-${#candidates[@]}, c=custom, default=$default_sel]: " src_sel
-            src_sel="${src_sel:-$default_sel}"
-            if [[ "$src_sel" == "c" || "$src_sel" == "C" ]]; then
-                read -rp "Enter llama.cpp source path: " LLAMACPP_DIR
-            elif [[ "$src_sel" =~ ^[0-9]+$ ]] && [ "$src_sel" -ge 1 ] && [ "$src_sel" -le ${#candidates[@]} ]; then
-                LLAMACPP_DIR="${candidates[$((src_sel-1))]}"
+            search_roots+=("$(dirname "$ROOT_DIR")")
+        fi
+        parent_dir="${search_roots[0]}"
+        candidates=()
+        for root in "${search_roots[@]}"; do
+            [ -d "$root" ] || continue
+            for c in "$root" "$root"/llama.cpp "$root"/llama.cpp-* "$root"/llama-hdd.cpp "$root"/llama*/llama.cpp "$root"/llama*; do
+                [ -f "$c/CMakeLists.txt" ] || continue
+                # Deduplicate (a glob can hit the same path twice)
+                c_real="$(realpath "$c" 2>/dev/null || echo "$c")"
+                seen=0
+                for s in "${candidates[@]}"; do
+                    [ "$(realpath "$s" 2>/dev/null || echo "$s")" = "$c_real" ] && { seen=1; break; }
+                done
+                [ "$seen" -eq 1 ] && continue
+                candidates+=("$c")
+            done
+        done
+
+        # A chosen variant only accepts matching trees — a stock llama-hdd
+        # checkout must never silently satisfy a rocmfpx-hdd build (it would
+        # compile fine and then fail at model load on the FP4 tensor types).
+        if [ -n "$VARIANT" ]; then
+            filtered=()
+            for c in "${candidates[@]}"; do
+                matches_variant "$c" "$VARIANT" && filtered+=("$c")
+            done
+            candidates=(${filtered[@]+"${filtered[@]}"})
+        fi
+
+        if [ ${#candidates[@]} -eq 0 ] && [ -t 0 ]; then
+            if resolve_variant_source "${VARIANT:-llama-hdd}"; then
+                candidates+=("$RESOLVED_SRC")
+            fi
+        fi
+
+        if [ ${#candidates[@]} -eq 0 ]; then
+            echo "❌ No ${VARIANT:+$(variant_label "$VARIANT") }source trees found."
+            if [ "$PACKAGED_INSTALL" -eq 1 ]; then
+                echo "   Looked in: ${search_roots[*]}"
+                echo "   Either clone one (e.g. git clone https://github.com/ggml-org/llama.cpp.git ~/code/llama.cpp)"
             else
-                echo "❌ Invalid selection: $src_sel"
-                exit 1
+                echo "   Looked near: $parent_dir"
+                echo "   Either clone one (e.g. git clone https://github.com/ggml-org/llama.cpp.git $DEFAULT_LLAMACPP_DIR)"
+            fi
+            echo "   or set LLAMACPP_SRC=/path/to/llama.cpp"
+            exit 1
+        fi
+
+        # Smart default: prefer an llama-hdd tree over vanilla llama.cpp — a
+        # vanilla build yields a server that rejects the launcher's hdd flags
+        # (-dio, slot-save checkpoints). Fall back to the mainline sibling
+        # checkout, then the first candidate found. (With a chosen variant the
+        # list is already filtered, so the first match is the default.)
+        default_sel=0
+        mainline_sel=0
+        for i in "${!candidates[@]}"; do
+            if [ "$default_sel" -eq 0 ] && is_llama_hdd_src "${candidates[$i]}"; then
+                default_sel=$((i+1))
+            fi
+            [ "$mainline_sel" -eq 0 ] && [ "$(realpath "${candidates[$i]}" 2>/dev/null || echo "${candidates[$i]}")" = "$(realpath "$DEFAULT_LLAMACPP_DIR" 2>/dev/null || echo "$DEFAULT_LLAMACPP_DIR")" ] && mainline_sel=$((i+1))
+        done
+        [ "$default_sel" -eq 0 ] && default_sel=$mainline_sel
+        [ "$default_sel" -eq 0 ] && default_sel=1
+
+        if [ ${#candidates[@]} -eq 1 ]; then
+            LLAMACPP_DIR="${candidates[0]}"
+        else
+            echo "🔍 Available llama.cpp source trees:"
+            for i in "${!candidates[@]}"; do
+                label=""
+                if is_rocmfpx_hdd_src "${candidates[$i]}"; then
+                    label="$label [llama-rocmfpx-hdd]"
+                elif is_llama_hdd_src "${candidates[$i]}"; then
+                    label="$label [llama-hdd]"
+                fi
+                [ $((i+1)) -eq "$default_sel" ] && label="$label (default)"
+                if [ -d "${candidates[$i]}/.git" ]; then
+                    branch=$(git -C "${candidates[$i]}" branch --show-current 2>/dev/null || true)
+                    [ -n "$branch" ] && label="$label [$branch]"
+                fi
+                printf "  %d) %s%s\n" $((i+1)) "${candidates[$i]}" "$label"
+            done
+            echo "  c) Custom path"
+            echo ""
+
+            if [ ! -t 0 ]; then
+                LLAMACPP_DIR="${candidates[$((default_sel-1))]}"
+                echo "ℹ️  Non-interactive input; using default source: $LLAMACPP_DIR"
+            else
+                read -rp "Select source [1-${#candidates[@]}, c=custom, default=$default_sel]: " src_sel
+                src_sel="${src_sel:-$default_sel}"
+                if [[ "$src_sel" == "c" || "$src_sel" == "C" ]]; then
+                    read -rp "Enter llama.cpp source path: " LLAMACPP_DIR
+                elif [[ "$src_sel" =~ ^[0-9]+$ ]] && [ "$src_sel" -ge 1 ] && [ "$src_sel" -le ${#candidates[@]} ]; then
+                    LLAMACPP_DIR="${candidates[$((src_sel-1))]}"
+                else
+                    echo "❌ Invalid selection: $src_sel"
+                    exit 1
+                fi
             fi
         fi
     fi
     LLAMACPP_DIR="$(realpath "$LLAMACPP_DIR")"
+    if [ -n "$VARIANT" ] && ! matches_variant "$LLAMACPP_DIR" "$VARIANT"; then
+        echo "⚠️  $LLAMACPP_DIR does not look like a $(variant_label "$VARIANT") tree — building it anyway."
+    fi
+fi
+
+# The launcher keys runtime env (LD_LIBRARY_PATH) off the backend prefix and
+# discovers builds by directory name — give rocmfpx-hdd builds their own
+# suffixed output dir so they never clobber a stock backend build.
+if is_rocmfpx_hdd_src "$LLAMACPP_DIR"; then
+    case "$BUILD_TYPE" in
+        *rocmfpx*) ;;
+        *)
+            BUILD_TYPE="${BUILD_TYPE}-rocmfpx-hdd"
+            BUILD_TAG="${BUILD_TYPE#*-}"
+            BUILD_DIR="${LLAMA_LAUNCHER_BUILDS_DIR:-$ROOT_DIR/builds}/$BUILD_TYPE"
+            echo "ℹ️  rocmfpx-hdd source — output goes to builds/$BUILD_TYPE"
+            ;;
+    esac
 fi
 
 echo "🔍 llama.cpp source: $LLAMACPP_DIR"
@@ -448,23 +602,50 @@ if [ ${#MISSING[@]} -gt 0 ]; then
     done
     echo ""
 
-    # Detect package manager and give a one-liner
+    # Detect package manager, build the install command, and offer to run it
+    dep_cmd=""
+    dep_pkgs=""
     if command -v pacman >/dev/null 2>&1; then
-        echo "Arch/CachyOS quick install:"
+        dep_cmd="sudo pacman -S --needed"
         case "$BACKEND" in
-            cpu)    echo "  sudo pacman -S base-devel cmake pkgconf git" ;;
-            vulkan) echo "  sudo pacman -S vulkan-headers vulkan-icd-loader shaderc glslang spirv-tools spirv-headers vulkan-tools" ;;
-            rocm)   echo "  sudo pacman -S rocm-hip-sdk rocblas hipblas rocminfo" ;;
-            cuda)   echo "  sudo pacman -S cuda" ;;
+            vulkan) dep_pkgs="vulkan-headers vulkan-icd-loader shaderc glslang spirv-tools spirv-headers vulkan-tools" ;;
+            rocm)   dep_pkgs="rocm-hip-sdk rocblas hipblas rocminfo" ;;
+            cuda)   dep_pkgs="cuda" ;;
         esac
+        # Pull in the common toolchain only when one of those was missing
+        case " ${MISSING[*]} " in
+            *"cmake|"*|*"make|"*|*"gcc/g++"*|*"git|"*|*"pkg-config"*)
+                dep_pkgs="base-devel cmake pkgconf git${dep_pkgs:+ $dep_pkgs}" ;;
+        esac
+        [ -n "$dep_pkgs" ] && echo "Arch/CachyOS quick install:"
     elif command -v apt-get >/dev/null 2>&1; then
-        echo "Debian/Ubuntu quick install:"
+        dep_cmd="sudo apt-get install -y"
         case "$BACKEND" in
-            cpu)    echo "  sudo apt-get install build-essential cmake pkg-config git" ;;
-            vulkan) echo "  sudo apt-get install libvulkan-dev vulkan-tools glslc glslang-tools spirv-tools spirv-headers" ;;
-            rocm)   echo "  See https://rocm.docs.amd.com for ROCm installation" ;;
-            cuda)   echo "  sudo apt-get install nvidia-cuda-toolkit libcublas-dev" ;;
+            vulkan) dep_pkgs="libvulkan-dev vulkan-tools glslc glslang-tools spirv-tools spirv-headers" ;;
+            rocm)   echo "See https://rocm.docs.amd.com for ROCm installation" ;;
+            cuda)   dep_pkgs="nvidia-cuda-toolkit libcublas-dev" ;;
         esac
+        case " ${MISSING[*]} " in
+            *"cmake|"*|*"make|"*|*"gcc/g++"*|*"git|"*|*"pkg-config"*)
+                dep_pkgs="build-essential cmake pkg-config git${dep_pkgs:+ $dep_pkgs}" ;;
+        esac
+        [ -n "$dep_pkgs" ] && echo "Debian/Ubuntu quick install:"
+    fi
+    if [ -n "$dep_pkgs" ]; then
+        echo "  $dep_cmd $dep_pkgs"
+        echo ""
+        if [ -t 0 ]; then
+            read -rp "Run it now? [Y/n]: " dep_ans
+            if [[ ! "$dep_ans" =~ ^[Nn] ]]; then
+                # shellcheck disable=SC2086
+                if $dep_cmd $dep_pkgs; then
+                    echo "✅ Dependencies installed — re-checking..."
+                    # Re-exec with the source pinned so nothing gets re-asked.
+                    exec env LLAMACPP_SRC="$LLAMACPP_DIR" "$0" "$BUILD_TYPE" ${GPU_ARCH_OVERRIDE:+"$GPU_ARCH_OVERRIDE"}
+                fi
+                echo "❌ Package install failed — fix manually and re-run."
+            fi
+        fi
     fi
     echo ""
     exit 1
