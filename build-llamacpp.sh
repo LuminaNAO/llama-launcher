@@ -6,7 +6,7 @@
 # The optional -tag suffix selects a parallel output directory under builds/
 # so experimental variants of the same backend can coexist.
 #   ./build-llamacpp.sh rocm           # -> builds/rocm (default mainline source)
-#   ./build-llamacpp.sh rocm-test      # -> builds/rocm-test
+#   ./build-llamacpp.sh rocm-myexperiment      # -> builds/rocm-myexperiment
 #   ./build-llamacpp.sh cpu            # -> builds/cpu
 #
 # Run interactively, the script asks which server variant to build
@@ -18,7 +18,7 @@
 #
 # To build from a non-default llama.cpp source tree,
 # set LLAMACPP_SRC:
-#   LLAMACPP_SRC=/path/to/llama.cpp ./build-llamacpp.sh rocm-test
+#   LLAMACPP_SRC=/path/to/llama.cpp ./build-llamacpp.sh rocm-myexperiment
 #
 # GPU arch is auto-detected for ROCm builds but can be overridden:
 #   ./build-llamacpp.sh rocm gfx1100    # Force RX 7900 series target
@@ -177,7 +177,8 @@ if [ -z "$BUILD_TYPE" ] && [ -t 0 ]; then
     else
         suggested_type="cpu"
     fi
-    echo "Build types: cpu, vulkan, rocm, cuda, metal — optionally with a -tag suffix (e.g. rocm-test)"
+    echo "Build types: cpu, vulkan, rocm, cuda, metal"
+    echo "(add your own -<tag> suffix for a parallel output dir, e.g. rocm-myexperiment -> builds/rocm-myexperiment)"
     read -rp "Build type [default=$suggested_type]: " BUILD_TYPE
     BUILD_TYPE="${BUILD_TYPE:-$suggested_type}"
     echo ""
@@ -196,12 +197,12 @@ if [ -z "$BUILD_TYPE" ]; then
     echo "  ./build-llamacpp.sh cuda            # CUDA backend (auto-detect NVIDIA GPU)"
     echo "  ./build-llamacpp.sh cuda 89         # CUDA for Ada Lovelace (RTX 4090)"
     echo "  ./build-llamacpp.sh metal           # Metal backend (macOS / Apple Silicon)"
-    echo "  ./build-llamacpp.sh rocm-test       # Tagged ROCm build"
+    echo "  ./build-llamacpp.sh rocm-myexperiment  # your own tagged build -> builds/rocm-myexperiment"
     exit 1
 fi
 
 BUILD_DIR="${LLAMA_LAUNCHER_BUILDS_DIR:-$ROOT_DIR/builds}/$BUILD_TYPE"
-# Backend = prefix before the first dash, so e.g. "rocm-test" uses the rocm
+# Backend = prefix before the first dash, so e.g. "rocm-myexperiment" uses the rocm
 # toolchain/cmake flags but lands in a separate output dir.
 BACKEND="${BUILD_TYPE%%-*}"
 # Tag = the rest after the first dash, empty if none. Tags select separate
@@ -587,7 +588,7 @@ case "$BACKEND" in
         echo "  ./build-llamacpp.sh vulkan    # Recommended for Strix Halo / RDNA 3.5"
         echo "  ./build-llamacpp.sh rocm      # ROCm/HIP backend"
         echo "  ./build-llamacpp.sh cuda      # NVIDIA CUDA backend"
-        echo "  LLAMACPP_SRC=/path/to/llama.cpp ./build-llamacpp.sh rocm-test      # alternate source"
+        echo "  LLAMACPP_SRC=/path/to/llama.cpp ./build-llamacpp.sh rocm-myexperiment      # alternate source"
         exit 1
         ;;
 esac

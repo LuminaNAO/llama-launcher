@@ -1388,7 +1388,7 @@ fi
 echo ""
 
 # ── Backend environment ──────────────────────────────────────────────────────
-# Match on the backend prefix so tagged builds (e.g. "rocm-test", "vulkan-v4")
+# Match on the backend prefix so tagged builds (e.g. "vulkan-rocmfpx-hdd")
 # inherit the same env setup as their backend.
 case "${BUILD_TYPE%%-*}" in
     rocm)
