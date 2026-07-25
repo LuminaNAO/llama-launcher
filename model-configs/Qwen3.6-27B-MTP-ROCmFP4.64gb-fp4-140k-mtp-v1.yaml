@@ -11,7 +11,12 @@ metadata:
     ~4.82 bpw, 16.9 GB).
     REQUIRES the rocmfpx build flavor (llama-rocmfpx-hdd source, e.g.
     --build vulkan-rocmfpx-hdd): the custom q4_0_rocmfp4 tensor types do not
-    load in stock llama.cpp or llama-hdd.
+    load in stock llama.cpp or llama-hdd. Build it with `llama-build` (which
+    delegates to the fork's tuned build script) or the fork's
+    scripts/build-strix-rocmfp4-mtp.sh directly — a plain cmake -DGGML_VULKAN
+    build decodes at ~half speed (missing the ROCmFP4 HIP decode-tune defines).
+    Measured this build: ~30 t/s steady decode, ~40 t/s peak on high MTP
+    draft acceptance, short ctx.
     Target: Strix Halo / AMD Ryzen AI Max+ 395 - 64 GB unified memory.
     Backend: Vulkan device (beats HIP on this format/hardware).
     Context: 143360 (f16 KV; hybrid SSM keeps attention KV small, ~1 GB at
