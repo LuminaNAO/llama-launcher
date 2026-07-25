@@ -485,6 +485,41 @@ if [ ! -f "$LLAMACPP_DIR/CMakeLists.txt" ]; then
     exit 1
 fi
 
+# ── rocmfpx: delegate to the fork's own build script ───────────────────────
+# The ROCmFP4 decode path is tuned by HIP-side defines (GGML_HIP_FORCE_MMQ,
+# GGML_ROCMFP4_* profiles) that the fork's build script sets and a generic
+# `cmake -DGGML_VULKAN=ON` does NOT — a generic build loads and runs but
+# decodes at roughly half speed. So build rocmfpx trees through their script.
+ROCMFPX_BUILD_SCRIPT="$LLAMACPP_DIR/scripts/build-strix-rocmfp4-mtp.sh"
+if is_rocmfpx_hdd_src "$LLAMACPP_DIR" && [ -f "$ROCMFPX_BUILD_SCRIPT" ]; then
+    echo "🧩 rocmfpx source detected — using the fork's tuned build script"
+    echo "   $ROCMFPX_BUILD_SCRIPT"
+    if ! command -v hipcc >/dev/null 2>&1 && [ ! -d /opt/rocm ]; then
+        echo "❌ rocmfpx builds need the ROCm/HIP toolchain (hipcc). Install rocm-hip-sdk (Arch)."
+        exit 1
+    fi
+    # Vendored SPIR-V headers ship with the fork; the Vulkan backend needs them
+    # on the include path when the distro package is absent.
+    if [ -d "$LLAMACPP_DIR/third_party/spirv-headers/include" ]; then
+        export CPATH="$LLAMACPP_DIR/third_party/spirv-headers/include${CPATH:+:$CPATH}"
+    fi
+    export BUILD_DIR="$BUILD_DIR"
+    export JOBS="${JOBS:-$(nproc)}"
+    # Forward an explicit GPU arch (e.g. gfx1151) when the user passed one.
+    [ -n "$GPU_ARCH_OVERRIDE" ] && export CMAKE_HIP_ARCHITECTURES="$GPU_ARCH_OVERRIDE"
+    bash "$ROCMFPX_BUILD_SCRIPT" llama-server llama-cli
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "❌ rocmfpx build script failed (exit $rc)"
+        exit "$rc"
+    fi
+    echo ""
+    echo "✅ Build complete! ($BUILD_TYPE, via fork build script)"
+    echo "   Server: $BUILD_DIR/bin/llama-server"
+    echo "   Libs: $BUILD_DIR/lib/"
+    exit 0
+fi
+
 # ── Dependency checks ──────────────────────────────────────────────────────
 MISSING=()
 
