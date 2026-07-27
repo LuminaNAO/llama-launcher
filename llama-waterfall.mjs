@@ -45,7 +45,7 @@
 //     so a tier dying during prefill/queueing fails over invisibly.
 //     Non-streaming responses are buffered in full and replay on the next
 //     tier if the upstream dies anywhere mid-body.
-//   - A pre-commit stall timeout (--stall-timeout, default 300s, 0=off)
+//   - A pre-commit stall timeout (--stall-timeout, default 600s, 0=off)
 //     catches black-holed tiers (power loss, dropped WireGuard peer — no
 //     TCP reset ever arrives): no response activity before the first body
 //     byte for that long → tier marked down, request cascades. It disarms
@@ -87,7 +87,7 @@ const cfg = {
     pollIntervalSec: 10,
     promoteAfter: 3,
     connectTimeoutMs: 2000,
-    stallTimeoutMs: 300_000,   // pre-commit only; 0 disables
+    stallTimeoutMs: 600_000,   // pre-commit only; 0 disables
     maxBodyBytes: 64 * 1024 * 1024,
 };
 

@@ -117,9 +117,12 @@ local and remote, which keeps debugging sane.
   dropped WireGuard peer — never sends a TCP reset; the request would
   just hang until the client's own timeout. If no response activity
   arrives before the first body byte for `--stall-timeout` seconds
-  (default 300, 0 = off), the tier is marked down and the request
+  (default 600, 0 = off), the tier is marked down and the request
   cascades. The timer disarms at the first forwarded byte, so long
-  generations are never cut.
+  generations are never cut. This is the *last-resort* detector only —
+  anything that produces a real signal (connect-refused, connect-timeout,
+  502/503, TCP reset, premature close) cascades immediately without
+  waiting for it.
 - **Mid-generation death cannot fail over.** Once body bytes have been
   forwarded, replaying elsewhere would restart generation and duplicate
   already-streamed tokens. The request fails (tier marked down); the
