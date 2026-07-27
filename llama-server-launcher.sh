@@ -39,8 +39,9 @@
 #   --save           Save effective launch settings as a per-model config
 #   --waterfall      Run ONLY the llama-waterfall failover proxy (no local
 #                    inference). Routes across endpoints in waterfall.conf,
-#                    fastest first. Listens on --port (default 40800).
-#                    See docs/WATERFALL.md; TUI: node llama-waterfall.mjs tui
+#                    fastest first. [agent] table on --port (default 40800),
+#                    [subagent] table on 40810.
+#                    See docs/WATERFALL.md; dashboard: llama-waterfall tui
 #
 # Subcommands:
 #   stop             Gracefully stop a running llama-server (and deep proxy)
@@ -187,8 +188,8 @@ mkdir -p "$LLAMA_LAUNCHER_DIR"
 
 # ── Waterfall-only mode: run the failover proxy, no local inference ─────────
 # Routes traffic across the endpoints in waterfall.conf (fastest first,
-# cascade on failure). See docs/WATERFALL.md. Drive it with:
-#   node llama-waterfall.mjs tui
+# cascade on failure): [agent] table on ARG_PORT, [subagent] on 40810.
+# See docs/WATERFALL.md. Drive it with: llama-waterfall tui
 if [ "${WATERFALL_MODE:-0}" -eq 1 ]; then
     exec node "$LLAMA_LAUNCHER_LIB_DIR/llama-waterfall.mjs" serve "${ARG_PORT:-40800}" \
         --config "$LLAMA_LAUNCHER_DIR/waterfall.conf" \

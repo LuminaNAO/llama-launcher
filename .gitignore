@@ -2,6 +2,7 @@
 llama.log
 llama-deep.log
 launcher-restart.log
+waterfall.log
 
 # Cache
 .cache/

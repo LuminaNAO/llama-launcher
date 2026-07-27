@@ -3,12 +3,17 @@
 # llama-waterfall — thin wrapper around llama-waterfall.mjs so the proxy is
 # invocable as a plain shell command, matching the other llama-* tools.
 #
-# Usage (all args pass straight through, see `llama-waterfall` with no args):
-#   llama-waterfall serve 40800        # run the failover proxy
-#   llama-waterfall tui                # vim-keyed dashboard
+# Usage (all args pass straight through, see `llama-waterfall --help`):
+#   llama-waterfall                    # start server if needed + open the TUI
+#                                      # (q closes what it opened, Q stops all)
+#   llama-waterfall stop               # stop the server and any attached TUIs
+#   llama-waterfall serve [port]       # run just the failover proxy
+#   llama-waterfall tui                # attach-only vim-keyed dashboard
 #   llama-waterfall status [--json]    # plus pin/disable/enable/add/remove/
-#                                      # move/edit/write/reload/test
+#                                      # move/edit/write/reload/test, each
+#                                      # accepting --table agent|subagent
 #
+# Two routing tables: [agent] on :40800 and [subagent] on :40810.
 # Full design: docs/WATERFALL.md
 
 set -euo pipefail
