@@ -1,0 +1,12 @@
+# .publishing_protocol — per-repo publishing config, read by nao-aur-publish
+# and by agents before any release work. Generic rules: PUBLISHING_PROTOCOL.md
+# in the nao-aur-publish repo.
+PUBLISH_BRANCH=master
+PKGBUILD_PATH=PKGBUILD
+AUR_PACKAGE=llama-launcher
+# NOTES:
+# - AUR is published ONLY via: nao-aur-publish llama-launcher vN
+#   Never push this repo's git history to AUR.
+# - PKGBUILD source= points at Codeberg; the vN tag must be on Codeberg
+#   before publishing (nao-aur-publish checks this).
+# - .SRCINFO is never committed here — generated at publish time.
