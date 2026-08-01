@@ -1,0 +1,65 @@
+kind: llama-launcher-tune
+version: 1
+name: "128gb-iq3xxs-262k-v1"
+model: "DeepSeek-V4-Flash-0731"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 128gb-iq3xxs-262k-v1  (DRAFT — allocations below are estimates, verify on first launch)
+    Per-model config for: DeepSeek-V4-Flash-0731-UD-IQ3_XXS (Unsloth Dynamic 3-bit, ~104 GB)
+    Target: Strix Halo / AMD Ryzen AI Max+ 395 — 128 GB unified (rocm build ONLY, see below)
+    Architecture: DeepSeek V4 Flash (deepseek4) — sparse-attention MoE
+    - 284B total params, 13B active per token, 1M ctx trained
+    - Hybrid attention: raw SWA window + CSA (4:1 compressed) + HCA (128:1 compressed)
+      + lightning indexer; dedicated llama_kv_cache_dsv4 with all four caches
+    - Speculative-decoding module (DSpark arch); llama.cpp auto-resolves a draft
+      sidecar GGUF if present next to the main model, -md overrides
+    REQUIREMENTS (llama-hdd >= build 10238 / upstream b10069+148):
+    - CACHE_TYPE_K must EQUAL CACHE_TYPE_V — enforced at load for deepseek4,
+      mismatched types abort. f16/f16 here: the dsv4 cache is so small that
+      KV quantization buys almost nothing and the arch is too new to trust it.
+    - rocm build only. Vulkan has no GGML_OP_LIGHTNING_INDEXER kernel — prefill
+      would fall back to CPU. CUDA/HIP kernel has no arch gating, gfx1151 OK.
+    - PARALLEL=1: dsv4 strict slot==position mode needs n_stream == n_seq_max.
+    HDD-CACHE NOTE: dsv4 seq_rm rejects ALL partial removals — the server cannot
+    trim a diverging tail, so every prompt-prefix reuse goes through context
+    checkpoints. Launch with --hdd-cache: the LSCKPT2 sidecar persisting those
+    checkpoints is the difference between warm restore and full re-prefill on
+    this model. Checkpoint + slot files are small (KV ~10% of V3.2 per token),
+    so --slot-save-max-checkpoints thinning is unlikely to be needed.
+    Expected allocations (262_144 ctx, 1 slot, unified KV, f16 K/V, FA on) — ESTIMATES:
+    Model weights (ROCm0):                ~106,500 MiB
+    dsv4 caches (raw SWA + CSA ctx/4 + HCA ctx/128 + indexer): ~2,000-3,000 MiB
+    FA/compute scratch @ -ub 512:           ~3,000-4,000 MiB
+    Total on-device:                      ~112-114 GB on 118 GB budget → ~4-6 GB headroom
+    Tighter than the MiniMax 128gb tune (6.9 GB). If first launch OOMs or the
+    log shows unsupported-op CPU fallbacks, drop CONTEXT to 131072 before
+    touching -ub, and bump this file to v2 — do not edit v1 in place.
+    Sampling: DeepSeek/Unsloth recommendation for agentic + coding use —
+    temp=1.0, top_p=0.95, min_p=0. "Think High" is the model default; leave
+    REASONING on with unlimited budget.
+    CACHE_RAM=0 as on all 128gb tunes (in-RAM prompt cache caused swap thrash);
+    cross-session warmth comes from the HDD slot cache. Launcher auto-namespaces
+    the slot dir per-quant: $SLOT_SAVE_PATH/DeepSeek-V4-Flash-0731-UD-IQ3_XXS/.
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "f16"
+  CACHE_TYPE_V: "f16"
+  CONTEXT: "262144"
+  DIO: "1"
+  EXTRA_ARGS: "--min-p 0.0 -ub 512 -b 2048"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  JINJA: "1"
+  KV_UNIFIED: "1"
+  NGL: "99"
+  NO_MMAP: "1"
+  PARALLEL: "1"
+  PORT: "40801"
+  REASONING: "on"
+  REASONING_BUDGET: "-1"
+  TEMP: "1.0"
+  THREADS: "32"
+  TIMEOUT: "3600"
+  TOP_P: "0.95"
