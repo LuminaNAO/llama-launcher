@@ -1,0 +1,113 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-nvfp4-262k-v1"
+model: "Qwen3"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-nvfp4-262k-v1
+    Per-model config for: llmfan46/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-
+    Preserved-NVFP4-GGUF, file NVFP4-MLP-Only-Q8_0 (19.07 GiB).
+    MLP layers at NVFP4, attention kept at Q8_0 -- the card's "Bigger Size,
+    Lower Quality Loss / Near-lossless, recommended" variant.
+    Target: RTX 5090, 32149 MiB VRAM, Blackwell sm_120, CUDA0. Host 62 GB.
+
+    THIS IS THE FASTEST CONFIG MEASURED ON THIS BOX, BY A WIDE MARGIN, AND IT
+    ALSO REACHES THE MODEL'S FULL NATIVE 262144 CONTEXT. Measured 2026-08-06
+    against the Q6_K incumbent, identical harness, q4_0 KV throughout:
+
+      llama-bench (MTP off):        NVFP4      Q6_K     delta
+        pp512 @ 0                  5165.87   3180.00   +62%
+        pp512 @ 16384              4422.33   2915.90   +52%
+        pp512 @ 65536              2052.82   1653.80   +24%
+        pp512 @ 131072             1211.57   1062.10   +14%
+        tg128 @ 0                    71.63     60.35   +19%
+        tg128 @ 16384                68.22     57.77   +18%
+        tg128 @ 65536                58.87     50.73   +16%
+        tg128 @ 131072               49.38     43.31   +14%
+
+      served @143360, MTP on:       NVFP4      Q6_K
+        VRAM                      24746 MiB  28418 MiB
+        throughput                132.66 t/s 107.80 t/s   +23%
+        draft acceptance             0.769      0.691
+
+    MTP survives the requantisation and actually drafts BETTER (0.769 vs 0.691):
+    a lighter model makes the draft step cheaper relative to verification.
+
+    Context ceiling, served with MTP:
+        c=262144                   loads, 27994 MiB (4.1 GiB free)
+        c=262144 + mmproj vision   loads, 29132 MiB (3.0 GiB free)
+    So CONTEXT is set to the model's full native 262144 WITH vision headroom --
+    something Q6_K could not do at any setting (it caps near 143360, and with
+    vision loaded had only 355 MiB spare).
+
+    !! QUALITY CAVEAT -- READ BEFORE PREFERRING THIS FOR CODING !!
+    Perplexity, wikitext-2, c=32768, 8 chunks, q4_0 KV:
+        this model   6.6573 +/- 0.046
+        Q6_K         5.7843 +/- 0.037
+    That is +15.1%, far outside the confidence intervals, i.e. a real gap and
+    not noise. BUT it is NOT a clean measurement of NVFP4 quantisation loss,
+    for two reasons:
+      1. These are DIFFERENT FINETUNES, not one model at two quants. The
+         incumbent is DavidAU Fable-Fusion-711; this is llmfan46
+         uncensored-heretic-v2. Finetune differences are folded into that number.
+      2. This model is abliterated ("heretic"/"uncensored"), and abliteration is
+         known to cost general capability. If you do not need uncensored output
+         you are paying that cost for nothing.
+    Also: wikitext perplexity is a poor proxy for coding ability specifically.
+    That comparison has since been run -- utautako/Qwen3.6-27B-NVIDIA-NVFP4-MTP-
+    Q8attn-GGUF (not abliterated, tune 32gb-cuda-5090-nvfp4nv-262k-v1) scores
+    6.3318 +/- 0.043 on the identical corpus. So dropping abliteration recovers
+    about a third of the gap to Q6_K; the remaining ~0.55 is NVFP4 quantisation
+    plus finetune differences. PREFER THE nvfp4nv TUNE OVER THIS ONE unless you
+    specifically need uncensored output: it is faster, scores better, and is not
+    paying an abliteration penalty you do not want.
+
+    Measured coding ability, however, showed NO difference: on a full-stack
+    agentic gauntlet (8 tasks, hidden test suites, agent writes + self-tests +
+    fixes) this model and Q6_K both scored 92/92 first shot. Perplexity was not
+    predictive of coding outcomes on this workload.
+
+    DRAFT DEPTH IS 5 HERE, NOT 3 -- this model's optimum genuinely differs from
+    the others. Measured, same prompt, served with MTP:
+        nmax=2  143.68 t/s  acc 0.881  mean len 2.76
+        nmax=3  165.39 t/s  acc 0.832  mean len 3.50
+        nmax=4  166.40 t/s  acc 0.733  mean len 3.93
+        nmax=5  171.91 t/s  acc 0.673  mean len 4.36   <- peak
+        nmax=6  163.81 t/s  acc 0.586  mean len 4.51
+        nmax=7  160.93 t/s  acc 0.538  mean len 4.76
+        nmax=8  140.37 t/s  acc 0.485  mean len 4.85
+    Do not assume the depth that suits one quant suits another: nvfp4nv peaks at
+    3 and regresses past it, Q8_0 cannot exceed 3 at all (it OOMs).
+
+    NEO-CODE / imatrix note: DavidAU's NEO-CODE Di-IMatrix-MAX line is the
+    coding-calibrated option, but those repos contain ZERO MTP files, so
+    choosing them costs the ~1.9x MTP speedup (~114 t/s -> ~60 t/s). No model
+    published anywhere combines imatrix/NEO-CODE calibration WITH NVFP4 and MTP.
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "16"
+  CHECKPOINT_MIN_STEP: "2048"
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "262144"
+  DIO: "1"
+  # hdd cache on by default (launcher fills in the machine's default slots dir)
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 5 -b 2048 -ub 512 --image-min-tokens 1024"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

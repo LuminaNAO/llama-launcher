@@ -1,0 +1,87 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-nvfp4nv-262k-v1"
+model: "Qwen3"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-nvfp4nv-262k-v1
+    Per-model config for: utautako/Qwen3.6-27B-NVIDIA-NVFP4-MTP-Q8attn-GGUF
+    (17.81 GiB). Derived from NVIDIA's official NVFP4 quant, MTP block preserved,
+    attention kept at Q8_0. NOT abliterated.
+    Target: RTX 5090, 32149 MiB VRAM, Blackwell sm_120, CUDA0. Host 62 GB.
+
+    FASTEST CONFIG MEASURED ON THIS BOX. All figures 2026-08-06, q4_0 KV,
+    -b 2048 -ub 512, same coding prompt, served with MTP:
+
+      throughput, by draft depth (--spec-draft-n-max):
+        nmax  this model            Q6_K incumbent
+        2     155.94 t/s acc 0.896  112.40 t/s acc 0.839
+        3     181.53 t/s acc 0.820  119.25 t/s acc 0.766
+        4     170.33 t/s acc 0.616  (not measured)
+        5     161.31 t/s acc 0.526  (not measured)
+      At matched nmax=3 this is +52% over Q6_K.
+
+    WHY nmax=3 AND NOT 2: throughput is governed by acceptance x draft length,
+    not acceptance alone. Going 2 -> 3 drops acceptance 0.896 -> 0.820 but lifts
+    mean draft length 2.79 -> 3.46, and the product wins by +16.4%. Past 3 it
+    reverses: at 4 and 5, acceptance collapses (0.62, 0.53) faster than length
+    grows, so the extra drafting is wasted verification work. 3 is the peak, and
+    it matches the bundled Ornith 5090 tune's choice. The old default of 2 came
+    from the Strix Halo tunes and was simply untested here.
+
+    WHY -b 2048 -ub 512: swept on PREFILL (the thing batch size actually
+    affects -- an earlier sweep measured decode and found nothing, which was a
+    methodology error, not a result):
+        b=1024 ub=256   pp512 4707.5   @16k 3993.6   <- 9% worse, avoid
+        b=2048 ub=512   pp512 5179.7   @16k 4417.6
+        b=2048 ub=1024  pp512 5180.2   @16k 4441.2
+        b=4096 ub=1024  pp512 5185.5   @16k 4433.2
+        b=4096 ub=2048  pp512 5181.2   @16k 4439.3
+    Everything at b>=2048, ub>=512 is identical within noise; only going smaller
+    hurts. So there is nothing to gain by raising these.
+
+    Context ceiling, served with MTP at nmax=3:
+        c=262144            loads, 27898 MiB (4.2 GiB free)
+        c=262144 + vision   loads, 29036 MiB (3.0 GiB free)
+    Full native 262144 with the vision projector loaded and 3 GiB spare.
+
+    QUALITY, and the honest trade. Perplexity, wikitext-2, c=32768, 8 chunks,
+    q4_0 KV, identical corpus and chunk count for all three:
+        Q6_K (DavidAU Fable-Fusion-711)      5.7843 +/- 0.037
+        THIS (NVIDIA-derived, not ablit.)    6.3318 +/- 0.043   +9.5%
+        NVFP4 heretic (abliterated)          6.6573 +/- 0.046  +15.1%
+    Dropping abliteration recovered ~0.33 PPL, roughly a third of the gap. The
+    remaining ~0.55 is NVFP4 quantisation plus finetune differences, and it is
+    outside the confidence intervals -- a real cost, not noise.
+    So the trade is: +52% throughput and +119K context for +9.5% perplexity.
+    Caveat both ways: these are different finetunes, not one model at two quants,
+    and wikitext perplexity is a weak proxy for coding ability specifically.
+    Judge on real coding output before treating the PPL gap as decisive.
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "16"
+  CHECKPOINT_MIN_STEP: "2048"
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "262144"
+  DIO: "1"
+  # hdd cache on by default (launcher fills in the machine's default slots dir)
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 3 -b 2048 -ub 512 --image-min-tokens 1024"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

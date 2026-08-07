@@ -1,0 +1,170 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-q6-143k-v1"
+model: "Qwen3"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-q6-143k-v1
+    Per-model config for: DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic
+    -NM-DAU-NEO-MAX-MTP-GGUF, quant MTP-Q6_K (22.38 GB on disk).
+    Target: RTX 5090, 32149 MiB VRAM (compute capability 12.0), CUDA0.
+    Host: 62 GB system RAM.
+    Backend: CUDA via the package-installed llama-hdd ("system" build type).
+
+    WHY THIS EXISTS: every bundled Qwen3.6-27B tune targets AMD, not this box.
+      - 64gb-fp4-140k-mtp-v1  -> Strix Halo unified memory, ROCmFP4 custom
+        tensor types, and "-dev Vulkan0". This build has no libggml-vulkan, so
+        that flag aborts with `invalid device: Vulkan0`. It also points at a
+        different GGUF entirely (Qwen3.6-27B-MTP-ROCmFP4, ~16.9 GB).
+      - 64gb-q4-140k-coding-v1 -> Strix Halo / ROCm, 64 GB unified pool.
+      - 24gb-q4-131k-coding-v1 -> gfx1100 (RX 7900 XTX); its "-ub 128 -b 512"
+        is an FA-scratch workaround for that chip and needlessly throttles
+        prefill on Blackwell.
+    None of those describe a 5090, hence this file.
+
+    VRAM budget at 143360 ctx (31.4 GiB usable):
+      Q6_K weights, fully offloaded:            ~22.4 GiB
+      KV @ q4_0, hybrid SSM keeps attn KV small: ~0.5 GiB
+      compute/FA scratch at -b 2048 -ub 512:     ~1.5 GiB
+      MTP draft head:                            ~0.3 GiB
+      total:                                    ~25.2 GiB, ~6 GiB spare
+    The spare is deliberate: this box drives a desktop compositor off the same
+    GPU. If you go headless, -ub can rise to 1024 for faster prefill.
+
+    KV IS q4_0, CHANGED FROM q8_0 ON MEASUREMENT (2026-08-06). An earlier
+    revision of this file used q8_0 on the reasoning that the KV was small
+    enough not to be worth quantising. That reasoning was wrong -- the saving is
+    over 2 GiB, and it costs nothing measurable. A/B on this box, same model,
+    same settings, only KV type differing:
+
+      speed, llama-bench (MTP off), q4_0 relative to q8_0:
+        depth 0      pp -1.7%   tg -0.3%
+        depth 16384  pp -1.3%   tg -0.3%
+        depth 65536  pp -0.3%   tg -1.2%
+        depth 131072 pp -0.1%   tg -1.8%
+      speed, served at 143360 with MTP on:
+        q8_0  30658 MiB  105.72 t/s  acceptance 0.677
+        q4_0  28418 MiB  107.80 t/s  acceptance 0.691
+      quality, llama-perplexity on wikitext-2:
+        c= 4096, 32 chunks   q8_0 5.3003 +/- 0.047   q4_0 5.3112 +/- 0.047
+        c=32768,  8 chunks   q8_0 5.7765 +/- 0.037   q4_0 5.7843 +/- 0.037
+
+    The two speed methods disagree in sign (bench says ~1% slower, served says
+    ~2% faster); both are inside run-to-run noise, so the honest reading is no
+    meaningful speed difference. Perplexity costs +0.21% at 4K and +0.135% at
+    32K -- note the gap SHRINKS as context grows, i.e. the accumulation failure
+    mode you would expect from a quantised KV does not materialise here. That is
+    head_dim=256 auto-engaging rotor activation rotation, the same effect the
+    bundled Strix Halo tunes rely on. Side-by-side generations at temp 0 were
+    structurally identical.
+
+    The 2240 MiB this frees is not academic: at 143360 with the vision projector
+    loaded, q8_0 KV left only 355 MiB free. q4_0 takes that to ~2.6 GiB, which
+    is the difference between a fragile config and a comfortable one.
+
+    Batch sizes: -b 2048 -ub 512 are Blackwell-appropriate. Do NOT copy the
+    -ub 128 from the gfx1100 tune.
+
+    HDD_CACHE is ON, so the disk-backed slot cache is the source of truth for
+    prompt switching and CACHE_RAM is 0. The launcher forces CACHE_RAM=0 when
+    HDD cache is enabled, so setting both consistently here avoids shipping a
+    value that gets silently overridden. Slot growth is bounded by MIN_FREE_GB
+    and MAX_TOTAL_SLOTS_GB below.
+
+    CHECKPOINT_MAX 32 at ~305 MB per checkpoint near full context is ~9.8 GB of
+    system RAM worst case. Also fine on 62 GB. Lower this before lowering
+    CONTEXT if the host starts swapping.
+
+    SERVED FOOTPRINT, verified with llama-server and MTP actually enabled
+    (2026-08-06). These are the numbers that matter for launching:
+        c=143360, MTP on, no vision   loads, 30658 MiB used (1491 MiB free)
+        c=143360, MTP on, + mmproj    loads, 31794 MiB used ( 355 MiB free)
+    So 143360 is safe here. But note the vision projector costs ~1.1 GiB and
+    leaves only ~355 MiB: that is fine headless, tight with a desktop compositor
+    on the same GPU. If you run vision AND hit instability, drop CONTEXT to
+    ~114688 before blaming anything else.
+
+    DRAFT DEPTH RAISED 2 -> 3 ON MEASUREMENT (2026-08-06). Same coding prompt,
+    served, q4_0 KV:
+        nmax=2   112.40 t/s  acceptance 0.839  mean draft len 2.68
+        nmax=3   119.25 t/s  acceptance 0.766  mean draft len 3.30   (+6.1%)
+        nmax=4   119.30 t/s  acceptance 0.675  mean draft len 3.70
+        nmax=5   114.19 t/s  acceptance 0.629  mean draft len 4.14
+    Acceptance falls but draft length rises more, and throughput is the product.
+    3 and 4 are tied within noise; 3 is kept as the cheaper of the two. This
+    model gains far less from deeper drafting than the NVFP4 builds (+6.1% here
+    vs +16.4% there).
+
+    The optimum is per-model, not universal -- do not copy a depth across tunes:
+        this tune (Q6_K)  peaks 3-4
+        nvfp4nv           peaks 3, regresses at 4-5
+        heretic NVFP4     peaks 5, still climbing through 4
+        Q8_0              capped at 3 -- 4 and 5 OOM outright
+
+    Batch sizes were swept on prefill and b=2048/ub=512 is already optimal:
+    anything at b>=2048, ub>=512 is identical within noise, and b=1024/ub=256 is
+    ~9% worse. Nothing to gain by raising them.
+
+    The llama-bench figures below were taken WITHOUT MTP (llama-bench has no
+    --spec-type flag), so treat them as a no-speculation floor, not as what you
+    will see served. Measured served throughput with MTP at n-max 2 was
+    ~114.5 t/s against the 60.5 t/s bench figure -- a 1.89x speedup, consistent
+    with draft acceptance 0.86 at mean draft length 2.73.
+
+    MEASURED on this box 2026-08-06 (llama-bench, MTP OFF, settings as below, r=2):
+        depth      pp512     tg128
+        0         3221.50    60.50
+        16384     2947.45    57.95
+        65536     1660.95    51.38
+        131072    1062.47    44.09
+    The 131072 run completed without OOM, which confirms the VRAM budget above.
+    Decode degrades only 27% from empty to 128K; prefill degrades 67%. So deep
+    context costs you prompt processing, not generation -- which is exactly why
+    the checkpoint / prefix-cache machinery below earns its keep.
+
+    Compare Q8_0 (32gb-cuda-5090-q8-48k-v1): Q8 is ~11-24% faster at prefill but
+    ~16-19% slower at decode, and once MTP's draft context is accounted for it
+    only serves ~65K (shipped at 49152 for compositor headroom). This tune is
+    the one to use for anything long-context -- it serves 143360.
+
+    VISION: VERIFIED WORKING, INCLUDING ALONGSIDE MTP (tested 2026-08-06).
+    Server loads Q6_K + mmproj-F16 + --spec-type draft-mtp together; the model
+    described a test image correctly (shapes, colours, relative positions) while
+    MTP reported draft acceptance 0.864 (216/250, mean len 2.73) -- well above
+    the model card's 0.50 "switch to normal quants" threshold. MTP does NOT
+    silently disable itself under multimodal input.
+    Two things this depends on:
+      - --image-min-tokens 1024: the build warns Qwen-VL needs >=1024 image
+        tokens for grounding accuracy. The result above was obtained WITH it.
+      - Generous max_tokens. This is a thinking model: at max_tokens 150 it
+        spent the entire budget inside the reasoning block and returned
+        content="" (answer stranded in reasoning_content), which looks exactly
+        like broken vision but is not. 800 was enough to finish.
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "32"
+  CHECKPOINT_MIN_STEP: "2048"
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "143360"
+  DIO: "1"
+  # hdd cache on by default (launcher fills in the machine's default slots dir)
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 3 -b 2048 -ub 512 --image-min-tokens 1024"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

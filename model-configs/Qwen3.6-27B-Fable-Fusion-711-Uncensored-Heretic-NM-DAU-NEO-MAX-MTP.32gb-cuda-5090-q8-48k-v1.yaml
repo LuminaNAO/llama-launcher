@@ -1,0 +1,107 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-q8-48k-v1"
+model: "Qwen3"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-q8-64k-v1
+    Per-model config for: DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic
+    -NM-DAU-NEO-MAX-MTP-GGUF, quant MTP-Q8_0 (28.16 GB on disk).
+    Target: RTX 5090, 32149 MiB VRAM, CUDA0. Host: 62 GB system RAM.
+
+    KV QUANT IS WHAT MAKES THIS TUNE VIABLE. 28.15 GiB of weights against
+    31.4 GiB of VRAM leaves only ~3.2 GiB for KV plus compute buffers, so the
+    KV cache type sets the context ceiling almost single-handedly.
+    Measured on this box 2026-08-06 (llama-bench, -b 2048 -ub 512, full offload):
+
+        KV     depth     pp512     tg
+        q8_0    65536   1835.89   44.37
+        q8_0    81920   1601.31   42.61
+        q8_0    98304   CUDA error (out of memory)
+        q8_0   131072   failed to create context
+        q4_0    98304   1414.16   40.86
+        q4_0   131072   1141.46   38.30
+        q4_0   143360   1056.79   37.50
+        q4_0   163840    957.88   36.09
+        q4_0   196608   failed to create context
+        q4_0   262144   failed to create context
+
+    So the ceiling is ~82K on q8_0 KV and ~164K on q4_0 KV -- halving the KV
+    quant almost exactly doubles the reachable context. That is why this tune
+    uses q4_0 K/V despite the Q6_K tune using q8_0: Q6_K has VRAM to spare and
+    can afford the better cache, this quant does not and cannot.
+
+    q4_0 KV is not the quality compromise it looks like here: head_dim=256 means
+    rotor activation rotation auto-engages, which substantially closes the
+    q4_0-vs-q8_0 gap. This is the same reasoning the bundled Strix Halo tunes
+    use for their own q4_0 KV choice.
+
+    !! THE llama-bench CEILINGS ABOVE DO NOT APPLY TO A SERVED CONFIG !!
+    llama-bench has no --spec-type flag, so it never allocates the MTP draft
+    context. This tune enables MTP, and on a quant with only ~3.2 GiB of slack
+    that draft context is decisive. Re-probed with llama-server, MTP on, q4_0 KV:
+        c=131072  out of memory
+        c=114688  out of memory
+        c= 98304  out of memory
+        c= 81920  out of memory
+        c= 65536  loads, 31914 MiB used  (235 MiB free -- too tight)
+        c= 49152  loads, 31496 MiB used  (653 MiB free)
+    So the served ceiling is ~65K, not the 163840 llama-bench reported. An
+    earlier revision of this file shipped CONTEXT 143360 off the bench figure
+    and failed at launch with:
+        common_speculative_init_result: failed to create MTP context
+    CONTEXT is therefore 49152, not 65536: 65536 leaves only 235 MiB, which the
+    desktop compositor on this same GPU will not tolerate.
+
+    If you want long context, use the Q6_K tune -- it serves 143360 with MTP at
+    30658 MiB (1491 MiB free). That is the right answer for this box; Q8_0 at
+    32 GB with MTP is inherently a short-context configuration.
+
+    WHEN TO PREFER THIS OVER Q6_K -- measured, same box, same settings:
+                     Q6_K      Q8_0
+        pp512 @ 0    3221.5    4001.0   Q8 ~24% faster prefill
+        pp512 @ 16K  2947.5    3572.9   Q8 ~21% faster
+        pp512 @ 64K  1661.0    1835.9   Q8 ~11% faster
+        tg128 @ 0      60.5      50.9   Q6 ~19% faster decode
+        tg128 @ 16K    58.0      49.2   Q6 ~18% faster
+        tg128 @ 64K    51.4      44.4   Q6 ~16% faster
+    Q8_0 wins prefill at every depth (cheaper dequant), Q6_K wins decode at every
+    depth (less memory bandwidth per token). Note those Q8 figures are on q8_0
+    KV; on the q4_0 KV this tune ships, Q8 at 131072 does 1141 pp / 38.3 tg
+    against Q6_K's 1062 pp / 44.1 tg -- so even at matched deep context the split
+    holds: Q8 prefills faster, Q6 decodes faster.
+    Pick this tune for prompt-heavy work that re-reads large contexts; pick Q6_K
+    for generation-heavy work, or when you want the better KV quant.
+
+    NO VISION ON THIS TUNE. The mmproj projector needs ~1 GiB of VRAM that this
+    quant does not have. Vision is configured on the Q6_K tune, where it is
+    verified working (correct image description, MTP draft acceptance 0.864
+    with an image in the prompt).
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "16"
+  CHECKPOINT_MIN_STEP: "2048"
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "49152"
+  DIO: "1"
+  # hdd cache on by default (launcher fills in the machine's default slots dir)
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 3 -b 2048 -ub 512"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"
