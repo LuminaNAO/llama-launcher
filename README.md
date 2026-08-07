@@ -60,6 +60,9 @@ Run without flags for the interactive launcher. Enter `s` from the recent-launch
 | `--context <N>`  | Override context size |
 | `--parallel <N>` | Override parallel slots |
 | `--hdd-cache`    | Enable disk-backed slot cache and force `CACHE_RAM=0`. For full benefit (prompt-checkpoint resumption — avoids cold prefill on prompt switch for hybrid/MTP models), install [`llama-hdd`](https://codeberg.org/LuminaNAO/git/llama-hdd.cpp) instead of vanilla `llama.cpp`. With vanilla llama.cpp the slot KV still restores, but the `common_prompt_checkpoint` list is lost and the model cold-prefills. |
+| `--vision [N]`   | Enable the vision projector (`*mmproj*.gguf`) found beside the model, without the interactive prompt. Optional `N` picks among several (default `1`). |
+| `--no-vision`    | Force text-only even when a projector is present. |
+| `--mmproj <file>`| Use this projector file explicitly; implies `--vision` and may point outside the model folder. |
 | `--no-hdd-cache` | Disable disk-backed slot cache for this launch; flag-driven launches default off when neither HDD flag is passed |
 | `--proxy`        | Enable deep-logging proxy (off by default) |
 | `--log`          | Tee server output to `llama.log` (in the llama-launcher dir; off by default) |

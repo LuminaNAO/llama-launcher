@@ -23,6 +23,11 @@
 #   --hdd-cache      Enable disk-backed slot cache for this launch; forces
 #                    CACHE_RAM=0 and uses tune/default SLOT_SAVE_PATH
 #   --no-hdd-cache   Disable disk-backed slot cache for this launch
+#   --vision [N]     Enable the vision projector (mmproj) found beside the
+#                    model; optional N selects among several (default 1).
+#                    Without this the TUI asks and defaults to no vision.
+#   --no-vision      Force text-only even when a projector is present
+#   --mmproj <file>  Use this projector file explicitly (implies --vision)
 #   --min-free-gb N  Minimum free disk space the proxy preserves on the
 #                    slot-cache partition (default 100). Triggers LRU
 #                    eviction of oldest slot files (across all sibling
@@ -139,6 +144,9 @@ ARG_INTERNAL_PORT=""
 PORT_FLAGS_TOUCHED=0
 HDD_CACHE_MODE="default"
 HDD_CACHE_TOUCHED=0
+ARG_MMPROJ=""
+ARG_VISION_INDEX=""
+VISION_MODE=""      # "", "on" or "off"
 MIN_FREE_GB_TOUCHED=0
 MAX_TOTAL_SLOTS_GB_TOUCHED=0
 FORCE_SKIP_CHECKS=0  # --force: skip dependency/version checks (yq etc.)
@@ -161,6 +169,13 @@ while [[ $# -gt 0 ]]; do
         --min-free-gb) MIN_FREE_GB="$2"; MIN_FREE_GB_TOUCHED=1; shift 2 ;;
         --max-total-slots-gb) MAX_TOTAL_SLOTS_GB="$2"; MAX_TOTAL_SLOTS_GB_TOUCHED=1; shift 2 ;;
         --no-hdd-cache) HDD_CACHE_MODE="off"; HDD_CACHE_TOUCHED=1; shift ;;
+        --vision)
+            VISION_MODE="on"
+            # optional numeric index picks among multiple projectors
+            if [[ "${2:-}" =~ ^[0-9]+$ ]]; then ARG_VISION_INDEX="$2"; shift 2; else shift; fi
+            ;;
+        --no-vision) VISION_MODE="off"; shift ;;
+        --mmproj) ARG_MMPROJ="$2"; VISION_MODE="on"; shift 2 ;;
         --proxy) NO_PROXY=0; LOG_FLAGS_TOUCHED=1; shift ;;
         --log) NO_LOG=0; LOG_FLAGS_TOUCHED=1; shift ;;
         --deep-log) NO_DEEP_LOG=0; LOG_FLAGS_TOUCHED=1; shift ;;
@@ -513,6 +528,10 @@ if [[ "$ORIGINAL_ARGC" -eq 0 && -z "$ARG_BUILD_TYPE" && -z "$ARG_MODEL_PATH" && 
                 [[ " $extras " == *" --deep-log "* ]] && NO_DEEP_LOG=0
                 [[ " $extras " == *" --hdd-cache "* ]] && { HDD_CACHE_MODE="on"; HDD_CACHE_TOUCHED=1; }
                 [[ " $extras " == *" --no-hdd-cache "* ]] && { HDD_CACHE_MODE="off"; HDD_CACHE_TOUCHED=1; }
+                [[ " $extras " == *" --no-vision "* ]] && { VISION_MODE="off"; }
+                if [[ " $extras " =~ --vision\ ([0-9]+) ]]; then
+                    VISION_MODE="on"; ARG_VISION_INDEX="${BASH_REMATCH[1]}"
+                fi
                 echo ""
                 echo "🔄 Relaunching: $ARG_BUILD_TYPE / $(basename "$ARG_MODEL_PATH") / ${ARG_TUNE:-(no tune)}${extras:+  [$extras]}"
                 echo ""
@@ -1367,23 +1386,55 @@ while IFS= read -r -d '' file; do
     mmproj_matches+=("$file")
 done < <(find "$MODEL_FOLDER" -maxdepth 1 -name "*mmproj*.gguf" -print0 2>/dev/null)
 
-if [ ${#mmproj_matches[@]} -ge 1 ]; then
-    echo ""
-    echo "👁️  Vision projector(s) found:"
-    for i in "${!mmproj_matches[@]}"; do
-        printf "  %d) %s\n" $((i+1)) "$(basename "${mmproj_matches[$i]}")"
-    done
-    echo "  0) None (text-only)"
-    echo ""
-    read -rp "Enable vision? [0=no, 1=yes, default=0]: " mmproj_sel
-    mmproj_sel="${mmproj_sel:-0}"
-    if [[ "$mmproj_sel" =~ ^[1-9][0-9]*$ ]] && [ "$mmproj_sel" -le ${#mmproj_matches[@]} ]; then
-        MMPROJ="${mmproj_matches[$((mmproj_sel-1))]}"
+if [ -n "$ARG_MMPROJ" ]; then
+    # Explicit file wins over anything discovered beside the model.
+    if [ -f "$ARG_MMPROJ" ]; then
+        MMPROJ="$ARG_MMPROJ"
         echo "👁️  Vision: $(basename "$MMPROJ")"
     else
-        echo "👁️  Vision: none"
+        echo "❌ --mmproj: file not found: $ARG_MMPROJ"
+        exit 1
+    fi
+elif [ ${#mmproj_matches[@]} -ge 1 ]; then
+    if [[ "$VISION_MODE" == "off" ]]; then
+        echo "👁️  Vision: none (--no-vision)"
+    elif [[ "$VISION_MODE" == "on" ]]; then
+        _vsel="${ARG_VISION_INDEX:-1}"
+        if [ "$_vsel" -ge 1 ] 2>/dev/null && [ "$_vsel" -le ${#mmproj_matches[@]} ]; then
+            MMPROJ="${mmproj_matches[$((_vsel-1))]}"
+            echo "👁️  Vision: $(basename "$MMPROJ")"
+        else
+            echo "❌ --vision $_vsel: only ${#mmproj_matches[@]} projector(s) found in $MODEL_FOLDER"
+            for i in "${!mmproj_matches[@]}"; do
+                printf "   %d) %s\n" $((i+1)) "$(basename "${mmproj_matches[$i]}")"
+            done
+            exit 1
+        fi
+    else
+        # No flag given: ask, as before. Default stays "no" so unattended
+        # runs (paru queues, cron) never silently pull in a projector.
+        echo ""
+        echo "👁️  Vision projector(s) found:"
+        for i in "${!mmproj_matches[@]}"; do
+            printf "  %d) %s\n" $((i+1)) "$(basename "${mmproj_matches[$i]}")"
+        done
+        echo "  0) None (text-only)"
+        echo "     (non-interactive: pass --vision, --vision N or --no-vision)"
+        echo ""
+        read -rp "Enable vision? [0=no, 1=yes, default=0]: " mmproj_sel
+        mmproj_sel="${mmproj_sel:-0}"
+        if [[ "$mmproj_sel" =~ ^[1-9][0-9]*$ ]] && [ "$mmproj_sel" -le ${#mmproj_matches[@]} ]; then
+            MMPROJ="${mmproj_matches[$((mmproj_sel-1))]}"
+            echo "👁️  Vision: $(basename "$MMPROJ")"
+        else
+            echo "👁️  Vision: none"
+        fi
     fi
 else
+    if [[ "$VISION_MODE" == "on" ]]; then
+        echo "❌ --vision requested but no *mmproj*.gguf found in $MODEL_FOLDER"
+        exit 1
+    fi
     echo "👁️  Vision: none"
 fi
 
@@ -1910,6 +1961,16 @@ if [ -n "${SLOT_SAVE_PATH:-}" ]; then
     _extras_log+="--hdd-cache "
 elif [[ "$HDD_CACHE_MODE" == "off" ]]; then
     _extras_log+="--no-hdd-cache "
+fi
+if [ -n "${MMPROJ:-}" ]; then
+    # Record the index rather than the path: history fields are space-split.
+    _vidx=1
+    for _i in "${!mmproj_matches[@]}"; do
+        [[ "${mmproj_matches[$_i]}" == "$MMPROJ" ]] && _vidx=$((_i+1))
+    done
+    _extras_log+="--vision $_vidx "
+elif [[ "$VISION_MODE" == "off" ]]; then
+    _extras_log+="--no-vision "
 fi
 _extras_log="${_extras_log% }"
 printf '%s\t%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$BUILD_TYPE" "$model_path" "$_tune_log" "$_extras_log" >> "$LAUNCH_HISTORY"
