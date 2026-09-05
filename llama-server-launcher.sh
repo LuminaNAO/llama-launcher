@@ -313,6 +313,8 @@ fi
 [ -n "$_env_slot_save_path" ] && LLAMACPP_SLOT_SAVE_PATH="$_env_slot_save_path"
 [ "$MIN_FREE_GB_TOUCHED" -eq 1 ] && MIN_FREE_GB="$_cli_min_free_gb"
 [ "$MAX_TOTAL_SLOTS_GB_TOUCHED" -eq 1 ] && MAX_TOTAL_SLOTS_GB="$_cli_max_total_slots_gb"
+_host_min_free_gb="${MIN_FREE_GB:-}"
+_host_max_total_slots_gb="${MAX_TOTAL_SLOTS_GB:-}"
 unset _env_models_dir _env_slot_save_path _cli_min_free_gb _cli_max_total_slots_gb
 
 config_quote() {
@@ -1378,6 +1380,11 @@ else
     done
 fi
 
+# Host-wide disk policy from local config or CLI wins over per-model tunes.
+[ -n "$_host_min_free_gb" ] && MIN_FREE_GB="$_host_min_free_gb"
+[ -n "$_host_max_total_slots_gb" ] && MAX_TOTAL_SLOTS_GB="$_host_max_total_slots_gb"
+unset _host_min_free_gb _host_max_total_slots_gb
+
 # ── Auto-detect vision projector ─────────────────────────────────────────────
 # Searches the same folder as the selected model — no prefix matching needed
 MMPROJ=""
@@ -1976,6 +1983,31 @@ _extras_log="${_extras_log% }"
 printf '%s\t%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$BUILD_TYPE" "$model_path" "$_tune_log" "$_extras_log" >> "$LAUNCH_HISTORY"
 
 # ── Launch llama-server ─────────────────────────────────────────────────────
+# ── Resolve a repo-relative --chat-template-file in EXTRA_ARGS ────────────────
+# Tunes ship their templates beside them (model-configs/*.jinja, *.j2), so a
+# tune may name the file relative to the model-config dir (or the launcher
+# dir, e.g. "model-configs/foo.j2"). Resolve it against every place configs
+# live — source checkout or packaged /usr/share — so tunes stay portable and
+# carry no machine-specific absolute paths. Absolute paths pass through.
+if [[ "${EXTRA_ARGS:-}" =~ --chat-template-file[[:space:]]+([^[:space:]]+) ]]; then
+    _tmpl="${BASH_REMATCH[1]}"
+    if [[ "$_tmpl" != /* ]]; then
+        _resolved=""
+        for _d in "$MODEL_CONFIG_DIR" "$BUNDLED_MODEL_CONFIG_DIR" \
+                  "$LLAMA_LAUNCHER_DIR" "$(dirname "$BUNDLED_MODEL_CONFIG_DIR")" \
+                  "$LLAMA_LAUNCHER_LIB_DIR" "$SCRIPT_DIR" "$PWD"; do
+            [[ -n "$_d" && -f "$_d/$_tmpl" ]] && { _resolved="$_d/$_tmpl"; break; }
+        done
+        if [[ -n "$_resolved" ]]; then
+            EXTRA_ARGS="${EXTRA_ARGS/--chat-template-file $_tmpl/--chat-template-file $_resolved}"
+            echo "🧩 Chat template: $_resolved"
+        else
+            echo "⚠️  --chat-template-file '$_tmpl' not found beside any model-config dir; passing through as-is"
+        fi
+    fi
+    unset _tmpl _resolved _d
+fi
+
 LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
   -m "$model_path"
   -ngl "$NGL"

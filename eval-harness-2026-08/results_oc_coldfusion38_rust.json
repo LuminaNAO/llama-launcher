@@ -1,0 +1,52 @@
+[
+ {
+  "id": "R1",
+  "cat": "rust",
+  "label": "oc-coldfusion38",
+  "content": "```rust\npub fn squash(v: &mut Vec<String>) {\n    // Deduplicate consecutive runs in place, comparing ORIGINAL (untrimmed) values.\n    let mut write = 0;\n    for read in 0..v.len() {\n        if write == 0 || v[read] != v[write - 1] {\n            v[write] = v[read].clone();\n            write += 1;\n        }\n    }\n    v.truncate(write);\n\n    // Trim ASCII whitespace after deduplication.\n    for s in v.iter_mut() {\n        *s = s.trim_ascii().to_string();\n    }\n}\n```",
+  "error": null,
+  "wall": 48.59201955795288,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "R2",
+  "cat": "rust",
+  "label": "oc-coldfusion38",
+  "content": "Found the bug: in `promote()`, when the key is found after popping preceding items, I pushed the popped items back *after* the found item, reversing the order. Fixing:\n```rust\nuse std::collections::{HashMap, LinkedList};\nuse std::hash::Hash;\n\npub struct Lru<K, V> {\n    cap: usize,\n    keys: HashMap<K, ()>,\n    list: LinkedList<(K, V)>,\n}\n\nimpl<K, V> Lru<K, V>\nwhere\n    K: Clone + Eq + Hash,\n{\n    pub fn new(cap: usize) -> Self {\n        assert!(cap >= 1, \"Lru capacity must be >= 1\");\n        Self {\n            cap,\n            keys: HashMap::new(),\n            list: LinkedList::new(),\n        }\n    }\n\n    pub fn put(&mut self, k: K, v: V) {\n        if self.keys.contains_key(&k) {\n            self.promote(&k);\n            if let Some(front) = self.list.front_mut() {\n                front.1 = v;\n            }\n        } else {\n            if self.list.len() >= self.cap {\n                if let Some((old_k, _)) = self.list.pop_back() {\n                    self.keys.remove(&old_k);\n                }\n            }\n            self.keys.insert(k.clone(), ());\n            self.list.push_front((k, v));\n        }\n    }\n\n    pub fn get(&mut self, k: &K) -> Option<&V> {\n        if !self.keys.contains_key(k) {\n            return None;\n        }\n        self.promote(k);\n        self.list.front().map(|entry| &entry.1)\n    }\n\n    fn promote(&mut self, k: &K) {\n        let mut popped: Vec<(K, V)> = Vec::new();\n        loop {\n            let item = match self.list.pop_front() {\n                Some(item) => item,\n                None => break,\n            };\n            if item.0 == *k {\n                for it in popped.into_iter().rev() {\n                    self.list.push_front(it);\n                }\n                self.list.push_front(item);\n                return;\n            }\n            popped.push(item);\n        }\n    }\n}\n```",
+  "error": null,
+  "wall": 168.89269280433655,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "R3",
+  "cat": "rust",
+  "label": "oc-coldfusion38",
+  "content": "```rust\nuse std::sync::Arc;\nuse std::thread;\n\npub fn parallel_map<T, R, F>(mut items: Vec<T>, f: F, workers: usize) -> Vec<R>\nwhere\n    T: Send + 'static,\n    R: Send + 'static,\n    F: Fn(T) -> R + Send + Sync + 'static,\n{\n    let len = items.len();\n    let base = len / workers;\n    let rem = len % workers;\n\n    let f = Arc::new(f);\n    let mut handles = Vec::with_capacity(workers);\n\n    for w in 0..workers {\n        // Worker `w` gets `count` elements; the first `rem` workers get one extra.\n        let count = if w < rem { base + 1 } else { base };\n\n        // Peel this worker's contiguous slice off the front (owned, moved in).\n        // The last worker takes whatever remains.\n        let chunk: Vec<T> = if w + 1 == workers {\n            items\n        } else {\n            items.drain(..count).collect()\n        };\n\n        let f = Arc::clone(&f);\n        handles.push(thread::spawn(move || {\n            let mut out = Vec::with_capacity(chunk.len());\n            for x in chunk {\n                out.push(f(x));\n            }\n            out\n        }));\n    }\n\n    // Join in spawn order; each worker already produced its slice in input order.\n    let mut results = Vec::with_capacity(len);\n    for h in handles {\n        results.extend(h.join().expect(\"parallel_map worker thread panicked\"));\n    }\n    results\n}\n```",
+  "error": null,
+  "wall": 61.615636348724365,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "R4",
+  "cat": "rust",
+  "label": "oc-coldfusion38",
+  "content": "```rust\nuse std::marker::PhantomData;\n\npub struct PairsMut<'a, T> {\n    ptr: *mut T,\n    len: usize,\n    _marker: PhantomData<&'a mut [T]>,\n}\n\nimpl<'a, T> Iterator for PairsMut<'a, T> {\n    type Item = (&'a mut T, &'a mut T);\n\n    fn next(&mut self) -> Option<Self::Item> {\n        if self.len < 2 {\n            return None;\n        }\n        // `ptr` and `ptr.add(1)` point into disjoint regions of the original\n        // slice, so the two mutable references cannot alias.\n        let first = unsafe { &mut *self.ptr };\n        let second = unsafe { &mut *self.ptr.add(1) };\n        self.ptr = self.ptr.add(2);\n        self.len -= 2;\n        Some((first, second))\n    }\n\n    fn size_hint(&self) -> (usize, Option<usize>) {\n        let n = self.len / 2;\n        (n, Some(n))\n    }\n}\n\nimpl<T> ExactSizeIterator for PairsMut<'_, T> {\n    fn len(&self) -> usize {\n        self.len / 2\n    }\n}\n\npub fn pairs_mut<T>(s: &mut [T]) -> PairsMut<'_, T> {\n    PairsMut {\n        ptr: s.as_mut_ptr(),\n        len: s.len(),\n        _marker: PhantomData,\n    }\n}\n```",
+  "error": null,
+  "wall": 21.16889977455139,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "R5",
+  "cat": "rust",
+  "label": "oc-coldfusion38",
+  "content": "```rust\nuse std::future::Future;\nuse std::pin::Pin;\nuse std::sync::atomic::{AtomicBool, Ordering};\nuse std::sync::{Arc, Mutex};\nuse std::task::{Context, Poll, Wake, Waker};\nuse std::thread;\n\n/// A future that returns `Pending` (and wakes) once for each remaining tick,\n/// then completes.\npub struct YieldNow {\n    pub remaining: u32,\n}\n\nimpl Future for YieldNow {\n    type Output = ();\n\n    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {\n        let this = self.get_mut();\n        if this.remaining > 0 {\n            this.remaining -= 1;\n            cx.waker().wake_by_ref();\n            Poll::Pending\n        } else {\n            Poll::Ready(())\n        }\n    }\n}\n\n/// State shared between `block_on` and its waker.\nstruct SharedWaker {\n    /// Set by the waker; consumed by the polling thread.\n    woken: AtomicBool,\n    /// The thread running `block_on`, so `wake()` can unpark it from\n    /// any thread.\n    parked_thread: Mutex<Option<thread::Thread>>,\n}\n\nimpl SharedWaker {\n    fn wake_impl(state: &SharedWaker) {\n        // Release: publishes any state the waker's owner wrote before waking.\n        state.woken.store(true, Ordering::Release);\n        // Unpark the blocked thread (or leave a permit if it hasn't parked yet).\n        if let Some(t) = state.parked_thread.lock().unwrap().as_ref() {\n            t.unpark();\n        }\n    }\n}\n\nimpl Wake for SharedWaker {\n    fn wake(self: Arc<Self>) {\n        Self::wake_impl(&self);\n    }\n\n    fn wake_by_ref(self: &Arc<Self>) {\n        Self::wake_impl(self);\n    }\n}\n\n/// Polls `fut` to completion on the current thread.\n///\n/// When `fut` yields `Pending`, the thread parks until the future's waker is\n/// invoked (possibly from another thread), then polls again.\npub fn block_on<F: Future>(mut fut: F) -> F::Output {\n    let state = Arc::new(SharedWaker {\n        woken: AtomicBool::new(false),\n        parked_thread: Mutex::new(None),\n    });\n\n    // Register the current thread so wake() can unpark it.\n    *state.parked_thread.lock().unwrap() = Some(thread::current());\n\n    let waker = Waker::from(state.clone());\n\n    // `fut` is owned here, pinned on the stack, and never moved again.\n    let mut fut = unsafe { Pin::new_unchecked(&mut fut) };\n\n    loop {\n        match fut.as_mut().poll(&mut Context::from_waker(&waker)) {\n            Poll::Ready(value) => return value,\n            Poll::Pending => {\n                // Block until the waker fires. A concurrent wake() is safe:\n                // it either sets the flag (observed here) or leaves an unpark\n                // permit so park() returns immediately \u2014 no lost wakeups.\n                while !state.woken.swap(false, Ordering::Acquire) {\n                    thread::park();\n                }\n            }\n        }\n    }\n}\n```",
+  "error": null,
+  "wall": 157.80747842788696,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ }
+]

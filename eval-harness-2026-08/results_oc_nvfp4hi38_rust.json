@@ -1,0 +1,52 @@
+[
+ {
+  "id": "R1",
+  "cat": "rust",
+  "label": "oc-nvfp4hi38",
+  "content": "I found that the `retain` closure is capturing a borrow incorrectly, so I'm switching to a two-pointer approach instead.\nThe two-pointer in-place approach avoids the borrow issue. Compiling and testing now:\nThe code is correct \u2014 my test expectation was wrong: `\"\\u{a0}x\\u{a0}\"` has only non-ASCII whitespace, so it must stay untrimmed. Fixing the test:\nI found the bug in the two-pointer dedup logic \u2014 `write` holds the index of the last kept element, so I need to truncate with `write + 1` instead of `write`. Fixing that now.\nEdge case: empty vec would panic on `truncate(write + 1)`. Adding a guard:\nI found that the failing test was due to incorrect expectations in my scratch file, not the function itself. I'm now verifying the submitted function in isolation to confirm it's correct.\nI found that the test assertion was incorrect \u2014 \"  a \" and \"a \" are different strings before trimming, so they shouldn't dedupe. I'll fix the assertion and run the test again.\nFull submission passes; the appended-test variant failed \u2014 let me see the actual failure detail:\nFound it \u2014 the test at line 40 was comparing `[\"a \", \"a \", \"a\"]` and expecting `[\"a\"]`, but `\"a \"` and `\"a\"` are actually different original values, so they should both remain, and after trimming it should be `[\"a\", \"a\"]`. My test expectation was wrong again; the function is correct. I'll fix the test:\nsed's bracket-expression parsing ate the replacement. Fixing directly:\nAll checks pass. Doing one final verification of the exact code I'll deliver (using stable `str::trim_ascii`):\n```rust\npub fn squash(v: &mut Vec<String>) {\n    // Pass 1: remove consecutive duplicate strings (compared on original,\n    // untrimmed values), keeping the first of each run.\n    let mut write = 0usize;\n    for read in 1..v.len() {\n        if v[read] != v[write] {\n            write += 1;\n            v[write] = v[read].clone();\n        }\n    }\n    if !v.is_empty() {\n        v.truncate(write + 1);\n    }\n\n    // Pass 2: trim ASCII whitespace from both ends of every surviving string.\n    for s in v.iter_mut() {\n        *s = s.trim_ascii().to_string();\n    }\n}\n```",
+  "error": null,
+  "wall": 160.90135383605957,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "R2",
+  "cat": "rust",
+  "label": "oc-nvfp4hi38",
+  "content": "```rust\nuse std::collections::{HashMap, VecDeque};\nuse std::hash::Hash;\n\npub struct Lru<K, V> {\n    cap: usize,\n    values: HashMap<K, V>,\n    order: VecDeque<K>, // front = LRU, back = MRU\n}\n\nimpl<K: Clone + Eq + Hash, V> Lru<K, V> {\n    pub fn new(cap: usize) -> Self {\n        assert!(cap >= 1, \"Lru capacity must be >= 1\");\n        Lru {\n            cap,\n            values: HashMap::new(),\n            order: VecDeque::new(),\n        }\n    }\n\n    pub fn put(&mut self, k: K, v: V) {\n        if self.values.contains_key(&k) {\n            if let Some(existing) = self.values.get_mut(&k) {\n                *existing = v;\n            }\n            self.touch(&k);\n        } else {\n            if self.values.len() >= self.cap {\n                if let Some(lru) = self.order.pop_front() {\n                    self.values.remove(&lru);\n                }\n            }\n            self.values.insert(k.clone(), v);\n            self.order.push_back(k);\n        }\n    }\n\n    pub fn get(&mut self, k: &K) -> Option<&V> {\n        if self.values.contains_key(k) {\n            self.touch(k);\n            self.values.get(k)\n        } else {\n            None\n        }\n    }\n\n    fn touch(&mut self, k: &K) {\n        if let Some(pos) = self.order.iter().position(|x| x == k) {\n            self.order.remove(pos);\n        }\n        self.order.push_back(k.clone());\n    }\n}\n```",
+  "error": null,
+  "wall": 45.28657817840576,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "R3",
+  "cat": "rust",
+  "label": "oc-nvfp4hi38",
+  "content": "```rust\nuse std::sync::atomic::{AtomicUsize, Ordering};\nuse std::sync::{Arc, Mutex};\nuse std::thread;\n\npub fn parallel_map<T, R, F>(items: Vec<T>, f: F, workers: usize) -> Vec<R>\nwhere\n    T: Send + 'static,\n    R: Send + 'static,\n    F: Fn(T) -> R + Send + Sync + 'static,\n{\n    let len = items.len();\n\n    // Items are moved into a Vec<Option<T>>; each worker `take`s its item by\n    // index, so every element is consumed exactly once.\n    let pending: Arc<Mutex<Vec<Option<T>>>> =\n        Arc::new(Mutex::new(items.into_iter().map(Some).collect()));\n\n    // Preallocated results, indexed by the ORIGINAL input position so the\n    // output order is preserved regardless of completion order.\n    let results: Arc<Mutex<Vec<Option<R>>>> = Arc::new(Mutex::new(vec![None; len]));\n\n    // Shared work counter: workers pull the next free index until exhausted.\n    let next: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));\n\n    let f: Arc<F> = Arc::new(f);\n\n    let worker_count = workers.max(1);\n    let mut handles = Vec::with_capacity(worker_count);\n\n    for _ in 0..worker_count {\n        let pending = Arc::clone(&pending);\n        let results = Arc::clone(&results);\n        let next = Arc::clone(&next);\n        let f = Arc::clone(&f);\n\n        handles.push(thread::spawn(move || {\n            loop {\n                let idx = next.fetch_add(1, Ordering::Relaxed);\n                if idx >= len {\n                    break;\n                }\n                // Lock only long enough to claim the item; f runs unlocked.\n                let item = pending.lock().unwrap().get_mut(idx).unwrap().take().unwrap();\n                let r = f(item);\n                results.lock().unwrap()[idx] = Some(r);\n            }\n        }));\n    }\n\n    for h in handles {\n        h.join().unwrap();\n    }\n\n    // Every index in [0, len) is claimed exactly once, so all slots are filled.\n    results\n        .into_inner()\n        .unwrap()\n        .into_iter()\n        .map(Option::unwrap)\n        .collect()\n}\n```",
+  "error": null,
+  "wall": 35.903095722198486,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "R4",
+  "cat": "rust",
+  "label": "oc-nvfp4hi38",
+  "content": "The key idea: hold the unique `&mut [T]` borrow for the iterator's whole lifetime (via `PhantomData<&'a mut T>`), advance a raw pointer by 2 per step, and only ever dereference while \u2265 2 elements remain \u2014 so the two references are always in-bounds, aligned, disjoint (slice elements never overlap), and each element is emitted at most once.\n\n```rust\nuse std::marker::PhantomData;\n\n/// Iterator over non-overlapping consecutive `(&'a mut T, &'a mut T)` pairs.\n///\n/// For a slice of length `n` this yields exactly `n / 2` pairs, dropping an\n/// odd trailing element. Each element is handed out at most once.\npub struct PairsMut<'a, T> {\n    /// Points at the first element of the next pair; valid for the remaining\n    /// `len` elements (an odd tail may remain, never dereferenced).\n    ptr: *mut T,\n    /// Number of elements remaining at `ptr`.\n    len: usize,\n    /// Records that the iterator holds the unique `&'a mut [T]` borrow over\n    /// the whole range, keeping the lifetime and variance correct.\n    _marker: PhantomData<&'a mut T>,\n}\n\npub fn pairs_mut<'a, T>(s: &mut [T]) -> PairsMut<'a, T> {\n    PairsMut {\n        ptr: s.as_mut_ptr(),\n        len: s.len(),\n        _marker: PhantomData,\n    }\n}\n\nimpl<'a, T> Iterator for PairsMut<'a, T> {\n    type Item = (&'a mut T, &'a mut T);\n\n    fn next(&mut self) -> Option<Self::Item> {\n        if self.len < 2 {\n            return None;\n        }\n        unsafe {\n            // SAFETY:\n            // * `ptr` is derived from the `&'a mut [T]` that this iterator\n            //   holds, so the allocation is alive and exclusively borrowed\n            //   for the entire lifetime 'a (enforced by _marker).\n            // * We only reach this point with `len >= 2`, so both `ptr` and\n            //   `ptr.add(1)` are in-bounds, properly aligned (element\n            //   alignment of the slice), and refer to initialized elements.\n            // * Adjacent elements of a slice never overlap, so the two\n            //   `&mut T` references are disjoint \u2014 no aliasing.\n            // * We advance `ptr` by 2 immediately, so every element is\n            //   emitted at most once; the odd tail is never touched.\n            let first = &mut *self.ptr;\n            let second = &mut *self.ptr.add(1);\n            self.ptr = self.ptr.add(2);\n            self.len -= 2;\n            Some((first, second))\n        }\n    }\n\n    fn size_hint(&self) -> (usize, Option<usize>) {\n        let pairs = self.len / 2;\n        (pairs, Some(pairs))\n    }\n}\n```",
+  "error": null,
+  "wall": 58.26676845550537,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "R5",
+  "cat": "rust",
+  "label": "oc-nvfp4hi38",
+  "content": "",
+  "error": "empty content; rc=0; stderr: ; raw: {\n  \"payloads\": [],\n  \"meta\": {\n    \"durationMs\": 162077,\n    \"agentMeta\": {\n      \"sessionId\": \"eval-oc-nvfp4hi38-R5\",\n      \"provider\": \"llama.cpp\",\n      \"model\": \"/usr/local/share/llama.cpp/models",
+  "wall": 163.34435987472534,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ }
+]

@@ -5,12 +5,17 @@ ordered lists of llama.cpp endpoints ("tiers"), fastest first. If the
 preferred tier is down, requests cascade down the list until they hit a
 live server. When a faster tier recovers, traffic is promoted back.
 
-It serves **two independent routing tables** from one process:
+It serves **N independent named routing tables ("portals")** from one
+process — each portal is a name, a listen port, and an ordered endpoint
+list. Two portals exist by default:
 
-| Table       | Port  | Purpose                                   |
+| Portal      | Port  | Purpose                                   |
 |-------------|-------|-------------------------------------------|
 | `[agent]`    | 40800 | main agent endpoint (freeclaw points here) |
 | `[subagent]` | 40810 | sub-agent endpoint                         |
+
+and `waterfall.conf` sections define any further portals (names are
+`[a-z0-9-]+`, each with its own `port = N`).
 
 The point: freeclaw (or any client) points at `localhost:40800` (main) and
 `localhost:40810` (sub-agents) once, permanently, and never needs to know
@@ -41,8 +46,9 @@ vs `attached — q detaches`.
 ```
 freeclaw agent    → waterfall :40800 [agent]    → tier 1  127.0.0.1:40801   (local deep-proxy → :40802 llama-server)
                                                 → tier 2  127.0.0.1:40811   (ssh tunnel → remote deep-proxy → …)
-                                                → tier 3  192.0.2.20:40801 (WireGuard peer's deep-proxy)
+                                                → tier 3  10.0.0.x:40801 (WireGuard peer's deep-proxy)
 freeclaw subagent → waterfall :40810 [subagent] → its own tier list (e.g. cloudclaw :40820, or the same nodes)
+other client      → waterfall :NNNNN [any-name] → any further portal defined in waterfall.conf
 ```
 
 ### Layering invariant
@@ -137,31 +143,45 @@ local and remote, which keeps debugging sane.
 
 ## Persistence
 
-`waterfall.conf` holds both tables and their full routing state:
+`waterfall.conf` holds every portal and its full routing state — one
+`[name]` section per portal (`[a-z0-9-]+`), an optional `port = N` line,
+then endpoints:
 
 ```
 [agent]
+port = 40800
 127.0.0.1:40801  # local
-192.0.2.20:40801  # peerhost
+10.0.0.x:40801  # example peer
 
 [subagent]
+port = 40810
 *127.0.0.1:40801  # local        ← * = pinned
 !127.0.0.1:40820  # cloudclaw    ← ! = disabled
+
+[cloud]
+port = 40830
+127.0.0.1:40820  # cloudburst
 ```
 
-- Priority = line order. Legacy files without section headers read as
-  `[agent]` — old single-table confs keep working.
+- Priority = line order. The conf defines the portal set: sections are
+  portal names, any number of them. `port =` is optional for the two
+  canonical portals (`[agent]` defaults to :40800, `[subagent]` to
+  :40810) and required for everything else; auto-save always writes it
+  explicitly. Legacy files without section headers read as `[agent]` —
+  old single-table confs keep working.
 - Saved on `w` in the TUI (or the `write` CLI command) **and
   automatically whenever the server exits** (stop command, signals,
-  owned-TUI quit) — routing tables, order, pins, and disabled state all
+  owned-TUI quit) — portals, ports, order, pins, and disabled state all
   come back after a restart.
 - Between saves the `[+]` dirty indicator shows unsaved state; `u`
-  reverts the runtime tables to what's on disk. Hand edits are fine —
-  `r` in the TUI or SIGHUP to the proxy reloads.
+  reverts the runtime portals to what's on disk. Hand edits are fine —
+  `r` in the TUI or SIGHUP to the proxy reloads, including live re-binds
+  when a portal's `port =` changed and listeners opening/closing when
+  sections were added or removed.
 
 ## v1 assumptions
 
-- **Homogeneous models per table** (Qwen 3.6 on all nodes). Model names
+- **Homogeneous models per portal** (Qwen 3.6 on all nodes). Model names
   pass through untouched. The TUI shows each tier's model from `/props`
   and flags mismatches, but waterfall does not translate between models.
 - Endpoints are plain `ip:port` (WireGuard/LAN/localhost). SSH tunnels
@@ -172,20 +192,29 @@ local and remote, which keeps debugging sane.
 
 - `llama-waterfall.mjs` — zero-dependency Node:
   - no args — autostart + TUI (see Running it above).
-  - `serve [agent-port] [--subagent-port <n>]` — the proxy + health
-    poller + unix control socket (`waterfall.sock` in the launcher root;
-    local-only by nature, no auth story, no second TCP port).
+  - `serve [agent-port] [--subagent-port <n>] [--portal <name:port> …]` —
+    the proxy + health poller + unix control socket (`waterfall.sock` in
+    the launcher root; local-only by nature, no auth story, no second TCP
+    port). `--portal name:port` (repeatable) overrides any portal's
+    listen port and beats conf `port =` lines; the legacy positional
+    agent-port and `--subagent-port` keep working the same way.
   - `tui` — vim-keyed live dashboard attached to the running proxy over
     the control socket (JSON-lines protocol; push events, no polling).
   - `stop` — stop the server and attached TUIs, saving unsaved changes.
+  - **Portal CRUD** — `portal list [--json]`, `portal add <name>
+    [--port <n>]` (listener opens immediately; persist with `write`/`w`),
+    `portal rm <name>`.
   - **CLI control** — the full TUI surface is also exposed as subcommands
     so agents and scripts can drive it (ranks are 1-based, as displayed;
-    every command accepts `--json`; per-tier commands act on `[agent]`
-    unless `--table subagent` is given):
+    every command accepts `--json`; per-tier commands act on the first
+    portal (`[agent]`) unless `--portal <name>` is given — `--table` is a
+    deprecated alias, and `sub` still means `subagent`):
     `status`, `pin <rank>|off`, `disable <rank> [--hard]`, `enable <rank>`,
     `add <host:port> [label…] [--rank <n>]`, `remove <rank>`,
     `move <rank> <new-rank>`, `edit <rank> <host:port> [label…]`,
     `write`, `reload`, `test <rank>`.
+    `status --json` exposes the portals under `.portals` (`.tables` is
+    kept as a deprecated alias).
 - `waterfall.conf` — see Persistence above. Lives in the launcher root
   next to `.tunnel-history`.
 - Launcher `--waterfall` mode — starts the proxy with **no local
@@ -193,20 +222,25 @@ local and remote, which keeps debugging sane.
 
 ## TUI
 
-Two stacked panes — `[agent]` on top, `[subagent]` below — with the event
-log underneath. **Tab** (or Shift-Tab) moves focus between panes; every
-key acts on the focused pane. Config-as-buffer semantics (vim mental
-model): rank/add/remove/edit/pin/disable changes apply to the running
-proxy immediately, but `waterfall.conf` is only persisted on `w` — or
-automatically when the server exits. A `[+]` dirty indicator shows
-unsaved state; `u` reverts the runtime tables to what's on disk.
+One stacked pane per portal, in conf order, with the event log
+underneath. **Tab / l** (next) and **Shift-Tab / h** (previous) move
+focus between panes; every key acts on the focused pane. If the terminal
+is too short to show every pane expanded, unfocused panes collapse to a
+one-line summary (name, port, tier/healthy counts, active endpoint) so
+the focused pane always stays whole. Config-as-buffer semantics (vim
+mental model): rank/add/remove/edit/pin/disable/portal changes apply to
+the running proxy immediately, but `waterfall.conf` is only persisted on
+`w` — or automatically when the server exits. A `[+]` dirty indicator
+shows unsaved state; `u` reverts the runtime portals to what's on disk.
 
 ```
- Tab   switch pane          g/G  top/bottom
- j/k   move cursor          J/K  rank down/up
+ h/l   switch pane (Tab/Shift-Tab too)
+ j/k   move cursor          C-d/C-u  jump 5 down/up
+ g/G   top/bottom (gg works) J/K  rank down/up
  a     add endpoint         dd   remove
  e     edit endpoint        x    disable (drain)   X   hard disable
  p     pin traffic to tier  t    test (health + 1-token completion)
+ A     add portal (name:port)  D  remove focused portal (asks y/N)
  w     write config         u    undo → reload from disk
  r     reload config        ?    help
  q     quit (stops the server only if this invocation started it)

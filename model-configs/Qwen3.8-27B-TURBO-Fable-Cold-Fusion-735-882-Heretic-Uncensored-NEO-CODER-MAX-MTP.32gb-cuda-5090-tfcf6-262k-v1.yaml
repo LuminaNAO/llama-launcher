@@ -1,0 +1,121 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-tfcf6-262k-v1"
+model: "Qwen3.8"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-tfcf6-262k-v1   (DRAFT 2026-09-04 — unscreened)
+    Per-model config for:
+      DavidAU/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP-GGUF
+      file  ...-NEO-CODER-MAX-MTP-Q6_K.gguf  24.03 GB / 22.4 GiB on disk
+      mmproj-BF16.gguf (0.93 GB), same repo. HF LFS sha256 verified on download.
+    Target: RTX 5090, 32 GiB VRAM, CUDA0, Blackwell sm_120. Host 62 GB.
+
+    Lineage: successor to Cold-Fusion-GAIN-V1.1-NEO-MAX (tune cfq6-262k-v1,
+    gauntlet 28/31) and the finished stage-2 of the gated 732 stage-1 dropped
+    2026-08-25. Card claims (ALL self-reported, unverified here):
+      * TURBO: thinking tokens cut to 1/2 .. 1/10 of baseline.
+      * Heretic stage-2 decensor: KL 0.0025, refusals 11/100 (stage 1: 86/100).
+      * ARC-C 735 / ARC-E 882 (base 591 / 782, mxfp8) — weak proxy for coding.
+      * MTP tensors kept at Q8_0 in every -MTP quant; output tensor 16-bit.
+    Card samplers (thinking): temp 1.0, top-p 0.95, top-k 20, min-p 0,
+    rep-pen 1.0 — identical to this tune line; MTP wants temp<=1, rep-pen 1.
+
+    Derived from cfq6-262k-v1 with ONE deliberate change:
+      * -ub 512 (cfq6 ran 256). cfq6 needed 256 to fit a 24.14 GiB
+        UD-Q6_K_XL (31.9 GiB used with MTP). This file is 22.4 GiB — the
+        same weight as the Fable-Heretic MTP-Q6_K that ran 512 at 262k with
+        vision. If load fails or free VRAM < 1 GiB, drop to -ub 256.
+    Checkpoints follow production (MAX 20 x STEP 4096) rather than cfq6's
+    16 x 16384, so behaviour under the hdd-cache matches HIGHEST during the
+    screen.
+
+    COMMUNITY (HF discussions read 2026-09-04, 28 threads in 2 days):
+      * #25/#22 "cutting off": replies truncate to ~1/3 length after 2+
+        turns, ending mid-phrase. DavidAU's own diagnosis: TURBO's thinking
+        reduction "might suppress normal output generation"; a V2 with
+        "longer output" is finished and awaiting release; a 3rd branch fixes
+        it "at the root level". => our screen MUST include a 4-turn test.
+      * #12 (26 comments): TURBO is 50-90% faster than GAIN but "can't
+        debate", "yes man", "rushes into actions", needs instructions
+        repeated; GAIN-V1.1 "worked perfectly first try" in 27 min where
+        TURBO took 2:30 but needed extensive iteration.
+      * #19: user's coding benchmark — TURBO heretic "significantly worse"
+        than unsloth Qwen3.8; the NON-heretic Cold Fusion fixed its own
+        work via tools. DavidAU: "post heretic step was/is part of the
+        issue", addressed in release #2.
+      * #18: temp > 1.0 "wrecks it"; users settle on 0.7-0.85 (RP/SillyTavern
+        context, so weigh accordingly). Jinja template is REQUIRED (trained
+        with it; without it reasoning defaults to medium). Reasoning flag
+        should be "high" not "xhigh" in KoboldCPP — same alias behaviour
+        as our froggeric template.
+      Net: strong hype, but the coding/agentic reports point the wrong way
+      and the author concedes the heretic step hurt. Screen anyway (it is
+      the same lineage that scored 28/31 here), but expect V2 to be the one
+      worth production. Add to plan: 4-turn cutoff test; if it misbehaves
+      at temp 1.0, re-run probes at 0.85 before judging.
+
+    MEASURED HERE 2026-09-04 (this tune, first screen):
+      Load: 30.5 GiB used, 1.7 GiB free at -ub 512 — fits, at the ceiling.
+      Speed: decode shallow code/reason/prose 118/96/85 t/s; @201k ctx
+        71 t/s; prefill 5492 @62k, 3620 @201k. MTP acceptance 0.40-0.69
+        (Q8_0 drafter; best of the three candidates). Slower than GSQ-RCO
+        everywhere except acceptance; faster than HIGHEST only at depth.
+      QUALITY (fresh FreeClaw, --thinking high): Rust gauntlet 3/5 —
+        R3 fails on the Option<R>: Clone bound (same trap as HIGHEST),
+        R5 fails on `use std::task::ArcWake` (does not exist in std; it is
+        a futures-crate item) — a knowledge error, not a slip. Tasks took
+        15-34 s each: it does not iterate with rustc before submitting.
+        Matches HF #12/#19 ("rushes into actions", worse than stock).
+      TURBO CLAIM VERIFIED: thinking on identical prompts at xhigh —
+        3-switch 1.8k chars (GSQ 18k), cron.d 0.1k (GSQ 49k), lifetime
+        bug 1.9k (GSQ 61k), marbles 4.0k (GSQ 0.3k). Answers correct on
+        all four. 4-turn test: all finish=stop, 1.5-2.4k-char answers —
+        the HF #25/#22 truncation did NOT reproduce with the froggeric
+        jinja template (their reports may be template-related).
+      VERDICT (pending HIGHEST same-day rerun): not a production
+        candidate for agentic coding — loses the gauntlet to GSQ-RCO 3/5
+        vs 4/5 and gives up the R3/R5 separators; slower than GSQ-RCO.
+        Its real asset is latency-per-answer for chat-style use. Revisit
+        on DavidAU's V2 (author says the post-heretic step hurt).
+      Files: eval-harness-2026-08/{results_oc_tfcf6_rust.json,
+        probes_tfcf6.json, speed_tfcf6.json}.
+
+    SCREEN PLAN (vs production HIGHEST nvfp4hi-262k-v1 = 26/26):
+      1. load: record VRAM used, confirm "blk.64" nextn tensors LOADED by the
+         draft (no "unused tensor blk.64.* -- ignoring"), vision one image.
+      2. speed: decode t/s shallow + ~100k ctx; prefill t/s; MTP draft
+         acceptance + mean len (Coletti bar: acc 0.46-0.80).
+      3. quality: Rust gauntlet R1-R5 (eval-harness-2026-08), 3-switch
+         puzzle, security probe — at reasoning_effort xhigh (fair vs prod).
+      4. TURBO claim: thinking-token count on identical prompts vs HIGHEST;
+         check the shorter reasoning drops no gauntlet item.
+    Production trial only if it matches 26/26 AND wins on speed or VRAM AND
+    the thinking reduction is real on our prompts.
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "20"
+  CHECKPOINT_MIN_STEP: "4096"
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "262144"
+  DIO: "1"
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 3 -b 2048 -ub 512 --min-p 0 --image-min-tokens 1024 --no-mmproj-offload --chat-template-file qwen38-froggeric-fixed.jinja --reasoning-format deepseek --chat-template-kwargs {\"reasoning_effort\":\"xhigh\"}"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "1.0"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

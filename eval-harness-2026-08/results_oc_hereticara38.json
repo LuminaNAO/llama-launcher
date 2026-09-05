@@ -1,0 +1,262 @@
+[
+ {
+  "id": "M1",
+  "cat": "math",
+  "label": "oc-hereticara38",
+  "content": "Since 101 \u2261 1 (mod 4), the congruence n\u00b2 \u2261 \u22121 (mod 101) has exactly two solutions: n \u2261 10 and n \u2261 91 (mod 101).\n\nCounting in 1 \u2264 n \u2264 1,000,000:\n- n \u2261 10 (mod 101): \u230a(1,000,000 \u2212 10)/101\u230b + 1 = 9900 + 1 = 9901\n- n \u2261 91 (mod 101): \u230a(1,000,000 \u2212 91)/101\u230b + 1 = 9900 + 1 = 9901\n\nTotal: 9901 + 9901 = 19802, confirmed by direct brute-force computation.\n\nANSWER: 19802",
+  "error": null,
+  "wall": 22.862650156021118,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "M2",
+  "cat": "math",
+  "label": "oc-hereticara38",
+  "content": "Let me verify with an independent digit-DP computation.\nMismatch \u2014 my DP counted up to 99,999,999 instead of 10,000,000. Fixing the bound:\nTwo independent methods agree:\n\n1. **Brute force** (iterate 1..10,000,000, check `n % 13 == 0` and digit sum == 13): **2036**\n2. **Digit DP** (count numbers \u2264 9,999,999 with digit sum 13 and value \u2261 0 mod 13; note 10,000,000 itself has digit sum 1 so the bound is exact): **2036**\n\nANSWER: 2036",
+  "error": null,
+  "wall": 14.588790655136108,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "M3",
+  "cat": "math",
+  "label": "oc-hereticara38",
+  "content": "**E = 42**\n\nLet E = expected rolls from scratch, F = expected rolls given the last roll was a six.\n\n- E = 1 + (1/6)F + (5/6)E\n- F = 1 + (1/6)(0) + (5/6)E \u2192 F = 1 + (5/6)E\n\nSubstituting: E = 1 + (1/6)(1 + (5/6)E) + (5/6)E \u2192 E(1/36) = 7/6 \u2192 E = 42.\n\n(Consistent with the general run formula for p = 1/6: 1/p\u00b2 + 1/p = 36 + 6 = 42.)\n\nANSWER: 42",
+  "error": null,
+  "wall": 6.034830093383789,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "M4",
+  "cat": "math",
+  "label": "oc-hereticara38",
+  "content": "**Lattice paths from (0,0) to (10,10) avoiding (5,5):**\n\n- Total paths: C(20,10) = 184,756\n- Paths through (5,5): C(10,5) \u00d7 C(10,5) = 252 \u00d7 252 = 63,504\n- Paths avoiding (5,5): 184,756 \u2212 63,504 = **121,252**\n\n(Verified with a brute-force recursive count, which matches.)\n\nANSWER: 121252",
+  "error": null,
+  "wall": 7.754656791687012,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "M5",
+  "cat": "math",
+  "label": "oc-hereticara38",
+  "content": "Using the Chinese Remainder Theorem (7\u00b711\u00b713 = 1001, so the solution is unique mod 1001):\n\n- n = 143a + 91b + 77c\n- 143a \u2261 3 (mod 7) \u2192 3a \u2261 3 \u2192 a = 1\n- 91b \u2261 5 (mod 11) \u2192 3b \u2261 5 \u2192 b = 9\n- 77c \u2261 7 (mod 13) \u2192 12c \u2261 7 \u2192 c = 6\n\nn \u2261 143 + 819 + 462 = 1424 \u2261 423 (mod 1001)\n\nCheck: 423 mod 7 = 3 \u2713, 423 mod 11 = 5 \u2713, 423 mod 13 = 7 \u2713\n\nSmallest n > 1000 is 423 + 1001 = **1424**.\n\nVerify: 1424 = 7\u00b7203 + 3 \u2713, 1424 = 11\u00b7129 + 5 \u2713, 1424 = 13\u00b7109 + 7 \u2713\n\nANSWER: 1424",
+  "error": null,
+  "wall": 9.409609317779541,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "M6",
+  "cat": "math",
+  "label": "oc-hereticara38",
+  "content": "A divisor of N = 2\u2075 \u00b7 3\u2074 \u00b7 5\u00b2 is a perfect square exactly when all its prime exponents are even.\n\n- For 2: exponents 0, 2, 4 \u2192 1 + 2\u00b2 + 2\u2074 = 21\n- For 3: exponents 0, 2, 4 \u2192 1 + 3\u00b2 + 3\u2074 = 91\n- For 5: exponents 0, 2 \u2192 1 + 5\u00b2 = 26\n\nSum = 21 \u00b7 91 \u00b7 26 = 1911 \u00b7 26 = 49686\n\nANSWER: 49686",
+  "error": null,
+  "wall": 4.8656816482543945,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "M7",
+  "cat": "math",
+  "label": "oc-hereticara38",
+  "content": "The number of five-card hands is C(52,5) = 2,598,960.\n\nFor exactly two pairs:\n- Choose the two ranks for the pairs: C(13,2) = 78\n- Choose suits for each pair: C(4,2) \u00b7 C(4,2) = 6 \u00b7 6 = 36\n- Choose the fifth card's rank (a third rank): 11\n- Choose its suit: 4\n\nFavorable hands: 78 \u00b7 36 \u00b7 11 \u00b7 4 = 123,552.\n\nProbability = 123,552 / 2,598,960. Reducing: divide by 13\u00b724\u00b7\u2026 \u2014 stepping through, 123,552/2,598,960 = 198/4,165, where 198 = 2\u00b73\u00b2\u00b711 and 4,165 = 5\u00b77\u00b2\u00b717 share no factors.\n\nSo m + n = 198 + 4,165 = 4,363.\n\nANSWER: 4363",
+  "error": null,
+  "wall": 9.323009967803955,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "M8",
+  "cat": "math",
+  "label": "oc-hereticara38",
+  "content": "Verified computationally and by hand:\n\n- For n \u2265 1000: f(n) = n \u2212 3\n- Working down: f(998) = f(f(1003)) = f(1000) = 997, f(999) = f(f(1004)) = f(1001) = 998, and this continues in an alternating pattern\n- Induction shows: for all n < 1000, **f(n) = 998 if n is odd, 997 if n is even** (since f(n) = f(f(n+5)), and the inner value lands on 997/998, whose f-values are 998/997 respectively)\n\nSince 1 is odd, f(1) = 998.\n\nANSWER: 998",
+  "error": null,
+  "wall": 36.94747304916382,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "L1",
+  "cat": "logic",
+  "label": "oc-hereticara38",
+  "content": "Working through the constraints:\n\n- B \u21d4 C (B's truth = C is a knight)\n- C \u21d4 \u00acA (C says A is a knave)\n\n**Case A = T:** Then C = F, so B = F. A's statement (B and D are both knaves) must be true, forcing D = F. E's statement (A and C same type) is false since they differ, so E = F. Count knights: only A \u2192 1 knight. D's claim \"exactly two\" is false \u2713 (consistent with D being a knave). **Consistent.**\n\n**Case A = F:** Then C = T and B = T. E's statement (A and C same) is false \u2192 E = F. Knights so far: B, C (2). If D = T, total is 3 \u2192 D's claim \"exactly two\" is false, contradiction. If D = F, total is 2 \u2192 D's claim is true, contradiction. **Impossible.**\n\nUnique solution: A = knight, B, C, D, E = knaves.\n\nANSWER: TFFFF",
+  "error": null,
+  "wall": 11.806920766830444,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "L2",
+  "cat": "logic",
+  "label": "oc-hereticara38",
+  "content": "Checking all permutations of the five weekdays against the five constraints leaves exactly 4 valid schedules, and in every single one of them Sam lands on Friday.\n\nANSWER: Fri",
+  "error": null,
+  "wall": 20.506901264190674,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "L3",
+  "cat": "logic",
+  "label": "oc-hereticara38",
+  "content": "Let n be the number of false statements. Each statement S\u1d62 is true exactly when n = i.\n\n- **n = 0:** All true \u2192 but S2, S3, S4 would be false. Contradiction.\n- **n = 1:** S1 true, others false \u2192 that's 3 false, not 1. Contradiction.\n- **n = 2:** S2 true, others false \u2192 that's 3 false, not 2. Contradiction.\n- **n = 3:** S3 true; S1, S2, S4 false \u2192 exactly 3 false. \u2713 Consistent.\n- **n = 4:** S4 true \u2192 only 3 false, not 4. Contradiction.\n\nThe only consistent scenario: S3 is true, and S1, S2, S4 are false.\n\nANSWER: 3",
+  "error": null,
+  "wall": 7.071547985076904,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "L4",
+  "cat": "logic",
+  "label": "oc-hereticara38",
+  "content": "**Solution: 5 moves**\n\n1. **Fill the 7L jug** \u2192 (7, 0)\n2. **Pour 7L \u2192 5L** until the 5L jug is full \u2192 (2, 5)\n3. **Empty the 5L jug** \u2192 (2, 0)\n4. **Fill the 7L jug** again \u2192 (7, 2)\n5. **Pour 7L \u2192 5L** until the 5L jug is full (it takes 3L, since it already holds 2L) \u2192 **(4, 5)** \u2713\n\nThe 7L jug now holds exactly 4 litres.\n\nQuick check that nothing shorter works: BFS over states shows the first goal state (4 in the 7L jug) appears only at depth 5 \u2014 no 1- to 4-move sequence lands on (4, x) or (x, 4).\n\nANSWER: 5",
+  "error": null,
+  "wall": 21.766133308410645,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "L5",
+  "cat": "logic",
+  "label": "oc-hereticara38",
+  "content": "Checking triples of positive integers with a\u2264b\u2264c, abc=2450 and a+b+c=64:\n\n- **5, 10, 49**: product 2450, sum 64 \u2713\n- **7, 7, 50**: product 2450, sum 64 \u2713\n\nNo other factor triples work.\n\nANSWER: 2",
+  "error": null,
+  "wall": 16.83472180366516,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "L6",
+  "cat": "logic",
+  "label": "oc-hereticara38",
+  "content": "Both methods agree \u2014 let me grab the actual press pattern to show it:\n**Answer: 15 presses.**\n\nVerified two independent ways:\n1. **Chasing method** \u2014 fix the first row's presses (32 possibilities), then each subsequent row is forced (you must press below every lamp still off in the row above). Best result: 15.\n2. **Full linear algebra over GF(2)** \u2014 the 25\u00d725 toggle matrix has rank 23, leaving 2 free variables (4 total solutions); the minimum Hamming weight across all solutions is 15.\n\nOne optimal press pattern (X = press once):\n\n```\nX X . . .\nX X . X X\n. . X X X\n. X X X .\n. X X . X\n```\n\n(15 presses: (0,0),(0,1),(1,0),(1,1),(1,3),(1,4),(2,2),(2,3),(2,4),(3,1),(3,2),(3,3),(4,1),(4,2),(4,4) \u2014 each pressed exactly once.)\n\nANSWER: 15",
+  "error": null,
+  "wall": 23.018703937530518,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "C1",
+  "cat": "code_predict",
+  "label": "oc-hereticara38",
+  "content": "ANSWER: 7",
+  "error": null,
+  "wall": 3.4461071491241455,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "C2",
+  "cat": "code_predict",
+  "label": "oc-hereticara38",
+  "content": "18\n\nANSWER: 18",
+  "error": null,
+  "wall": 6.122809886932373,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "C3",
+  "cat": "code_predict",
+  "label": "oc-hereticara38",
+  "content": "ANSWER: 6 12",
+  "error": null,
+  "wall": 6.8719162940979,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "C4",
+  "cat": "code_predict",
+  "label": "oc-hereticara38",
+  "content": "ANSWER: 7 aaa",
+  "error": null,
+  "wall": 7.561000347137451,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "C5",
+  "cat": "code_predict",
+  "label": "oc-hereticara38",
+  "content": "Tracing the loop: in Python, `1`, `1.0`, and `True` all hash the same and compare equal, so they collide into a single dict key.\n\n- `d[1] = 0` \u2192 `{1: 0}`\n- `d[1.0] = 1` \u2192 same key, value updated \u2192 `{1: 1}`\n- `d[True] = 2` \u2192 same key again \u2192 `{1: 2}`\n- `d[\"1\"] = 3` \u2192 distinct key \u2192 `{1: 2, \"1\": 3}`\n\nSo `len(d)` is 2, and `d[1]` is 2 (the value from the last colliding write).\n\nANSWER: 2 2",
+  "error": null,
+  "wall": 6.946514368057251,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "W1",
+  "cat": "code_write",
+  "label": "oc-hereticara38",
+  "content": "```python\ndef interval_cover(intervals, span):\n    \"\"\"Return the minimum number of intervals from `intervals` needed to\n    fully cover `span` (a (start, end) tuple).\n\n    Touching endpoints count as covered (e.g. (1,3) followed by (3,5)\n    covers (1,5)). Returns -1 if the span cannot be fully covered.\n    \"\"\"\n    lo, hi = span\n    if lo >= hi:\n        return 0\n\n    ivs = sorted(intervals)  # sort by start endpoint\n    n = len(ivs)\n    i = 0\n    pos = lo    # how far to the right coverage has reached\n    used = 0\n\n    while pos < hi:\n        farthest = pos\n        # Among intervals that start at or before the current frontier,\n        # take the one reaching farthest (greedy choice).\n        while i < n and ivs[i][0] <= pos:\n            farthest = max(farthest, ivs[i][1])\n            i += 1\n        if farthest <= pos:\n            return -1  # no interval extends coverage -> gap\n        pos = farthest\n        used += 1\n\n    return used\n```",
+  "error": null,
+  "wall": 30.06477427482605,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "W2",
+  "cat": "code_write",
+  "label": "oc-hereticara38",
+  "content": "I found that `parse_expr` and `parse_term` need `nonlocal pos` since they assign to it, and I'm fixing that now.\n```python\ndef eval_expr(s):\n    \"\"\"Evaluate an arithmetic expression with non-negative integers,\n    + - * / ( ), and unary minus. '/' is float division. Returns a float.\"\"\"\n    pos = 0\n    n = len(s)\n\n    def skip_ws():\n        nonlocal pos\n        while pos < n and s[pos].isspace():\n            pos += 1\n\n    def parse_expr():\n        nonlocal pos\n        val = parse_term()\n        while True:\n            skip_ws()\n            if pos < n and s[pos] == '+':\n                pos += 1\n                val = val + parse_term()\n            elif pos < n and s[pos] == '-':\n                pos += 1\n                val = val - parse_term()\n            else:\n                break\n        return val\n\n    def parse_term():\n        nonlocal pos\n        val = parse_unary()\n        while True:\n            skip_ws()\n            if pos < n and s[pos] == '*':\n                pos += 1\n                val = val * parse_unary()\n            elif pos < n and s[pos] == '/':\n                pos += 1\n                rhs = parse_unary()\n                if rhs == 0:\n                    raise ZeroDivisionError(\"division by zero\")\n                val = val / rhs\n            else:\n                break\n        return val\n\n    def parse_unary():\n        nonlocal pos\n        skip_ws()\n        if pos < n and s[pos] == '-':\n            pos += 1\n            return -parse_unary()\n        return parse_primary()\n\n    def parse_primary():\n        nonlocal pos\n        skip_ws()\n        if pos < n and s[pos] == '(':\n            pos += 1\n            val = parse_expr()\n            skip_ws()\n            if pos >= n or s[pos] != ')':\n                raise ValueError(\"expected ')'\")\n            pos += 1\n            return val\n        if pos < n and s[pos].isdigit():\n            start = pos\n            while pos < n and s[pos].isdigit():\n                pos += 1\n            return float(s[start:pos])\n        raise ValueError(f\"unexpected character at position {pos}: {s[pos:]!r}\")\n\n    result = parse_expr()\n    skip_ws()\n    if pos != n:\n        raise ValueError(f\"unexpected character at position {pos}: {s[pos:]!r}\")\n    return float(result)\n```",
+  "error": null,
+  "wall": 25.61592197418213,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "W3",
+  "cat": "code_write",
+  "label": "oc-hereticara38",
+  "content": "```python\ndef topo_count(n, edges):\n    \"\"\"Count distinct topological orderings of a DAG with nodes 0..n-1.\"\"\"\n    pred = [0] * n  # bitmask of each node's direct predecessors\n    for u, v in edges:\n        pred[v] |= 1 << u\n\n    size = 1 << n\n    dp = [0] * size\n    dp[0] = 1\n    for mask in range(size):\n        if dp[mask] == 0:\n            continue\n        for v in range(n):\n            bit = 1 << v\n            if not mask & bit and (pred[v] & mask) == pred[v]:\n                dp[mask | bit] += dp[mask]\n    return dp[size - 1]\n```",
+  "error": null,
+  "wall": 6.443260192871094,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "I1",
+  "cat": "instruct",
+  "label": "oc-hereticara38",
+  "content": "Tidal energy is a green source of electricity.\nOcean tides create currents that turn rotating blades.\nTurbines capture kinetic energy as tides pass by.\nSuch plants offer clean power without burning fuels.",
+  "error": null,
+  "wall": 13.683082342147827,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "I2",
+  "cat": "instruct",
+  "label": "oc-hereticara38",
+  "content": "{\"primes\":[37,31,29,23,19,17,13,11,7,5,3,2],\"sum\":197,\"concat\":\"2-3-5-7-11-13-17-19-23-29-31-37\",\"meta\":{\"count\":12,\"even_count\":1}}",
+  "error": null,
+  "wall": 5.053164482116699,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "I3",
+  "cat": "instruct",
+  "label": "oc-hereticara38",
+  "content": "1\n2\nfizz\n4\nbuzz\nfizz\n7\n8\nfizz\nbuzz\n11\nfizz\n13\n14\nfizzbuzz\n16\n17\nfizz\n19\nbuzz\nbuzz\n22\n23\nbuzz\nfizz\n26\nbuzz\n28\n29\nfizzbuzz",
+  "error": null,
+  "wall": 7.164974927902222,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ },
+ {
+  "id": "I4",
+  "cat": "instruct",
+  "label": "oc-hereticara38",
+  "content": "Beneath the shimmering surface of the Indian Ocean, ancient trade winds whisper secrets older than empires, while coral reefs cradle schools of silver fish that dart between the shifting currents carrying warmth from tropical latitudes toward cooler shores, where monsoon rains reshape coastlines each season, and somewhere beyond the last trading vessel, the deep blue water stretches until the horizon.",
+  "error": null,
+  "wall": 10.1167893409729,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-heretic-ara/Qwen3.8-27B-heretic-ara.i1-Q6_K.gguf"
+ }
+]

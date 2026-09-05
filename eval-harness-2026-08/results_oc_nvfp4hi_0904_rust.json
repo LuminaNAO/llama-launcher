@@ -1,0 +1,42 @@
+[
+ {
+  "id": "R1",
+  "cat": "rust",
+  "label": "oc-nvfp4hi-0904",
+  "content": "```rust\npub fn squash(v: &mut Vec<String>) {\n    // Dedup consecutive runs in place (keep first of each run),\n    // comparing on the original (untrimmed) values.\n    let mut w = 0usize;\n    for r in 0..v.len() {\n        if w == 0 || v[r] != v[w - 1] {\n            if r != w {\n                v.swap(w, r);\n            }\n            w += 1;\n        }\n    }\n    v.truncate(w);\n\n    // Only now trim ASCII whitespace from both ends of survivors.\n    for s in v.iter_mut() {\n        *s = s.trim_matches(char::is_ascii_whitespace).to_string();\n    }\n}\n```",
+  "error": null,
+  "wall": 31.54728889465332,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "R2",
+  "cat": "rust",
+  "label": "oc-nvfp4hi-0904",
+  "content": "",
+  "error": "empty content; rc=0; stderr: ; raw: {\n  \"payloads\": [],\n  \"meta\": {\n    \"durationMs\": 164647,\n    \"agentMeta\": {\n      \"sessionId\": \"eval-oc-nvfp4hi-0904-R2\",\n      \"provider\": \"llama.cpp\",\n      \"model\": \"/usr/local/share/llama.cpp/mod",
+  "wall": 165.86992526054382,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "R3",
+  "cat": "rust",
+  "label": "oc-nvfp4hi-0904",
+  "content": "```rust\nuse std::sync::Arc;\nuse std::thread;\n\n/// Maps `f` over `items` using exactly `workers` OS threads and returns the\n/// results in the original input order.\npub fn parallel_map<T, R, F>(items: Vec<T>, f: F, workers: usize) -> Vec<R>\nwhere\n    T: Send + 'static,\n    R: Send + 'static,\n    F: Fn(T) -> R + Send + Sync + 'static,\n{\n    let workers = workers.max(1);\n    let n = items.len();\n    let f = Arc::new(f);\n\n    // Split `items` into `workers` contiguous chunks of (nearly) equal size.\n    let base = n / workers;\n    let rem = n % workers;\n\n    let mut handles = Vec::with_capacity(workers);\n    for i in 0..workers {\n        let len = base + if i < rem { 1 } else { 0 };\n        // Move the next chunk out of `items` by value.\n        let chunk: Vec<T> = items.drain(..len).collect();\n        let f = f.clone();\n        handles.push(thread::spawn(move || {\n            chunk.into_iter().map(|x| f(x)).collect::<Vec<R>>()\n        }));\n    }\n\n    // Join in spawn (chunk) order so results stay in original input order.\n    let mut out = Vec::with_capacity(n);\n    for handle in handles {\n        out.extend(handle.join().expect(\"parallel_map worker panicked\"));\n    }\n    out\n}\n```",
+  "error": null,
+  "wall": 70.70968770980835,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "R4",
+  "cat": "rust",
+  "label": "oc-nvfp4hi-0904",
+  "content": "The implementation is verified: compiles cleanly with `rustc --edition 2021`, all tests pass (even/odd/empty/single slices, mutation of both pair elements, non-`Copy` types, exact pair count and order, odd tail dropped). No `chunks_mut`/`split_at_mut`/slice helpers used \u2014 just `as_mut_ptr` + `offset` guarded by a `PhantomData<&'a mut T>` that pins the unique borrow.\n\n```rust\nuse std::marker::PhantomData;\n\n/// An iterator over non-overlapping consecutive pairs of `&mut T` in a slice,\n/// created by [`pairs_mut`]. An odd trailing element (if any) is dropped.\npub struct PairsMut<'a, T> {\n    /// Pointer to the first element of the next pair.\n    ptr: *mut T,\n    /// Number of complete pairs left to yield.\n    remaining: usize,\n    /// Records that the unique `&'a mut [T]` borrow lives in this iterator\n    /// (the raw pointer derives from it) for the whole `'a` lifetime.\n    _unique: PhantomData<&'a mut T>,\n}\n\n/// Splits `s` into an iterator of non-overlapping consecutive mutable pairs.\n///\n/// For a slice `[a, b, c, d, e]` this yields `(a, b)` then `(c, d)`; the\n/// trailing odd element is dropped.\npub fn pairs_mut<T>(s: &mut [T]) -> PairsMut<'_, T> {\n    PairsMut {\n        ptr: s.as_mut_ptr(),\n        remaining: s.len() / 2,\n        _unique: PhantomData,\n    }\n}\n\nimpl<'a, T: Sized> Iterator for PairsMut<'a, T> {\n    type Item = (&'a mut T, &'a mut T);\n\n    fn next(&mut self) -> Option<Self::Item> {\n        if self.remaining == 0 {\n            return None;\n        }\n        self.remaining -= 1;\n\n        let first = self.ptr;\n        let second = unsafe { self.ptr.offset(1) };\n\n        // Advance past this pair; `2 * (pairs handed out)` never exceeds the\n        // slice length, so the pointer stays within the allocation.\n        self.ptr = unsafe { self.ptr.offset(2) };\n\n        // SAFETY:\n        // - `first` / `second` were derived from `s.as_mut_ptr()`, a valid,\n        //   aligned pointer to the first element of a live slice of length\n        //   `n`, advanced by exactly `2k` and `2k + 1` elements for the\n        //   `k`-th pair, where `k < n / 2`; hence both indices lie in `[0, n)`.\n        // - Every `&mut T` handed out so far covers elements `[2k, 2k + 1]`\n        //   for a distinct `k`, so no two handed-out references overlap:\n        //   the exclusivity invariant of `&mut` is preserved and each\n        //   element is handed out at most once.\n        // - The mutable borrow of the whole slice is uniquely held by this\n        //   iterator (via `PhantomData<&'a mut T>`), so nothing else can\n        //   alias these elements for `'a`.\n        Some(unsafe { (&mut *first, &mut *second) })\n    }\n\n    fn size_hint(&self) -> (usize, Option<usize>) {\n        (self.remaining, Some(self.remaining))\n    }\n}\n```",
+  "error": null,
+  "wall": 80.34026026725769,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ }
+]

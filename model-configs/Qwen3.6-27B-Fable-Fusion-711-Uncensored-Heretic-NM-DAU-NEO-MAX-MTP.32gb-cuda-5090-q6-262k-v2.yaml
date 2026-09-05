@@ -1,0 +1,78 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-q6-262k-v2"
+model: "Qwen3"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-q6-262k-v2
+    v1 with the checkpoint count halved: MAX 32 -> 16, STEP 8192 -> 16384.
+    Both moved together so the coverage invariant holds:
+        MAX 16 x STEP 16384 = 262144 -- still exact 100% even coverage.
+    Effect: checkpoint RAM worst case halves (~22 GiB -> ~11 GiB at full
+    context), at the cost of coarser rollback -- a divergence re-prefills up
+    to 16384 tokens instead of 8192 before a checkpoint catches it.
+    (Halving MAX alone would have kept STEP 8192 but silently shrunk
+    checkpoints to a recent-131K window; rejected as it breaks the even
+    coverage this tune line is built on.)
+
+    Everything below is inherited from v1 unchanged and still load-bearing.
+
+    Per-model config for: DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic
+    -NM-DAU-NEO-MAX-MTP-GGUF, quant MTP-Q6_K (22.38 GB on disk).
+    Target: RTX 5090, 32149 MiB VRAM, CUDA0. Host 62 GB RAM.
+
+    FULL NATIVE 262144 CONTEXT WITH VISION. Two tricks make it fit; both are
+    load-bearing, do not remove either:
+
+      --kv-unified          without it the model fails to LOAD at even 212992.
+      --no-mmproj-offload   the vision projector stays in HOST RAM and images
+                            are encoded on CPU. This is what prevents the
+                            image-encode "resource allocation failed" crash
+                            (measured 2026-08-12, see v1 notes for the full
+                            probe data), and it frees ~1.1 GiB of VRAM besides.
+
+    REQUIRES A RECENT llama-hdd BUILD (verified on b10238 source). The older
+    b10123 package build allocates several GiB more and cannot reach these
+    contexts at all (its measured vision ceiling was 163840).
+
+    Checkpoints live in SYSTEM RAM, not VRAM, so count does not affect VRAM
+    fit. Sized from the measured model
+        size(MiB) = 149.6 + 4.02 KiB/token (~1.2 GiB at pos 260K)
+    worst case ~11 GiB in RAM. If the host still swaps, lower MAX further and
+    scale STEP to keep MAX x STEP = 262144.
+
+    Sibling tunes: q6-262k-v1 keeps the finer 8192 rollback granularity at
+    ~22 GiB RAM worst case. q6-143k-v1 is the everyday variant with ~2.6 GiB
+    VRAM headroom and GPU-side image encode. The NVFP4 tunes reach 262144
+    with the projector on GPU and more margin.
+
+    Draft depth 3 per this model's measured sweep (peaks 3-4, regresses at 5).
+    --image-min-tokens 1024 required for Qwen-VL grounding accuracy.
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "16"
+  CHECKPOINT_MIN_STEP: "16384"
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "262144"
+  DIO: "1"
+  # hdd cache on by default (launcher fills in the machine's default slots dir)
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 3 -b 2048 -ub 512 --image-min-tokens 1024 --no-mmproj-offload"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

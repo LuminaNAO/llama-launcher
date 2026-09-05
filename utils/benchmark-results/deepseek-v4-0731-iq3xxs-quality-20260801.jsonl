@@ -1,0 +1,5 @@
+{"kind":"quality","name":"modular_arithmetic","pass":true,"expected":119,"answer":"119","elapsed_s":21.161,"prompt_tok_s":97.33230564448453,"decode_tok_s":15.075660717569875}
+{"kind":"quality","name":"syllogism","pass":true,"expected":"NO","answer":"NO","elapsed_s":0.67,"prompt_tok_s":60.18255374636397,"decode_tok_s":29.208166603382303}
+{"kind":"quality","name":"code_repair","pass":true,"expected":"seen.add(x)","answer":"The missing statement is:\n\n```python\nseen.add(x)\n```","elapsed_s":1.81,"prompt_tok_s":69.07909885767293,"decode_tok_s":15.63677994024516}
+{"kind":"quality","name":"strict_json","pass":true,"expected":{"count":3,"values":[1,2,3]},"answer":"{\n  \"count\": 3,\n  \"values\": [1, 2, 3]\n}","elapsed_s":2.269,"prompt_tok_s":59.40844045417753,"decode_tok_s":15.707162640688182}
+{"kind":"quality","name":"function_call","pass":true,"expected":{"name":"get_weather","city":"Perth"},"answer":{"type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Perth\"}"},"id":"6dvR94MyFFsGMqTRwHYvskBOFXe8ApRU"},"elapsed_s":5.944,"prompt_tok_s":127.20597850307918,"decode_tok_s":15.172303177297032}

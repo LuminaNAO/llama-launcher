@@ -541,6 +541,55 @@ else
     echo "Installed: $WATERFALL_LINK -> $WATERFALL_TARGET"
 fi
 
+# ── Extra utilities from utils/ ─────────────────────────────────────────────
+# The AUR package put these on PATH as llama-* commands. A source install
+# should not regress relative to the package, so link them here too.
+# Format: <command name>:<path relative to the repo root>
+_UTIL_LINKS=(
+    "llama-mlock-fixer:utils/mlock-fixer.sh"
+    "llama-benchmark:utils/benchmark.sh"
+    "llama-benchmark-backends:utils/benchmark-backends.sh"
+    "llama-bench-batch-sizes:utils/bench-batch-sizes.sh"
+    "llama-load-test:utils/load-test.sh"
+    "llama-vram-stress-test:utils/vram-stress-test.sh"
+    "llama-ssh-tunnel:utils/ssh-tunnel.sh"
+    "llama-install-service:utils/install-service.sh"
+    "llama-soak-test:utils/soak-test-v3b.sh"
+    "llama-slot-tools:utils/slot-tools.sh"
+)
+
+for _entry in "${_UTIL_LINKS[@]}"; do
+    _uname="${_entry%%:*}"
+    _urel="${_entry#*:}"
+    _usrc="$SCRIPT_DIR/$_urel"
+    _udst="$LINK_DIR/$_uname"
+
+    if [[ ! -f "$_usrc" ]]; then
+        echo "Skipping $_uname (no $_urel in this checkout)"
+        continue
+    fi
+    [[ -x "$_usrc" ]] || chmod +x "$_usrc" 2>/dev/null || true
+
+    if [[ -L "$_udst" && "$(readlink -f "$_udst")" == "$(readlink -f "$_usrc")" ]]; then
+        echo "Already installed: $_udst -> $_usrc"
+    elif [[ -e "$_udst" || -L "$_udst" ]]; then
+        # A clash on an optional helper should not abort the whole install,
+        # unlike the core links above -- warn, skip, carry on.
+        echo "WARNING: $_udst exists and points elsewhere, or is a regular file."
+        read -rp "Overwrite? [y/N] " ans
+        if [[ "$ans" =~ ^[Yy]$ ]]; then
+            ln -sfn "$_usrc" "$_udst"
+            echo "Updated: $_udst -> $_usrc"
+        else
+            echo "Skipped $_uname."
+        fi
+    else
+        ln -s "$_usrc" "$_udst"
+        echo "Installed: $_udst -> $_usrc"
+    fi
+done
+unset _entry _uname _urel _usrc _udst
+
 SHELL_NAME="$(detect_shell_name)"
 PROFILE="$(shell_profile_path "$SHELL_NAME")"
 

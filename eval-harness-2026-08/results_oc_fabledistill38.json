@@ -1,0 +1,262 @@
+[
+ {
+  "id": "M1",
+  "cat": "math",
+  "label": "oc-fabledistill38",
+  "content": "19802\n\nQuick sanity check on the math: 101 \u2261 1 (mod 4), so x\u00b2 \u2261 \u22121 (mod 101) has exactly 2 solutions per block of 101. There are \u230a1,000,000/101\u230b = 9900 full blocks (giving 9900 \u00d7 2 = 19800), plus a remainder of 100 values, which contain both solutions (a and 101\u2212a), adding 2 more. A brute-force count over all 1,000,000 integers confirms: 19802.\n\nANSWER: 19802",
+  "error": null,
+  "wall": 20.40576481819153,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "M2",
+  "cat": "math",
+  "label": "oc-fabledistill38",
+  "content": "DP had a bug (should be (10*r + d) mod 13). Fixing:\nDP (5876) and brute force (2036) disagree \u2014 checking which is right.\nBrute force is consistent (2036), so the DP has a bug. Verifying DP against brute force at small sizes:\nBoth an independent DP (digits \u00d7 digit-sum \u00d7 mod-13 state) and brute force agree at every size \u2014 and since 10,000,000 itself has digit sum 1, the 8-digit boundary adds nothing.\n\nThe count of positive integers n \u2264 10,000,000 with digit sum exactly 13 and divisible by 13 is **2036**.\n\nANSWER: 2036",
+  "error": null,
+  "wall": 26.16939616203308,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "M3",
+  "cat": "math",
+  "label": "oc-fabledistill38",
+  "content": "This is a classic first-passage problem. Let E\u2080 = expected rolls starting from scratch, E\u2081 = expected rolls after one six has just been seen.\n\n- E\u2080 = 1 + (5/6)E\u2080 + (1/6)E\u2081 \u2192 E\u2080 = 6 + E\u2081\n- E\u2081 = 1 + (5/6)E\u2080 (a six ends it; anything else resets)\n\nSubstituting: E\u2080 = 7 + (5/6)E\u2080 \u2192 E\u2080/6 = 7 \u2192 E\u2080 = 42.\n\nANSWER: 42",
+  "error": null,
+  "wall": 6.403291940689087,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "M4",
+  "cat": "math",
+  "label": "oc-fabledistill38",
+  "content": "Total paths from (0,0) to (10,10): C(20,10) = 184,756.\n\nPaths passing through (5,5): C(10,5) \u00d7 C(10,5) = 252 \u00d7 252 = 63,504.\n\nPaths avoiding (5,5): 184,756 \u2212 63,504 = **121,252**.\n\nANSWER: 121252",
+  "error": null,
+  "wall": 4.067580938339233,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "M5",
+  "cat": "math",
+  "label": "oc-fabledistill38",
+  "content": "n \u2261 423 (mod 1001) by CRT, so the smallest n > 1000 is 1424. Quick check: 1424 = 7\u00b7203+3 \u2713, 11\u00b7129+5 \u2713, 13\u00b7109+7 \u2713.\n\nANSWER: 1424",
+  "error": null,
+  "wall": 7.305088758468628,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "M6",
+  "cat": "math",
+  "label": "oc-fabledistill38",
+  "content": "Divisors of N that are perfect squares have even exponents: 2^a\u00b73^b\u00b75^c with a \u2208 {0,2,4}, b \u2208 {0,2,4}, c \u2208 {0,2}.\n\nSum = (1+2\u00b2+2\u2074)(1+3\u00b2+3\u2074)(1+5\u00b2)\n= (1+4+16)(1+9+81)(1+25)\n= 21 \u00b7 91 \u00b7 26\n= 1911 \u00b7 26\n= 49686\n\nANSWER: 49686",
+  "error": null,
+  "wall": 4.518054962158203,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "M7",
+  "cat": "math",
+  "label": "oc-fabledistill38",
+  "content": "Ways to choose exactly two pairs: pick 2 ranks (C(13,2) = 78), choose suits for each pair (C(4,2)\u00b2 = 36), then a kicker from the remaining 11 ranks in any of 4 suits (44). That gives 78 \u00d7 36 \u00d7 44 = 123,552 hands out of C(52,5) = 2,598,960 total.\n\nReduced: 123,552 / 2,598,960 = **198/4165** (verified with exact arithmetic; gcd is 1 since 4165 = 5\u00b77\u00b2\u00b717 shares no factor with 198 = 2\u00b73\u00b2\u00b711).\n\nSo m + n = 198 + 4165 = 4363.\n\nANSWER: 4363",
+  "error": null,
+  "wall": 13.824262142181396,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "M8",
+  "cat": "math",
+  "label": "oc-fabledistill38",
+  "content": "Computed this by dynamic programming from the top down: for n \u2265 1000, f(n) = n\u22123, then for n from 999 down to 1, f(n) = f(f(n+5)) is well-defined because n+5 > n. Hand-checking the base cases: f(999) = f(f(1004)) = f(1001) = 998, and f(998) = f(f(1003)) = f(1000) = 997 \u2014 matching the code. The recursion settles into a 2-cycle between 997 and 998, and propagating all the way down gives f(1) = 998.\n\nANSWER: 998",
+  "error": null,
+  "wall": 42.045257568359375,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "L1",
+  "cat": "logic",
+  "label": "oc-fabledistill38",
+  "content": "**Case A = knight:** A's statement is true, so B and D are knaves. B (knave) lies about C, so C is a knave. C (knave) lies saying \"A is a knave\" \u2014 consistent. E says \"A and C are the same type,\" but they differ, so E lies \u2014 E is a knave. That leaves exactly 1 knight, so D's claim \"exactly two\" is false \u2014 consistent with D being a knave. \u2714\n\n**Case A = knave:** Then C's \"A is a knave\" is true \u2192 C knight. B's \"C is a knight\" is true \u2192 B knight. If D is a knight, his \"exactly two\" is true, but we already have B, C and D = 3 knights \u2014 contradiction. If D is a knave, exactly-two is false, forcing E to be a knight to avoid a total of 2 \u2014 but then E's claim (A and C same type) is false while E is a knight \u2014 contradiction. No solution. \u2714\n\nSo the unique solution is: A knight, B, C, D, E knaves.\n\nANSWER: TFTFF",
+  "error": null,
+  "wall": 12.438002824783325,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "L2",
+  "cat": "logic",
+  "label": "oc-fabledistill38",
+  "content": "Working through the constraints (Mon=1\u2026Fri=5): Sam must be after Priya, Priya \u2260 Monday, Rosa < Sam, Tariq \u2208 {Tue\u2013Thu}, and Quinn adjacent to Rosa.\n\n- **Sam = Wed (3):** Priya must be <3 and not Monday \u2192 Priya=2. Then Rosa <3 and \u22602 \u2192 Rosa=1, forcing Quinn=2 \u2014 collides with Priya. Impossible.\n- **Sam = Thu (4):** Rosa \u2208 {1,2,3}, Priya \u2208 {2,3}, Tariq \u2208 {2,3}, Quinn adjacent to Rosa. Checking each: Rosa=1 forces Quinn=2, leaving {3,5} for Priya/Tariq \u2014 one of them must take Friday, which Tariq can't and Priya can't (Priya<Sam). Rosa=2: Quinn=1 or 3, remaining days always force Tariq onto Monday or Friday. Rosa=3: Quinn=2, remaining {1,5} same problem. Impossible.\n- **Sam = Fri (5):** Valid schedules exist, e.g. Rosa=Mon, Quinn=Tue, Priya=Wed, Tariq=Thu, Sam=Fri; also Rosa=Tue, Quinn=Mon, Priya=Wed, Tariq=Thu, Sam=Fri, etc. \u2713\n\nSo Sam presents on **Friday** in every valid schedule (and it's the only feasible day).\n\nANSWER: Fri",
+  "error": null,
+  "wall": 22.695403575897217,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "L3",
+  "cat": "logic",
+  "label": "oc-fabledistill38",
+  "content": "Let me check each possibility for how many statements could be false:\n\n- **0 false:** All four would be true, but only one of them can be true (they make contradictory claims). Impossible.\n- **1 false:** Then S1 (\"exactly one is false\") would be true, making S2, S3, S4 all false \u2014 that's 3 false, not 1. Contradiction.\n- **2 false:** Then S2 would be true, making S1, S3, S4 false \u2014 that's 3 false, not 2. Contradiction.\n- **3 false:** Then S3 (\"exactly three are false\") is true, and S1, S2, S4 are false \u2014 that's exactly 3 false. \u2705 Consistent.\n- **4 false:** Then S4 (\"exactly four are false\") would have to be true, contradicting \"all four are false.\" Impossible.\n\nThe only self-consistent assignment is S3 true and the other three false \u2014 exactly three statements are false.\n\nANSWER: 3",
+  "error": null,
+  "wall": 6.28090238571167,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "L4",
+  "cat": "logic",
+  "label": "oc-fabledistill38",
+  "content": "The minimum is 6 moves. One optimal sequence (7\u2011litre jug first):\n\n1. Fill the 7\u2011L jug \u2192 (7, 0)\n2. Pour 7\u21925 \u2192 (2, 5)\n3. Empty the 5\u2011L jug \u2192 (2, 0)\n4. Pour 7\u21925 \u2192 (0, 2)\n5. Fill the 7\u2011L jug \u2192 (7, 2)\n6. Pour 7\u21925 (5\u2011jug has room for 3) \u2192 (4, 5)\n\nThe 7\u2011litre jug now holds exactly 4 litres. A BFS over the state space confirms no 5\u2011move solution exists (the alternative \"fill the 5, pour into 7\" direction takes 12 moves), so 6 is optimal.\n\nANSWER: 6",
+  "error": null,
+  "wall": 42.893186807632446,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "L5",
+  "cat": "logic",
+  "label": "oc-fabledistill38",
+  "content": "**Reasoning:** Since a \u2264 b \u2264 c and abc = 2450, we have a\u00b3 \u2264 2450, so a \u2264 13. The divisors of 2450 = 2\u00b75\u00b2\u00b77\u00b2 that are \u2264 13 are 1, 2, 5, 7. For each, we need bc = 2450/a and b + c = 64 \u2212 a:\n\n- a=1: bc=2450, b+c=63 \u2192 discriminant 63\u00b2 \u2212 4\u00b72450 < 0. \u2717\n- a=2: bc=1225, b+c=62 \u2192 discriminant 62\u00b2 \u2212 4900 < 0. \u2717\n- a=5: bc=490, b+c=59 \u2192 discriminant 59\u00b2 \u2212 1960 = 1521 = 39\u00b2 \u2192 b,c = 10, 49. \u2713 \u2192 (5, 10, 49)\n- a=7: bc=350, b+c=57 \u2192 discriminant 57\u00b2 \u2212 1400 = 1849 = 43\u00b2 \u2192 b,c = 7, 50. \u2713 \u2192 (7, 7, 50)\n\nBoth check out: 5\u00b710\u00b749 = 2450, 5+10+49 = 64; 7\u00b77\u00b750 = 2450, 7+7+50 = 64.\n\nANSWER: 2",
+  "error": null,
+  "wall": 12.260724067687988,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "L6",
+  "cat": "logic",
+  "label": "oc-fabledistill38",
+  "content": "**15 presses.**\n\nI solved it exactly: the problem is a system of 25 equations over GF(2) (each lamp's final state = parity of presses on itself and its neighbors, set equal to 1). Gaussian elimination gives rank 23, so there are exactly 2^(25\u221223) = 4 solutions. All four solutions press exactly 15 lamps, so 15 is both achievable and provably minimal \u2014 one example solution presses:\n\n- Row 0: (0,1), (0,2), (0,4)\n- Row 1: (1,1), (1,2), (1,3)\n- Row 2: (2,2), (2,3), (2,4)\n- Row 3: (3,0), (3,1), (3,3), (3,4)\n- Row 4: (4,0), (4,1)\n\nVerified that toggling those neighborhoods turns all 25 lamps ON.\n\nANSWER: 15",
+  "error": null,
+  "wall": 17.041162490844727,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "C1",
+  "cat": "code_predict",
+  "label": "oc-fabledistill38",
+  "content": "ANSWER: 7",
+  "error": null,
+  "wall": 3.7701380252838135,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "C2",
+  "cat": "code_predict",
+  "label": "oc-fabledistill38",
+  "content": "ANSWER: 18",
+  "error": null,
+  "wall": 3.8134968280792236,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "C3",
+  "cat": "code_predict",
+  "label": "oc-fabledistill38",
+  "content": "ANSWER: 6 12",
+  "error": null,
+  "wall": 4.902507781982422,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "C4",
+  "cat": "code_predict",
+  "label": "oc-fabledistill38",
+  "content": "The program prints `7 aaa ` \u2014 `re.split(r\"(a+)\", ...)` returns 7 items `['', 'aaa', ' bbb ', 'aaa', ' ccc ', 'aaa', '']`, so `len(parts)=7`, `parts[1]='aaa'`, and `parts[-1].strip()=''`, producing a trailing space before the newline.\n\nANSWER: 7 aaa",
+  "error": null,
+  "wall": 11.370095252990723,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "C5",
+  "cat": "code_predict",
+  "label": "oc-fabledistill38",
+  "content": "ANSWER: 2 2",
+  "error": null,
+  "wall": 4.293274641036987,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "W1",
+  "cat": "code_write",
+  "label": "oc-fabledistill38",
+  "content": "```python\ndef interval_cover(intervals, span):\n    \"\"\"Return the minimum number of intervals needed to fully cover span, or -1.\"\"\"\n    s, e = span\n    if e <= s:\n        return 0\n    ivs = sorted(intervals, key=lambda t: (t[0], -t[1]))\n    cur = s\n    count = 0\n    i = 0\n    n = len(ivs)\n    while cur < e:\n        best = cur\n        while i < n and ivs[i][0] <= cur:  # touching endpoints count as covered\n            if ivs[i][1] > best:\n                best = ivs[i][1]\n            i += 1\n        if best == cur:  # no interval can extend coverage further\n            return -1\n        count += 1\n        cur = best\n    return count\n```",
+  "error": null,
+  "wall": 8.812276124954224,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "W2",
+  "cat": "code_write",
+  "label": "oc-fabledistill38",
+  "content": "```python\ndef eval_expr(s):\n    \"\"\"Evaluate an arithmetic expression string to a float.\n\n    Supports non-negative integers, + - * /, parentheses, unary minus,\n    and arbitrary whitespace. '/' is float division.\n    Grammar: expr := term (('+'|'-') term)*\n             term := unary (('*'|'/') unary)*\n             unary := '-' unary | '+' unary | atom\n             atom := '(' expr ')' | number\n    \"\"\"\n    pos = 0\n    n = len(s)\n\n    def skip_ws():\n        nonlocal pos\n        while pos < n and s[pos].isspace():\n            pos += 1\n\n    def parse_expr():\n        nonlocal pos\n        val = parse_term()\n        while True:\n            skip_ws()\n            if pos < n and s[pos] == '+':\n                pos += 1\n                val += parse_term()\n            elif pos < n and s[pos] == '-':\n                pos += 1\n                val -= parse_term()\n            else:\n                return val\n\n    def parse_term():\n        nonlocal pos\n        val = parse_unary()\n        while True:\n            skip_ws()\n            if pos < n and s[pos] == '*':\n                pos += 1\n                val *= parse_unary()\n            elif pos < n and s[pos] == '/':\n                pos += 1\n                val /= parse_unary()\n            else:\n                return val\n\n    def parse_unary():\n        nonlocal pos\n        skip_ws()\n        if pos < n and s[pos] == '-':\n            pos += 1\n            return -parse_unary()\n        if pos < n and s[pos] == '+':\n            pos += 1\n            return parse_unary()\n        return parse_atom()\n\n    def parse_atom():\n        nonlocal pos\n        skip_ws()\n        if pos < n and s[pos] == '(':\n            pos += 1\n            val = parse_expr()\n            skip_ws()\n            if pos >= n or s[pos] != ')':\n                raise ValueError(\"expected ')'\")\n            pos += 1\n            return val\n        start = pos\n        while pos < n and s[pos].isdigit():\n            pos += 1\n        if pos == start:\n            raise ValueError(\"unexpected character\")\n        return float(s[start:pos])\n\n    result = parse_expr()\n    skip_ws()\n    if pos != n:\n        raise ValueError(\"trailing characters in expression\")\n    return float(result)\n```",
+  "error": null,
+  "wall": 23.46694326400757,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "W3",
+  "cat": "code_write",
+  "label": "oc-fabledistill38",
+  "content": "```python\ndef topo_count(n, edges):\n    \"\"\"Count distinct topological orderings of a DAG with nodes 0..n-1.\"\"\"\n    preds = [0] * n\n    for u, v in edges:\n        preds[v] |= 1 << u\n\n    from functools import lru_cache\n\n    @lru_cache(maxsize=None)\n    def dp(mask):\n        if mask == (1 << n) - 1:\n            return 1\n        total = 0\n        for v in range(n):\n            if not (mask >> v) & 1 and (preds[v] & mask) == preds[v]:\n                total += dp(mask | (1 << v))\n        return total\n\n    return dp(0)\n```",
+  "error": null,
+  "wall": 3.545675039291382,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "I1",
+  "cat": "instruct",
+  "label": "oc-fabledistill38",
+  "content": "Tidal energy can produce vast stores of clean electricity.\nThe ocean's rising and falling waters hold great power.\nTurbines turn as the tides flow in and out.\nSuch plants deliver steady green power to the grid.",
+  "error": null,
+  "wall": 15.337591648101807,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "I2",
+  "cat": "instruct",
+  "label": "oc-fabledistill38",
+  "content": "{\"primes\": [37, 31, 29, 23, 19, 17, 13, 11, 7, 5, 3, 2], \"sum\": 197, \"concat\": \"2-3-5-7-11-13-17-19-23-29-31-37\", \"meta\": {\"count\": 12, \"even_count\": 1}}",
+  "error": null,
+  "wall": 4.441771030426025,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "I3",
+  "cat": "instruct",
+  "label": "oc-fabledistill38",
+  "content": "1\n2\nfizz\n4\nbuzz\nfizz\n7\n8\nfizz\nbuzz\n11\nfizz\n13\n14\nfizzbuzz\n16\nfizz\n18\n19\nbuzz\nbuzz\n22\nbuzz\nfizz\n26\nbuzz\n28\n29\nfizzbuzz",
+  "error": null,
+  "wall": 5.487579345703125,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ },
+ {
+  "id": "I4",
+  "cat": "instruct",
+  "label": "oc-fabledistill38",
+  "content": "Beneath the sun, the Indian Ocean spreads its warm waters across three continents, carrying trade winds, monsoons, and the whispers of ancient sailors. Then coral reefs rise toward the currents that swirl deep past hidden trenches, where sunlight rarely reaches the ocean floor. Whales and seabirds glide across the endless blue where waves meet the sky beyond the distant horizon.",
+  "error": null,
+  "wall": 25.153289318084717,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Fable-Distill/Qwen3.8-27B-Fable-Distill-Q6_K.gguf"
+ }
+]

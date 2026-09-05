@@ -1,0 +1,64 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-fdq6-262k-v1"
+model: "Qwen3.8"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-fdq6-262k-v1
+    Per-model config for: unsloth/Qwen3.8-27B-GGUF, quant UD-Q6_K_XL
+    (25.92 GB / 24.14 GiB on disk — 1.76 GiB heavier than the Fable
+    Heretic MTP-Q6_K this tune line descends from).
+    Target: RTX 5090, 32 GiB VRAM, CUDA0. Host 62 GB RAM.
+    Arch is qwen35 (same family as the 3.6 line) — loads on b10242.
+
+    Derived from Qwen3.6-Fable-Heretic 32gb-cuda-5090-q6-262k-v2. Same
+    two load-bearing tricks for full 262144 native context with vision:
+      --kv-unified          without it qwen35-family fails to LOAD at ~212992.
+      --no-mmproj-offload   image encode on CPU, saves ~1.1 GiB VRAM and
+                            avoids the image-encode allocation crash.
+
+    Differences from the heretic tune:
+      * MTP WORKS: the unsloth GGUF ships a nextn/MTP layer (blk.64) and
+        --spec-type draft-mtp loads it. Measured 2026-08-15: 138.8 tok/s
+        at depth 0 vs 57.6 without draft (2.4x), acceptance 0.79, mean
+        draft len 3.37. Without the spec flags the layer is skipped
+        ("unused tensor blk.64.* -- ignoring" at load is the no-MTP path).
+      * -ub 512 (heretic ran 512): claws back the extra 1.76 GiB of
+        weights. Measured fit: 31.9 GiB used with MTP at 262144/q4_0 KV
+        (29.9 GiB without MTP).
+      * Sampling per Qwen3.8 thinking-mode card: temp 1.0, top-p 0.95,
+        top-k 20, min-p 0. reasoning_effort defaults to xhigh in-template.
+      * hdd-cache verified with this model 2026-08-15: session-keyed save
+        on switch + shutdown, warm and cold (across restart) restores HIT
+        (92.7K-token doc came back with only ~518 tokens re-prefilled).
+        Slot ~1.87 GB .bin + 3.16 GB .bin.ckpt at that depth.
+
+    Checkpoints: MAX 16 x STEP 16384 = 262144 exact coverage (same as
+    heretic v2); checkpoints live in host RAM.
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "16"
+  CHECKPOINT_MIN_STEP: "16384"
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "262144"
+  DIO: "1"
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 3 -b 2048 -ub 512 --min-p 0 --image-min-tokens 1024 --no-mmproj-offload --chat-template-file qwen38-froggeric-fixed.jinja --reasoning-format deepseek --chat-template-kwargs {\"reasoning_effort\":\"xhigh\"}"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "1.0"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

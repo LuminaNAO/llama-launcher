@@ -72,9 +72,6 @@ metadata:
     value that gets silently overridden. Slot growth is bounded by MIN_FREE_GB
     and MAX_TOTAL_SLOTS_GB below.
 
-    CHECKPOINT_MAX 32 at ~305 MB per checkpoint near full context is ~9.8 GB of
-    system RAM worst case. Also fine on 62 GB. Lower this before lowering
-    CONTEXT if the host starts swapping.
 
     SERVED FOOTPRINT, verified with llama-server and MTP actually enabled
     (2026-08-06). These are the numbers that matter for launching:
@@ -141,6 +138,24 @@ metadata:
         spent the entire budget inside the reasoning block and returned
         content="" (answer stranded in reasoning_content), which looks exactly
         like broken vision but is not. 800 was enough to finish.
+    CHECKPOINT SIZING, MEASURED FROM LIVE LOGS (2026-08-08). Context
+    checkpoints live in SYSTEM RAM, not VRAM -- llama_state_seq_get_data_ext
+    copies KV state out of the backend into a host buffer, so the budget is the
+    62 GB host, not the 32 GB card. Fitted from 19 logged checkpoint sizes:
+
+        size(MiB) = 149.6 + 4.02 KiB per token
+        => 0.40 GiB @ 65536 tok, 0.65 GiB @ 131072, 1.15 GiB @ 262144
+
+    CHECKPOINT_MIN_STEP was doubled 2048 -> 4096. The server was logging a
+    constant stream of
+        W slot create_check: erasing old context checkpoint (...)
+    i.e. it hit CHECKPOINT_MAX and evicted on nearly every new checkpoint,
+    discarding exactly the mid-conversation restore points that avoid a cold
+    prefill. Halving checkpoint density doubles the span the same number of
+    slots can cover, for the same RAM.
+    Here: MAX 32 x STEP 4096 = 131072 tokens = 91% of this tune's context,
+    at ~13.5 GiB typical RAM. MAX was already fine; only the step changed.
+
 settings:
   RECOMMENDED_BACKEND: "cuda"
   API_KEY: "ollama-local"
@@ -148,7 +163,7 @@ settings:
   CACHE_TYPE_K: "q4_0"
   CACHE_TYPE_V: "q4_0"
   CHECKPOINT_MAX: "32"
-  CHECKPOINT_MIN_STEP: "2048"
+  CHECKPOINT_MIN_STEP: "4096"
   SLOT_SAVE_MAX_CHECKPOINTS: "10"
   CONTEXT: "143360"
   DIO: "1"

@@ -1,0 +1,52 @@
+[
+ {
+  "id": "R1",
+  "cat": "rust",
+  "label": "oc-heretic36",
+  "content": "```rust\npub fn squash(v: &mut Vec<String>) {\n    if v.is_empty() {\n        return;\n    }\n\n    let mut write = 0;\n    for read in 1..v.len() {\n        if v[read] != v[write] {\n            write += 1;\n            v[write] = v[read].clone();\n        }\n    }\n    v.truncate(write + 1);\n\n    for s in v.iter_mut() {\n        *s = s.trim().to_string();\n    }\n}\n```",
+  "error": null,
+  "wall": 12.891867637634277,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "R2",
+  "cat": "rust",
+  "label": "oc-heretic36",
+  "content": "```rust\nuse std::collections::HashMap;\n\nstruct Node<K, V> {\n    key: K,\n    value: V,\n    prev: Option<usize>,\n    next: Option<usize>,\n}\n\npub struct Lru<K: Eq + std::hash::Hash + Clone, V> {\n    cap: usize,\n    map: HashMap<K, usize>,\n    nodes: Vec<Option<Node<K, V>>>,\n    head: Option<usize>,\n    tail: Option<usize>,\n    free: Vec<usize>,\n    len: usize,\n}\n\nimpl<K: Eq + std::hash::Hash + Clone, V> Lru<K, V> {\n    pub fn new(cap: usize) -> Self {\n        assert!(cap >= 1);\n        Lru {\n            cap,\n            map: HashMap::with_capacity(cap),\n            nodes: Vec::with_capacity(cap),\n            head: None,\n            tail: None,\n            free: Vec::new(),\n            len: 0,\n        }\n    }\n\n    fn remove_node(&mut self, idx: usize) {\n        let (prev, next) = match &mut self.nodes[idx] {\n            Some(node) => (node.prev.take(), node.next.take()),\n            None => return,\n        };\n\n        if let Some(p) = prev {\n            if let Some(ref mut n) = self.nodes[p] {\n                n.next = next;\n            }\n        } else {\n            self.head = next;\n        }\n\n        if let Some(n) = next {\n            if let Some(ref mut n) = self.nodes[n] {\n                n.prev = prev;\n            }\n        } else {\n            self.tail = prev;\n        }\n    }\n\n    fn insert_at_head(&mut self, idx: usize) {\n        if let Some(ref mut node) = self.nodes[idx] {\n            node.prev = None;\n            node.next = self.head;\n        }\n\n        if let Some(h) = self.head {\n            if let Some(ref mut n) = self.nodes[h] {\n                n.prev = Some(idx);\n            }\n        }\n\n        self.head = Some(idx);\n\n        if self.tail.is_none() {\n            self.tail = Some(idx);\n        }\n    }\n\n    fn move_to_head(&mut self, idx: usize) {\n        self.remove_node(idx);\n        self.insert_at_head(idx);\n    }\n\n    fn alloc_idx(&mut self) -> usize {\n        if let Some(idx) = self.free.pop() {\n            idx\n        } else {\n            let idx = self.nodes.len();\n            self.nodes.push(None);\n            idx\n        }\n    }\n\n    pub fn get(&mut self, k: &K) -> Option<&V> {\n        let idx = *self.map.get(k)?;\n        self.move_to_head(idx);\n        self.nodes[idx].as_ref().map(|n| &n.value)\n    }\n\n    pub fn put(&mut self, k: K, v: V) {\n        if let Some(&idx) = self.map.get(&k) {\n            if let Some(ref mut node) = self.nodes[idx] {\n                node.value = v;\n            }\n            self.move_to_head(idx);\n            return;\n        }\n\n        if self.len >= self.cap {\n            if let Some(tail_idx) = self.tail {\n                self.remove_node(tail_idx);\n                if let Some(node) = self.nodes[tail_idx].take() {\n                    self.map.remove(&node.key);\n                    self.free.push(tail_idx);\n                }\n                self.len -= 1;\n            }\n        }\n\n        let idx = self.alloc_idx();\n        self.nodes[idx] = Some(Node {\n            key: k.clone(),\n            value: v,\n            prev: None,\n            next: None,\n        });\n        self.insert_at_head(idx);\n        self.map.insert(k, idx);\n        self.len += 1;\n    }\n}\n```",
+  "error": null,
+  "wall": 33.70699119567871,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "R3",
+  "cat": "rust",
+  "label": "oc-heretic36",
+  "content": "```rust\nuse std::sync::{Arc, Mutex};\nuse std::sync::mpsc;\nuse std::thread;\n\npub fn parallel_map<T, R, F>(items: Vec<T>, f: F, workers: usize) -> Vec<R>\nwhere\n    T: Send + 'static,\n    R: Send + 'static,\n    F: Fn(T) -> R + Send + Sync + 'static,\n{\n    let n = items.len();\n    let results: Arc<Mutex<Vec<Option<R>>>> =\n        Arc::new(Mutex::new(vec![None; n]));\n    let f = Arc::new(f);\n\n    let (tx, rx) = mpsc::channel::<(usize, T)>();\n    let rx = Arc::new(Mutex::new(rx));\n\n    let mut handles = Vec::with_capacity(workers);\n    for _ in 0..workers {\n        let rx = Arc::clone(&rx);\n        let f = Arc::clone(&f);\n        let results = Arc::clone(&results);\n\n        handles.push(thread::spawn(move || {\n            loop {\n                let task = {\n                    let rx = rx.lock().unwrap();\n                    rx.recv()\n                };\n                match task {\n                    Ok((i, item)) => {\n                        let result = f(item);\n                        let mut res = results.lock().unwrap();\n                        res[i] = Some(result);\n                    }\n                    Err(_) => break,\n                }\n            }\n        }));\n    }\n\n    for (i, item) in items.into_iter().enumerate() {\n        tx.send((i, item)).unwrap();\n    }\n    drop(tx);\n\n    for h in handles {\n        h.join().unwrap();\n    }\n\n    Arc::try_unwrap(results)\n        .unwrap()\n        .into_inner()\n        .unwrap()\n        .into_iter()\n        .map(Option::unwrap)\n        .collect()\n}\n```",
+  "error": null,
+  "wall": 16.310301065444946,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "R4",
+  "cat": "rust",
+  "label": "oc-heretic36",
+  "content": "```rust\npub struct PairsMut<'a, T> {\n    ptr: *mut T,\n    len: usize,\n    _marker: std::marker::PhantomData<&'a mut T>,\n}\n\npub fn pairs_mut<'a, T>(s: &mut [T]) -> PairsMut<'a, T> {\n    PairsMut {\n        ptr: s.as_mut_ptr(),\n        len: s.len() / 2 * 2,\n        _marker: std::marker::PhantomData,\n    }\n}\n\nimpl<'a, T> Iterator for PairsMut<'a, T> {\n    type Item = (&'a mut T, &'a mut T);\n\n    fn next(&mut self) -> Option<Self::Item> {\n        if self.len < 2 {\n            return None;\n        }\n        unsafe {\n            let p = self.ptr;\n            self.ptr = p.add(2);\n            self.len -= 2;\n            // Soundness:\n            // - Each iteration advances ptr by 2, so pairs never overlap.\n            // - len is truncated to even on construction; we stop when len < 2.\n            // - Therefore each element in the original slice is yielded at most once.\n            // - The two references are to disjoint memory regions.\n            let a = &mut *p;\n            let b = &mut *p.add(1);\n            Some((a, b))\n        }\n    }\n}\n```",
+  "error": null,
+  "wall": 13.10653018951416,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "R5",
+  "cat": "rust",
+  "label": "oc-heretic36",
+  "content": "```rust\nuse std::future::Future;\nuse std::pin::Pin;\nuse std::sync::{Arc, Condvar, Mutex};\nuse std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};\n\nstruct BlockOnState {\n    notified: Mutex<bool>,\n    cvar: Condvar,\n}\n\nfn clone_waker(data: *const ()) -> RawWaker {\n    let state = data as *const Arc<BlockOnState>;\n    unsafe { Arc::increment_strong_count(state) };\n    RawWaker::new(data, &WAKER_VTABLE)\n}\n\nfn wake_by_ref(data: *const ()) {\n    let state = unsafe { &*(data as *const Arc<BlockOnState>) };\n    let mut notified = state.notified.lock().unwrap();\n    *notified = true;\n    state.cvar.notify_one();\n}\n\nfn wake(data: *const ()) {\n    wake_by_ref(data);\n}\n\nfn drop_waker(data: *const ()) {\n    let state = data as *const Arc<BlockOnState>;\n    unsafe { Arc::decrement_strong_count(state) };\n}\n\nconst WAKER_VTABLE: RawWakerVTable = unsafe {\n    RawWakerVTable::new(clone_waker, wake, wake_by_ref, drop_waker)\n};\n\npub fn block_on<F: Future>(fut: F) -> F::Output {\n    let state = Arc::new(BlockOnState {\n        notified: Mutex::new(false),\n        cvar: Condvar::new(),\n    });\n\n    let waker = unsafe {\n        Waker::from_raw(RawWaker::new(Arc::into_raw(&state) as *const (), &WAKER_VTABLE))\n    };\n\n    let mut cx = Context::from_waker(&waker);\n    let mut fut = Pin::new(fut);\n\n    loop {\n        match fut.as_mut().poll(&mut cx) {\n            Poll::Ready(val) => return val,\n            Poll::Pending => {\n                let mut notified = state.notified.lock().unwrap();\n                while !*notified {\n                    notified = state.cvar.wait(notified).unwrap();\n                }\n                *notified = false;\n            }\n        }\n    }\n}\n\npub struct YieldNow {\n    pub remaining: u32,\n}\n\nimpl Future for YieldNow {\n    type Output = ();\n\n    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {\n        if self.remaining > 0 {\n            self.remaining -= 1;\n            cx.waker().wake_by_ref();\n            Poll::Pending\n        } else {\n            Poll::Ready(())\n        }\n    }\n}\n```",
+  "error": null,
+  "wall": 37.18259572982788,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ }
+]

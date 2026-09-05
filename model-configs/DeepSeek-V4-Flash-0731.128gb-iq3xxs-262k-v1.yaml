@@ -27,6 +27,22 @@ metadata:
     checkpoints is the difference between warm restore and full re-prefill on
     this model. Checkpoint + slot files are small (KV ~10% of V3.2 per token),
     so --slot-save-max-checkpoints thinning is unlikely to be needed.
+    CHECKPOINT COVERAGE (added after a 22-min cold re-prefill, llama.log task 22135):
+    because seq_rm rejects partial removals, the oldest surviving checkpoint IS
+    the rewind floor — a prompt that diverges below it re-prefills from token 0.
+    The launcher defaults (min-step 2048 -> 4096 observed stride, 32 checkpoints)
+    cover only ~131k of a 262k context, and the ring evicts LOWEST positions
+    first — exactly where a compaction summary splices in (~19k, just past the
+    system prompt + tools). Observed: divergence at 19,287 vs lowest checkpoint
+    >=30,720 -> full 95,037-token re-prefill, 22.7 min at ~70 t/s.
+    32 x 8192 = 262,144 pins the floor at position 0 for the whole context.
+    Memory is unchanged (still 32 x 17.0 MiB ~= 544 MiB) — only the stride moves,
+    so this is not an allocation change and does not need a v2 bump. Cost is
+    coarser granularity: worst-case re-prefill per divergence ~8k tokens (~2 min)
+    instead of ~4k, against a 22-min floor miss. VERIFY the effective stride in
+    the log on next launch: min-step 2048 produced a 4096 stride, so 8192 may
+    land at 8192 or 16384 — either fully covers 262k, but confirm before tuning
+    CHECKPOINT_MAX down.
     Expected allocations (262_144 ctx, 1 slot, unified KV, f16 K/V, FA on) — ESTIMATES:
     Model weights (ROCm0):                ~106,500 MiB
     dsv4 caches (raw SWA + CSA ctx/4 + HCA ctx/128 + indexer): ~2,000-3,000 MiB
@@ -46,6 +62,8 @@ settings:
   CACHE_RAM: "0"
   CACHE_TYPE_K: "f16"
   CACHE_TYPE_V: "f16"
+  CHECKPOINT_MAX: "32"
+  CHECKPOINT_MIN_STEP: "8192"
   CONTEXT: "262144"
   DIO: "1"
   EXTRA_ARGS: "--min-p 0.0 -ub 512 -b 2048"

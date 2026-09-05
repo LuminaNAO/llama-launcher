@@ -27,3 +27,9 @@ Thumbs.db
 
 # Build outputs
 build-logs/
+
+# Pre-sync backups
+*.bak-pre-sync
+
+# Local-only audit config (denylist values) — see .publishing_protocol
+.publishing_protocol.local

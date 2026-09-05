@@ -4,13 +4,16 @@
 //
 // Spins up mock llama-server backends (with /health, /props,
 // /v1/chat/completions incl. SSE), launches a real `waterfall serve`
-// child process against them, and exercises: dual routing tables
-// (agent + subagent listeners), legacy headerless conf compat, priority
+// child process against them, and exercises: the default agent+subagent
+// portals (dual listeners), legacy headerless conf compat, priority
 // routing, failover on connect-refused / 503 / pre-commit death
 // (pre-first-SSE-chunk, mid-JSON-body, stall timeout), promote-back
-// hysteresis, mid-stream death, per-table pin / disable / add / move,
-// sectioned conf persistence with !/* flags, the CLI control surface,
-// and save-on-stop.
+// hysteresis, mid-stream death, per-portal pin / disable / add / move,
+// sectioned conf persistence with !/* flags, the CLI control surface
+// (--portal plus the deprecated --table alias), and save-on-stop.
+// Phase 2 covers N named portals: 3-portal conf parse/save round-trip,
+// port= defaulting, --portal serve overrides, portal add/rm/list, live
+// re-bind on conf port changes, and a PTY smoke test of the N-pane TUI.
 //
 // Run: node utils/test-waterfall.mjs
 
@@ -423,6 +426,196 @@ try {
     backends.forEach(b => { try { b.server.close(); } catch { } });
     await sleep(200);
     rmSync(dir, { recursive: true, force: true });
+}
+
+// ── Phase 2: N named portals ──────────────────────────────────────────────
+// A 3-portal conf ([agent] without port=, [subagent]/[cloud] with port=),
+// served with NO port flags, so the resolution chain is exercised:
+// default > conf port= > flag override. The built-in :40800/:40810 defaults
+// are redirected to high ports via the env overrides — a production
+// waterfall may own the real ports on this machine.
+const P2 = { agent: 41880, sub: 41881, cloud: 41882, extra: 41883, cloud2: 41884, auto: [41885, 41886] };
+const TIER2 = [41894, 41895, 41896];
+await (async function phase2() {
+    const dir2 = mkdtempSync(join(tmpdir(), "wf-test2-"));
+    const conf2 = join(dir2, "waterfall.conf");
+    const sock2 = join(dir2, "waterfall.sock");
+    writeFileSync(conf2, [
+        "[agent]",
+        `127.0.0.1:${TIER2[0]}  # a1`,
+        "",
+        "[subagent]",
+        `port = ${P2.sub}`,
+        `127.0.0.1:${TIER2[1]}  # s1`,
+        "",
+        "[cloud]",
+        `port = ${P2.cloud}`,
+        `*127.0.0.1:${TIER2[2]}  # c1`,
+        `!127.0.0.1:${TIER2[1]}  # c2`,
+        "",
+    ].join("\n"));
+
+    const backends2 = [
+        await mockBackend(TIER2[0], "p2-t1"),
+        await mockBackend(TIER2[1], "p2-t2"),
+        await mockBackend(TIER2[2], "p2-t3"),
+    ];
+    const env2 = {
+        ...process.env,
+        LLAMA_WATERFALL_AGENT_PORT: String(P2.agent),      // stand-in for :40800
+        LLAMA_WATERFALL_SUBAGENT_PORT: String(41878),      // must LOSE to [subagent] port=
+    };
+    const child2 = spawn(process.execPath, [
+        WATERFALL, "serve", "--config", conf2, "--socket", sock2,
+        "--poll-interval", "0.3", "--promote-after", "2", "--connect-timeout", "800",
+    ], { stdio: ["ignore", "pipe", "pipe"], env: env2 });
+    let child2Out = "";
+    let child2Exit = null;
+    child2.stdout.on("data", c => child2Out += c);
+    child2.stderr.on("data", c => child2Out += c);
+    child2.on("exit", (code) => {
+        child2Exit = code;
+        if (!shutting2) { console.error(`phase-2 waterfall died early (code ${code}):\n${child2Out}`); process.exit(1); }
+    });
+    let shutting2 = false;
+
+    const cli = (...a) => new Promise((resolve) => {
+        const p = spawn(process.execPath, [WATERFALL, ...a, "--socket", sock2], { env: env2 });
+        let o = "", e = "";
+        p.stdout.on("data", c => o += c);
+        p.stderr.on("data", c => e += c);
+        p.on("exit", (code) => resolve({ code, out: o, err: e }));
+    });
+
+    try {
+        ok(await waitFor(async () => {
+            try { return (await req(P2.cloud, "/health")).status === 200; } catch { return false; }
+        }), "phase2: third portal [cloud] listener up on its port= port");
+
+        const c = await ctl(sock2);
+
+        // 21. 3-portal conf parse + port resolution chain
+        let s = await c.send("status");
+        ok(s.portals.length === 3 && s.portals.map(t => t.name).join(",") === "agent,subagent,cloud",
+            "3-portal conf loads all portals in conf order");
+        ok(s.portals[0].listenPort === P2.agent, "[agent] without port= falls back to its default port");
+        ok(s.portals[1].listenPort === P2.sub, "[subagent] port= line beats the default port");
+        ok(s.portals[2].listenPort === P2.cloud, "arbitrary portal gets its port from port=");
+        ok(JSON.stringify(s.tables) === JSON.stringify(s.portals), "status keeps .tables as an alias of .portals");
+        ok(s.portals[2].pinned === 0 && s.portals[2].endpoints[1].enabled === false,
+            "*/! markers parse inside a named portal section");
+
+        // 22. Routing through a named portal (pinned to c1)
+        let r = await req(P2.cloud, "/v1/chat/completions", { method: "POST", body: '{"messages":[]}' });
+        ok(JSON.parse(r.body).served_by === "p2-t3", "[cloud] portal routes to its own pinned tier");
+        r = await req(P2.agent, "/v1/chat/completions", { method: "POST", body: '{"messages":[]}' });
+        ok(JSON.parse(r.body).served_by === "p2-t1", "[agent] portal routes independently");
+
+        // 23. --portal CLI routing (and the sub alias)
+        let cr = await cli("pin", "off", "--portal", "cloud", "--json");
+        ok(JSON.parse(cr.out).portals[2].pinned === null, "CLI: pin off --portal cloud targets the named portal");
+        cr = await cli("disable", "1", "--portal", "sub", "--json");
+        ok(JSON.parse(cr.out).portals[1].endpoints[0].enabled === false, "CLI: --portal sub still aliases subagent");
+        await cli("enable", "1", "--portal", "subagent");
+        cr = await cli("pin", "1", "--portal", "nosuch", "--json");
+        ok(cr.code === 1 && cr.err.includes("unknown portal"), "CLI: unknown --portal errors out");
+
+        // 24. portal list / add / rm
+        cr = await cli("portal", "list", "--json");
+        let list = JSON.parse(cr.out);
+        ok(list.length === 3 && list[2].name === "cloud" && list[2].listenPort === P2.cloud,
+            "CLI: portal list --json reports every portal");
+        cr = await cli("portal", "add", "extra", "--port", String(P2.extra), "--json");
+        ok(JSON.parse(cr.out).portals.length === 4, "CLI: portal add creates a fourth portal");
+        await cli("add", `127.0.0.1:${TIER2[2]}`, "x1", "--portal", "extra");
+        r = await req(P2.extra, "/v1/chat/completions", { method: "POST", body: '{"messages":[]}' });
+        ok(JSON.parse(r.body).served_by === "p2-t3", "added portal listens and routes immediately");
+        cr = await cli("portal", "add", "extra", "--port", "41999");
+        ok(cr.code === 1 && cr.err.includes("already exists"), "CLI: duplicate portal add errors");
+        cr = await cli("portal", "add", "Bad_Name", "--port", "41999");
+        ok(cr.code === 1 && cr.err.includes("bad portal name"), "CLI: portal names outside [a-z0-9-]+ are rejected");
+        cr = await cli("portal", "add", "noport");
+        ok(cr.code === 1 && cr.err.includes("--port"), "CLI: portal add without --port errors for non-default names");
+
+        // 25. Save round-trip: 4 portals with explicit port= lines and markers
+        await c.send("pin", { portal: "cloud", index: 0 });
+        await c.send("write");
+        let conf = readFileSync(conf2, "utf8");
+        ok(conf.includes(`[agent]\nport = ${P2.agent}`), "write emits an explicit port= for the defaulted portal");
+        ok(conf.includes(`[extra]\nport = ${P2.extra}`), "write persists the runtime-added portal with its port");
+        ok(conf.includes(`*127.0.0.1:${TIER2[2]}`) && conf.includes(`!127.0.0.1:${TIER2[1]}`),
+            "write keeps */! markers inside named portal sections");
+        await c.send("reload");
+        s = await c.send("status");
+        ok(s.portals.length === 4 && s.portals[2].pinned === 0 && s.portals[2].endpoints[1].enabled === false,
+            "reload round-trips the 4-portal conf (ports, pin, disabled)");
+
+        // 26. portal rm: listener closes, conf loses the section on write
+        cr = await cli("portal", "rm", "extra", "--json");
+        ok(JSON.parse(cr.out).portals.length === 3, "CLI: portal rm removes the portal");
+        let refused = false;
+        try { await req(P2.extra, "/health", { timeoutMs: 1500 }); } catch { refused = true; }
+        ok(refused, "removed portal's listener is closed");
+        await c.send("write");
+        ok(!readFileSync(conf2, "utf8").includes("[extra]"), "write drops the removed portal from the conf");
+
+        // 27. Hand-edited port= change + reload re-binds the listener live
+        writeFileSync(conf2, readFileSync(conf2, "utf8").replace(`port = ${P2.cloud}`, `port = ${P2.cloud2}`));
+        await c.send("reload");
+        r = await req(P2.cloud2, "/v1/chat/completions", { method: "POST", body: '{"messages":[]}' });
+        ok(JSON.parse(r.body).served_by === "p2-t3", "reload re-binds a portal whose conf port changed");
+        refused = false;
+        try { await req(P2.cloud, "/health", { timeoutMs: 1500 }); } catch { refused = true; }
+        ok(refused, "old port is released after the re-bind");
+
+        c.close();
+
+        // 28. PTY smoke: attach-only TUI renders one pane per portal
+        // (keys go one per write with a gap — the TUI reads a chunk per key)
+        const pty = (cmdline, keys, delayMs) => new Promise((resolve) => {
+            const feed = keys.split("").map(k => `printf '${k}'; sleep 0.3;`).join(" ");
+            const p = spawn("bash", ["-c",
+                `(sleep ${delayMs / 1000}; ${feed} sleep 0.5) | script -qec "${cmdline}" /dev/null`,
+            ], { env: env2 });
+            let o = "";
+            p.stdout.on("data", c => o += c);
+            p.stderr.on("data", c => o += c);
+            const t = setTimeout(() => p.kill("SIGKILL"), 15000);
+            p.on("exit", (code) => { clearTimeout(t); resolve({ code, out: o }); });
+        });
+        let tr = await pty(`${process.execPath} ${WATERFALL} tui --socket ${sock2}`, "lj?q", 1500);
+        ok(tr.out.includes(`AGENT :${P2.agent}`) && tr.out.includes(`SUBAGENT :${P2.sub}`) && tr.out.includes(`CLOUD :${P2.cloud2}`),
+            "TUI renders one pane per portal (3 panes)");
+        ok(tr.out.includes("attached — q detaches") && tr.out.includes("detached"),
+            "attach-only TUI detaches on q, leaving the server up");
+        ok(await socketUp(sock2), "server survives an attached TUI quitting");
+
+        shutting2 = true;
+        await cli("stop");
+        ok(await waitFor(() => child2Exit !== null, 5000), "phase2: stop terminates the serve process");
+
+        // 29. No-arg lifecycle: autostart serve + owned TUI, q stops it all
+        tr = await pty(`${process.execPath} ${WATERFALL} --portal agent:${P2.auto[0]} --portal subagent:${P2.auto[1]} --config ${conf2}.auto --socket ${sock2}`, "q", 2500);
+        ok(tr.out.includes("owned — q stops server") && tr.out.includes(`AGENT :${P2.auto[0]}`),
+            "no-arg mode autostarts the server (--portal overrides forwarded) and owns it");
+        ok(tr.out.includes("waterfall stopped") && !(await socketUp(sock2)),
+            "owned TUI q stops the autostarted server");
+    } finally {
+        shutting2 = true;
+        if (child2Exit === null) child2.kill("SIGTERM");
+        backends2.forEach(b => { try { b.server.close(); } catch { } });
+        await sleep(200);
+        rmSync(dir2, { recursive: true, force: true });
+    }
+})();
+
+function socketUp(path) {
+    return new Promise((resolve) => {
+        if (!existsSync(path)) return resolve(false);
+        const c = netConnect(path);
+        c.on("connect", () => { c.destroy(); resolve(true); });
+        c.on("error", () => resolve(false));
+    });
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

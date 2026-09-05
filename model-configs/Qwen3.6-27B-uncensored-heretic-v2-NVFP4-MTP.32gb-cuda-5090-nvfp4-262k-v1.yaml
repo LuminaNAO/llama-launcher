@@ -84,14 +84,31 @@ metadata:
     coding-calibrated option, but those repos contain ZERO MTP files, so
     choosing them costs the ~1.9x MTP speedup (~114 t/s -> ~60 t/s). No model
     published anywhere combines imatrix/NEO-CODE calibration WITH NVFP4 and MTP.
+    CHECKPOINT SIZING, MEASURED FROM LIVE LOGS (2026-08-08). Context
+    checkpoints live in SYSTEM RAM, not VRAM -- llama_state_seq_get_data_ext
+    copies KV state out of the backend into a host buffer, so the budget is the
+    62 GB host, not the 32 GB card. Fitted from 19 logged checkpoint sizes:
+
+        size(MiB) = 149.6 + 4.02 KiB per token
+        => 0.40 GiB @ 65536 tok, 0.65 GiB @ 131072, 1.15 GiB @ 262144
+
+    CHECKPOINT_MIN_STEP was doubled 2048 -> 4096. The server was logging a
+    constant stream of
+        W slot create_check: erasing old context checkpoint (...)
+    i.e. it hit CHECKPOINT_MAX and evicted on nearly every new checkpoint,
+    discarding exactly the mid-conversation restore points that avoid a cold
+    prefill. Halving checkpoint density doubles the span the same number of
+    slots can cover, for the same RAM.
+    Here: MAX 20 x STEP 4096 = 81920 tokens of span (~13 GiB typical RAM).
+
 settings:
   RECOMMENDED_BACKEND: "cuda"
   API_KEY: "ollama-local"
   CACHE_RAM: "0"
   CACHE_TYPE_K: "q4_0"
   CACHE_TYPE_V: "q4_0"
-  CHECKPOINT_MAX: "16"
-  CHECKPOINT_MIN_STEP: "2048"
+  CHECKPOINT_MAX: "20"
+  CHECKPOINT_MIN_STEP: "4096"
   SLOT_SAVE_MAX_CHECKPOINTS: "10"
   CONTEXT: "262144"
   DIO: "1"

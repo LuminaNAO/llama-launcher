@@ -2,11 +2,15 @@
 
 // llama-waterfall — priority failover proxy for llama.cpp endpoints.
 //
-// Routes inference traffic across TWO independent routing tables, each with
-// its own listen port and ordered endpoint list (fastest first):
+// Routes inference traffic across N independent named "portals", each a
+// routing table with its own listen port and ordered endpoint list
+// (fastest first). Two portals exist by default:
 //
 //   [agent]     :40800  — the main agent endpoint (freeclaw points here)
 //   [subagent]  :40810  — the sub-agent endpoint
+//
+// and waterfall.conf sections define any further portals ([a-z0-9-]+ names,
+// optional "port = N" line per section).
 //
 // If the preferred tier is down the request cascades to the next tier;
 // when a faster tier recovers it is promoted back after a hysteresis
@@ -21,18 +25,21 @@
 //   llama-waterfall.mjs                       — start server if needed, open TUI.
 //       q closes the server too IF this invocation started it (else detaches);
 //       Q always stops the server.
-//   llama-waterfall.mjs serve [agent-port] [--subagent-port <n>] [--config <path>]
-//       [--socket <path>] [--api-key <key>] [--poll-interval <sec>]
-//       [--promote-after <n>] [--connect-timeout <ms>] [--stall-timeout <sec>]
-//       [--max-body-mb <n>]
+//   llama-waterfall.mjs serve [agent-port] [--subagent-port <n>]
+//       [--portal <name:port> …] [--config <path>] [--socket <path>]
+//       [--api-key <key>] [--poll-interval <sec>] [--promote-after <n>]
+//       [--connect-timeout <ms>] [--stall-timeout <sec>] [--max-body-mb <n>]
 //   llama-waterfall.mjs tui    [--socket <path>]   — attach-only dashboard
 //   llama-waterfall.mjs stop   [--socket <path>]   — stop server + attached TUIs
 //   llama-waterfall.mjs status [--json] [--socket <path>]
+//   llama-waterfall.mjs portal list|add <name> [--port <n>]|rm <name>
 //
-// Persistence: waterfall.conf holds both tables ([agent]/[subagent] sections;
-// legacy headerless files read as [agent]). Endpoint order, labels, disabled
-// (!) and pinned (*) state are saved on `w`/`write` AND automatically when
-// the server exits (stop command, signals, owned-TUI quit).
+// Persistence: waterfall.conf holds every portal ([name] sections with an
+// optional "port = N" line; legacy headerless files read as [agent], and
+// [agent]/[subagent] default to :40800/:40810 when port= is absent).
+// Endpoint order, labels, disabled (!) and pinned (*) state are saved on
+// `w`/`write` AND automatically when the server exits (stop command,
+// signals, owned-TUI quit).
 //
 // Failure semantics:
 //   - Request bodies are buffered so a failed attempt can be replayed
@@ -76,8 +83,15 @@ const ROOT_DIR = /^\/usr(\/local)?\/(lib|bin|share)\//.test(SCRIPT_DIR + "/")
 const DEFAULT_CONFIG = join(ROOT_DIR, "waterfall.conf");
 const DEFAULT_SOCKET = join(ROOT_DIR, "waterfall.sock");
 const SERVER_LOG = join(ROOT_DIR, "waterfall.log");
-const DEFAULT_AGENT_PORT = 40800;
-const DEFAULT_SUBAGENT_PORT = 40810;
+// Built-in default listen ports for the two canonical portals. Any other
+// portal must get its port from a "port = N" conf line, --portal name:port,
+// or portal add --port. (Env overrides exist so test suites can exercise
+// the defaulting chain without touching the real ports.)
+const DEFAULT_PORTS = {
+    agent: Number(process.env.LLAMA_WATERFALL_AGENT_PORT) || 40800,
+    subagent: Number(process.env.LLAMA_WATERFALL_SUBAGENT_PORT) || 40810,
+};
+const PORTAL_NAME_RE = /^[a-z0-9-]+$/;
 
 // ── Config (filled by serve()) ────────────────────────────────────────────
 const cfg = {
@@ -92,8 +106,10 @@ const cfg = {
 };
 
 // ── Runtime state ─────────────────────────────────────────────────────────
-// Two routing tables, each with its own listener, endpoint list and pin.
-// table = { name, listenPort, endpoints, pinned, activeKey, server }
+// N named portals (routing tables), each with its own listener, endpoint
+// list and pin. [agent]/[subagent] exist by default; waterfall.conf
+// sections and `portal add` define the rest.
+// portal = { name, listenPort, endpoints, pinned, activeKey, server }
 // endpoints[i] = {
 //   host, port, label,           // from waterfall.conf (label optional)
 //   enabled,                     // x/X toggles; persisted as "!" prefix
@@ -105,11 +121,19 @@ const cfg = {
 //   model, nCtx,                 // from /props (best effort)
 //   sockets,                     // live upstream sockets (for hard disable)
 // }
-const tables = [
-    { name: "agent", listenPort: DEFAULT_AGENT_PORT, endpoints: [], pinned: null, activeKey: null, server: null },
-    { name: "subagent", listenPort: DEFAULT_SUBAGENT_PORT, endpoints: [], pinned: null, activeKey: null, server: null },
+function newPortal(name, listenPort = null) {
+    return { name, listenPort, endpoints: [], pinned: null, activeKey: null, server: null };
+}
+const portals = [
+    newPortal("agent", DEFAULT_PORTS.agent),
+    newPortal("subagent", DEFAULT_PORTS.subagent),
 ];
-let dirty = false;          // runtime tables differ from waterfall.conf
+// serve-flag port overrides (positional agent-port, --subagent-port,
+// --portal name:port). They force the portal to exist and beat conf port=
+// lines on every (re)load for this process lifetime.
+const cliPorts = new Map();
+let serving = false;        // serve() is running — new portals get listeners
+let dirty = false;          // runtime portals differ from waterfall.conf
 const startedAt = Date.now();
 const events = [];          // ring buffer of { ts, line }
 const EVENTS_MAX = 200;
@@ -136,10 +160,10 @@ function parseSpec(spec) {
     return newEndpoint(m[1].replace(/^\[|\]$/g, ""), Number(m[2]), (m[3] || "").trim());
 }
 
-function resolveTable(name) {
-    if (name === undefined || name === null || name === "") return tables[0];
-    const t = tables.find(t => t.name === name || (name === "sub" && t.name === "subagent"));
-    if (!t) throw new Error(`unknown table: ${name} (use agent|subagent)`);
+function resolvePortal(name) {
+    if (name === undefined || name === null || name === "") return portals[0];
+    const t = portals.find(t => t.name === name || (name === "sub" && t.name === "subagent"));
+    if (!t) throw new Error(`unknown portal: ${name} (have: ${portals.map(p => p.name).join(", ") || "none"})`);
     return t;
 }
 
@@ -153,25 +177,36 @@ function logEvent(line) {
 }
 
 // ── waterfall.conf ────────────────────────────────────────────────────────
-// Sectioned: [agent] / [subagent] headers, one endpoint per line:
+// Sectioned: one [name] header per portal ([a-z0-9-]+), an optional
+// "port = N" line, then one endpoint per line:
 //   "host:port  # label"  — priority = line order
 // prefixed with "!" if disabled, "*" if pinned. Lines before any section
-// header belong to [agent] (legacy single-table files keep working).
+// header belong to [agent] (legacy single-table files keep working), and
+// [agent]/[subagent] default to :40800/:40810 when port= is absent.
 function parseConfig(text) {
     const out = {};
-    for (const t of tables) out[t.name] = { endpoints: [], pinned: null };
+    const sectionFor = (name) => (out[name] ??= { port: null, endpoints: [], pinned: null });
     let section = "agent";
     for (const raw of text.split("\n")) {
         let line = raw.trim();
         if (!line || line.startsWith("#")) continue;
-        const sec = line.match(/^\[([a-z]+)\]$/i);
+        const sec = line.match(/^\[([a-z0-9-]+)\]$/i);
         if (sec) {
-            const name = sec[1].toLowerCase();
-            if (!out[name]) console.error(`waterfall.conf: unknown section [${sec[1]}] — its lines are ignored`);
-            section = out[name] ? name : null;
+            section = sec[1].toLowerCase();
+            sectionFor(section);
+            continue;
+        }
+        if (line.match(/^\[/)) {
+            console.error(`waterfall.conf: bad section header ${line} (names are [a-z0-9-]+) — its lines are ignored`);
+            section = null;
             continue;
         }
         if (section === null) continue;
+        const portLine = line.match(/^port\s*=\s*(\d+)$/i);
+        if (portLine) {
+            sectionFor(section).port = Number(portLine[1]);
+            continue;
+        }
         let disabled = false, pinnedFlag = false;
         while (line[0] === "!" || line[0] === "*") {
             if (line[0] === "!") disabled = true; else pinnedFlag = true;
@@ -187,18 +222,35 @@ function parseConfig(text) {
         }
         ep.label = label;
         ep.enabled = !disabled;
-        const dst = out[section];
+        const dst = sectionFor(section);
         if (pinnedFlag && dst.pinned === null) dst.pinned = dst.endpoints.length;
         dst.endpoints.push(ep);
     }
     return out;
 }
 
-// Apply a parsed config to the runtime tables, preserving runtime
-// stats/state for endpoints that persist (matched by host:port).
+// Apply a parsed config to the runtime portals: the conf defines the
+// portal set (plus any portals forced by serve flags), and endpoints that
+// persist keep their runtime stats/state (matched by host:port). Portals
+// gained/lost or re-ported at runtime have their listeners started,
+// closed, or re-bound in place.
 function applyConfig(parsed) {
-    for (const t of tables) {
-        const src = parsed[t.name];
+    const wanted = new Map(Object.entries(parsed));
+    for (const name of cliPorts.keys()) {
+        if (!wanted.has(name)) wanted.set(name, { port: null, endpoints: [], pinned: null });
+    }
+    // Drop portals the conf no longer defines (and no serve flag forces).
+    for (const t of [...portals]) {
+        if (wanted.has(t.name)) continue;
+        if (t.server) { t.server.close(); t.server = null; logEvent(`portal [${t.name}] removed — listener on :${t.listenPort} closed`); }
+        portals.splice(portals.indexOf(t), 1);
+    }
+    // (Re)build in conf order, keeping existing portal objects by name.
+    const byName = new Map(portals.map(t => [t.name, t]));
+    portals.length = 0;
+    for (const [name, src] of wanted) {
+        const t = byName.get(name) || newPortal(name);
+        portals.push(t);
         const old = new Map(t.endpoints.map(ep => [epKey(ep), ep]));
         t.endpoints = src.endpoints.map(fresh => {
             const prev = old.get(epKey(fresh));
@@ -208,6 +260,15 @@ function applyConfig(parsed) {
             return prev;
         });
         t.pinned = src.pinned;
+        // Port precedence: serve flag > conf port= > built-in default > keep.
+        const port = cliPorts.get(name) ?? src.port ?? DEFAULT_PORTS[name] ?? t.listenPort;
+        if (port === null) {
+            console.error(`waterfall.conf: portal [${name}] has no port — add a "port = N" line (not listening)`);
+        } else if (port !== t.listenPort || (serving && !t.server)) {
+            if (t.server) { t.server.close(); t.server = null; }
+            t.listenPort = port;
+            if (serving) startProxy(t, false);
+        }
     }
     dirty = false;
 }
@@ -220,14 +281,15 @@ function loadConfig() {
 function writeConfig() {
     const lines = [
         "# waterfall.conf — llama-waterfall endpoint priority lists",
-        "# Sections: [agent] (main endpoint) and [subagent]. One endpoint per line:",
-        '#   host:port  # label     — priority = line order, fastest first.',
-        '# Prefix "!" = disabled, "*" = pinned.',
+        "# One [name] section per portal ([a-z0-9-]+), a port = N line, then one",
+        '# endpoint per line: host:port  # label — priority = line order, fastest',
+        '# first. Prefix "!" = disabled, "*" = pinned.',
         "# Managed by the waterfall TUI (w key; also saved automatically on server",
         "# exit). Hand edits are fine — reload with r in the TUI or SIGHUP.",
     ];
-    for (const t of tables) {
+    for (const t of portals) {
         lines.push("", `[${t.name}]`);
+        if (t.listenPort !== null) lines.push(`port = ${t.listenPort}`);
         t.endpoints.forEach((ep, i) => {
             const flags = `${t.pinned === i ? "*" : ""}${ep.enabled ? "" : "!"}`;
             lines.push(`${flags}${epKey(ep)}${ep.label ? `  # ${ep.label}` : ""}`);
@@ -240,7 +302,7 @@ function writeConfig() {
 
 function reloadConfig() {
     if (existsSync(cfg.configPath)) applyConfig(parseConfig(readFileSync(cfg.configPath, "utf8")));
-    for (const t of tables) {
+    for (const t of portals) {
         if (t.pinned !== null && t.pinned >= t.endpoints.length) t.pinned = null;
     }
     dirty = false;
@@ -470,7 +532,10 @@ async function dispatch(t, clientReq, clientRes, body) {
     }
 }
 
-function startProxy(t) {
+// fatal: a failed bind at serve() startup kills the process (the ports are
+// the whole point); portals added/re-ported at runtime just log the error
+// so a busy port cannot take down the running portals.
+function startProxy(t, fatal = true) {
     const server = createHttpServer((req, res) => {
         const chunks = [];
         let size = 0;
@@ -503,8 +568,12 @@ function startProxy(t) {
     });
     server.keepAliveTimeout = 75_000;
     server.on("error", (err) => {
-        console.error(`waterfall: cannot listen on :${t.listenPort} for [${t.name}] — ${err.code || err.message}`);
-        process.exit(1);
+        if (fatal) {
+            console.error(`waterfall: cannot listen on :${t.listenPort} for [${t.name}] — ${err.code || err.message}`);
+            process.exit(1);
+        }
+        t.server = null;
+        logEvent(`[${t.name}] cannot listen on :${t.listenPort} — ${err.code || err.message}`);
     });
     server.listen(t.listenPort, () => {
         logEvent(`[${t.name}] listening on :${t.listenPort} — ${t.endpoints.length} endpoint(s)`);
@@ -553,7 +622,7 @@ async function fetchProps(ep) {
 
 let pollTimer = null;
 async function pollOnce() {
-    await Promise.all(tables.flatMap(t => t.endpoints.map(async (ep) => {
+    await Promise.all(portals.flatMap(t => t.endpoints.map(async (ep) => {
         const i = t.endpoints.indexOf(ep);
         if (i === -1) return;  // removed mid-poll
         try {
@@ -593,6 +662,20 @@ function startPoller() {
 
 // ── Control socket (unix, JSON-lines) ─────────────────────────────────────
 function statusSnapshot() {
+    const ps = portals.map(t => ({
+        name: t.name,
+        listenPort: t.listenPort,
+        pinned: t.pinned,
+        active: currentActiveIndex(t),
+        endpoints: t.endpoints.map(ep => ({
+            host: ep.host, port: ep.port, label: ep.label,
+            enabled: ep.enabled, state: ep.state,
+            latencyMs: ep.latencyMs, requests: ep.requests, failures: ep.failures,
+            inflight: ep.inflight, consecutiveHealthy: ep.consecutiveHealthy,
+            lastError: ep.lastError, lastErrorAt: ep.lastErrorAt,
+            model: ep.model, nCtx: ep.nCtx,
+        })),
+    }));
     return {
         configPath: cfg.configPath,
         uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
@@ -600,20 +683,8 @@ function statusSnapshot() {
         pid: process.pid,
         pollIntervalSec: cfg.pollIntervalSec,
         promoteAfter: cfg.promoteAfter,
-        tables: tables.map(t => ({
-            name: t.name,
-            listenPort: t.listenPort,
-            pinned: t.pinned,
-            active: currentActiveIndex(t),
-            endpoints: t.endpoints.map(ep => ({
-                host: ep.host, port: ep.port, label: ep.label,
-                enabled: ep.enabled, state: ep.state,
-                latencyMs: ep.latencyMs, requests: ep.requests, failures: ep.failures,
-                inflight: ep.inflight, consecutiveHealthy: ep.consecutiveHealthy,
-                lastError: ep.lastError, lastErrorAt: ep.lastErrorAt,
-                model: ep.model, nCtx: ep.nCtx,
-            })),
-        })),
+        portals: ps,
+        tables: ps,   // deprecated alias — pre-portal consumers read .tables
         events: events.slice(-100),
     };
 }
@@ -663,7 +734,7 @@ async function handleCommand(msg, conn) {
             shutdownServer("stop requested");
             return statusSnapshot();
         case "pin": {
-            const t = resolveTable(msg.table);
+            const t = resolvePortal(msg.portal ?? msg.table);
             if (msg.index === null) { t.pinned = null; dirty = true; logEvent(`[${t.name}] pin cleared`); }
             else if (validIndex(t, msg.index)) { t.pinned = msg.index; dirty = true; logEvent(`pinned to ${epName(t, t.endpoints[t.pinned], t.pinned)}`); }
             else throw new Error("bad index");
@@ -671,7 +742,7 @@ async function handleCommand(msg, conn) {
             return statusSnapshot();
         }
         case "setEnabled": {
-            const t = resolveTable(msg.table);
+            const t = resolvePortal(msg.portal ?? msg.table);
             if (!validIndex(t, msg.index)) throw new Error("bad index");
             const ep = t.endpoints[msg.index];
             ep.enabled = Boolean(msg.enabled);
@@ -687,7 +758,7 @@ async function handleCommand(msg, conn) {
             return statusSnapshot();
         }
         case "add": {
-            const t = resolveTable(msg.table);
+            const t = resolvePortal(msg.portal ?? msg.table);
             const ep = parseSpec(msg.spec);
             const at = validIndex(t, msg.index) ? msg.index : t.endpoints.length;
             t.endpoints.splice(at, 0, ep);
@@ -698,7 +769,7 @@ async function handleCommand(msg, conn) {
             return statusSnapshot();
         }
         case "remove": {
-            const t = resolveTable(msg.table);
+            const t = resolvePortal(msg.portal ?? msg.table);
             if (!validIndex(t, msg.index)) throw new Error("bad index");
             const [ep] = t.endpoints.splice(msg.index, 1);
             if (t.pinned === msg.index) t.pinned = null;
@@ -709,7 +780,7 @@ async function handleCommand(msg, conn) {
             return statusSnapshot();
         }
         case "move": {
-            const t = resolveTable(msg.table);
+            const t = resolvePortal(msg.portal ?? msg.table);
             const { index, to } = msg;
             if (!validIndex(t, index) || !validIndex(t, to)) throw new Error("bad index");
             const [ep] = t.endpoints.splice(index, 1);
@@ -725,7 +796,7 @@ async function handleCommand(msg, conn) {
             return statusSnapshot();
         }
         case "edit": {
-            const t = resolveTable(msg.table);
+            const t = resolvePortal(msg.portal ?? msg.table);
             if (!validIndex(t, msg.index)) throw new Error("bad index");
             const old = t.endpoints[msg.index];
             const ep = parseSpec(msg.spec);
@@ -738,16 +809,42 @@ async function handleCommand(msg, conn) {
         }
         case "write":
             writeConfig();
-            logEvent(`wrote ${tables.map(t => `${t.endpoints.length} [${t.name}]`).join(" + ")} endpoint(s) to ${cfg.configPath}`);
+            logEvent(`wrote ${portals.map(t => `${t.endpoints.length} [${t.name}]`).join(" + ")} endpoint(s) to ${cfg.configPath}`);
             broadcast();
             return statusSnapshot();
         case "reload":
             reloadConfig();
-            logEvent(`reloaded ${cfg.configPath} (${tables.map(t => `${t.endpoints.length} [${t.name}]`).join(", ")})`);
-            for (const t of tables) noteActiveChange(t, "reload");
+            logEvent(`reloaded ${cfg.configPath} (${portals.map(t => `${t.endpoints.length} [${t.name}]`).join(", ")})`);
+            for (const t of portals) noteActiveChange(t, "reload");
             return statusSnapshot();
+        case "portalAdd": {
+            const name = String(msg.name || "").trim();
+            if (!PORTAL_NAME_RE.test(name)) throw new Error(`bad portal name: ${name || "(empty)"} (names are [a-z0-9-]+)`);
+            if (portals.some(p => p.name === name)) throw new Error(`portal ${name} already exists`);
+            const port = msg.port ?? cliPorts.get(name) ?? DEFAULT_PORTS[name];
+            if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`portal ${name} needs --port <n> (no default port for that name)`);
+            const t = newPortal(name, port);
+            portals.push(t);
+            if (serving) startProxy(t, false);
+            dirty = true;
+            logEvent(`portal [${name}] added on :${port}`);
+            broadcast();
+            return statusSnapshot();
+        }
+        case "portalRemove": {
+            if (!msg.name) throw new Error("portal rm needs a name");
+            const t = resolvePortal(msg.name);
+            if (portals.length === 1) throw new Error("cannot remove the last portal");
+            if (t.server) { t.server.close(); t.server = null; }
+            for (const ep of t.endpoints) for (const s of ep.sockets) s.destroy(new Error("portal removed"));
+            portals.splice(portals.indexOf(t), 1);
+            dirty = true;
+            logEvent(`portal [${t.name}] removed — listener on :${t.listenPort} closed`);
+            broadcast();
+            return statusSnapshot();
+        }
         case "test": {
-            const t = resolveTable(msg.table);
+            const t = resolvePortal(msg.portal ?? msg.table);
             if (!validIndex(t, msg.index)) throw new Error("bad index");
             const ep = t.endpoints[msg.index];
             const name = epName(t, ep, msg.index);
@@ -828,8 +925,20 @@ function startControlSocket() {
 
 // ── serve ─────────────────────────────────────────────────────────────────
 function applyServeArgs(args) {
-    tables[0].listenPort = Number(args._[0] || DEFAULT_AGENT_PORT);
-    tables[1].listenPort = Number(args["subagent-port"] || DEFAULT_SUBAGENT_PORT);
+    // Port overrides: the legacy positional agent-port and --subagent-port,
+    // plus the general --portal name:port (repeatable). Each forces the
+    // portal to exist and beats conf port= lines (see cliPorts).
+    if (args._[0] !== undefined) cliPorts.set("agent", Number(args._[0]));
+    if (args["subagent-port"] !== undefined) cliPorts.set("subagent", Number(args["subagent-port"]));
+    for (const spec of [].concat(args.portal ?? [])) {
+        const m = String(spec).match(/^([a-z0-9-]+):(\d+)$/);
+        if (!m) { console.error(`bad --portal: ${spec} (expected name:port, name = [a-z0-9-]+)`); process.exit(1); }
+        cliPorts.set(m[1], Number(m[2]));
+    }
+    for (const [name, port] of cliPorts) {
+        const t = portals.find(p => p.name === name) ?? portals[portals.push(newPortal(name)) - 1];
+        t.listenPort = port;
+    }
     if (args.config) cfg.configPath = args.config;
     if (args.socket) cfg.socketPath = args.socket;
     if (args["api-key"]) cfg.apiKey = args["api-key"];
@@ -845,22 +954,26 @@ async function serve(args) {
 
     mkdirSync(dirname(cfg.configPath), { recursive: true });
     loadConfig();
-    for (const t of tables) {
+    for (const t of portals) {
         if (!t.endpoints.length) {
             console.error(`no [${t.name}] endpoints in ${cfg.configPath} — add lines like "127.0.0.1:40801  # local" (or use the TUI once running)`);
         }
     }
 
     await startControlSocket();
-    for (const t of tables) startProxy(t);
+    for (const t of portals) {
+        if (t.listenPort === null) { console.error(`portal [${t.name}] has no port — not listening`); continue; }
+        startProxy(t);
+    }
+    serving = true;
     startPoller();
 
     process.on("SIGINT", () => shutdownServer("SIGINT"));
     process.on("SIGTERM", () => shutdownServer("SIGTERM"));
     process.on("SIGHUP", () => {
         reloadConfig();
-        logEvent(`SIGHUP: reloaded ${cfg.configPath} (${tables.map(t => `${t.endpoints.length} [${t.name}]`).join(", ")})`);
-        for (const t of tables) noteActiveChange(t, "reload");
+        logEvent(`SIGHUP: reloaded ${cfg.configPath} (${portals.map(t => `${t.endpoints.length} [${t.name}]`).join(", ")})`);
+        for (const t of portals) noteActiveChange(t, "reload");
     });
 }
 
@@ -924,10 +1037,11 @@ async function waitUntil(fn, timeoutMs = 8000, everyMs = 100) {
 
 // ── CLI control subcommands (the same surface the TUI drives) ─────────────
 // Ranks on the CLI are 1-based, matching the TUI display. Per-tier commands
-// target [agent] by default; pass --table subagent for the other table.
+// target the first portal ([agent]) by default; pass --portal <name> for
+// any other. (--table is kept as a deprecated alias.)
 function printStatus(s) {
     console.log(`waterfall  uptime ${fmtUptime(s.uptimeSec)}${s.dirty ? "  [+unsaved]" : ""}  conf ${s.configPath}`);
-    for (const t of s.tables) {
+    for (const t of s.portals ?? s.tables) {
         console.log(`[${t.name}] :${t.listenPort}${t.pinned !== null ? `  PINNED→${t.pinned + 1}` : ""}`);
         t.endpoints.forEach((ep, i) => {
             const flags = [
@@ -946,12 +1060,13 @@ function rankToIndex(v) {
     return n - 1;
 }
 
-function tableArg(args) {
-    const v = args.table;
-    if (v === undefined) return "agent";
-    if (v === "agent" || v === "subagent" || v === "sub") return v;
-    console.error(`bad --table: ${v} (use agent|subagent)`);
-    process.exit(1);
+function portalArg(args) {
+    let v = args.portal !== undefined ? args.portal : args.table;   // --table = deprecated alias
+    if (Array.isArray(v)) v = v[v.length - 1];
+    if (v === undefined) return undefined;   // server default: first portal
+    if (v === "sub") return "subagent";
+    if (!PORTAL_NAME_RE.test(v)) { console.error(`bad --portal: ${v} (names are [a-z0-9-]+)`); process.exit(1); }
+    return v;
 }
 
 async function ctlCmd(sub, args) {
@@ -961,26 +1076,26 @@ async function ctlCmd(sub, args) {
     catch { console.error(`waterfall not running (no socket at ${socketPath})`); process.exit(1); }
 
     const p = args._;
-    const table = tableArg(args);
+    const portal = portalArg(args);
     let cmd, extra = {};
     switch (sub) {
         case "status": cmd = "status"; break;
         case "pin":
             cmd = "pin";
-            extra = { table, index: (p[0] === "off" || p[0] === "none" || p[0] === undefined) ? null : rankToIndex(p[0]) };
+            extra = { portal, index: (p[0] === "off" || p[0] === "none" || p[0] === undefined) ? null : rankToIndex(p[0]) };
             break;
-        case "disable": cmd = "setEnabled"; extra = { table, index: rankToIndex(p[0]), enabled: false, hard: Boolean(args.hard) }; break;
-        case "enable": cmd = "setEnabled"; extra = { table, index: rankToIndex(p[0]), enabled: true }; break;
+        case "disable": cmd = "setEnabled"; extra = { portal, index: rankToIndex(p[0]), enabled: false, hard: Boolean(args.hard) }; break;
+        case "enable": cmd = "setEnabled"; extra = { portal, index: rankToIndex(p[0]), enabled: true }; break;
         case "add":
             cmd = "add";
-            extra = { table, spec: p.join(" "), index: args.rank !== undefined ? rankToIndex(args.rank) : undefined };
+            extra = { portal, spec: p.join(" "), index: args.rank !== undefined ? rankToIndex(args.rank) : undefined };
             break;
-        case "remove": cmd = "remove"; extra = { table, index: rankToIndex(p[0]) }; break;
-        case "move": cmd = "move"; extra = { table, index: rankToIndex(p[0]), to: rankToIndex(p[1]) }; break;
-        case "edit": cmd = "edit"; extra = { table, index: rankToIndex(p[0]), spec: p.slice(1).join(" ") }; break;
+        case "remove": cmd = "remove"; extra = { portal, index: rankToIndex(p[0]) }; break;
+        case "move": cmd = "move"; extra = { portal, index: rankToIndex(p[0]), to: rankToIndex(p[1]) }; break;
+        case "edit": cmd = "edit"; extra = { portal, index: rankToIndex(p[0]), spec: p.slice(1).join(" ") }; break;
         case "write": cmd = "write"; break;
         case "reload": cmd = "reload"; break;
-        case "test": cmd = "test"; extra = { table, index: rankToIndex(p[0]) }; break;
+        case "test": cmd = "test"; extra = { portal, index: rankToIndex(p[0]) }; break;
     }
 
     let result;
@@ -994,6 +1109,39 @@ async function ctlCmd(sub, args) {
     } else {
         printStatus(result);
     }
+    ctl.conn.destroy();
+}
+
+// Portal CRUD: `portal list [--json]`, `portal add <name> [--port <n>]`,
+// `portal rm <name>`. Like every other control command it drives the
+// running server over the control socket; persist with `write` (or w).
+async function portalCmd(args) {
+    const [action, name] = args._;
+    const socketPath = args.socket || DEFAULT_SOCKET;
+    let ctl;
+    try { ctl = await connectControl(socketPath); }
+    catch { console.error(`waterfall not running (no socket at ${socketPath})`); process.exit(1); }
+
+    let result;
+    try {
+        if (action === "list" || action === undefined) {
+            const s = await ctl.send("status");
+            const list = s.portals.map(t => ({
+                name: t.name, listenPort: t.listenPort, endpoints: t.endpoints.length,
+                pinned: t.pinned, active: t.active,
+            }));
+            if (args.json) console.log(JSON.stringify(list, null, 2));
+            else for (const t of list) console.log(`${t.name}  :${t.listenPort}  ${t.endpoints} endpoint(s)${t.pinned !== null ? `  PINNED→${t.pinned + 1}` : ""}`);
+            ctl.conn.destroy();
+            return;
+        }
+        if (action === "add") result = await ctl.send("portalAdd", { name, port: args.port !== undefined ? Number(args.port) : undefined });
+        else if (action === "rm" || action === "remove") result = await ctl.send("portalRemove", { name });
+        else { console.error("usage: llama-waterfall portal list [--json] | add <name> [--port <n>] | rm <name>"); process.exit(1); }
+    } catch (err) { console.error(`error: ${err.message}`); ctl.conn.destroy(); process.exit(1); }
+
+    if (args.json) console.log(JSON.stringify(result, null, 2));
+    else printStatus(result);
     ctl.conn.destroy();
 }
 
@@ -1038,8 +1186,8 @@ async function tui(args, opts = { owns: false }) {
     }
 
     let state = null;
-    let focus = 0;              // 0 = agent pane, 1 = subagent pane
-    const cursors = [0, 0];
+    let focus = 0;              // index into state.portals (one pane each)
+    const cursors = new Map();  // portal name → selected endpoint row
     let mode = "normal";        // "normal" | "input"
     let inputPrompt = "", inputBuf = "", inputSubmit = null;
     let pendingD = false;
@@ -1061,7 +1209,7 @@ async function tui(args, opts = { owns: false }) {
             try { await ctl.send("shutdown"); } catch { }
             exitTui("waterfall stopped");
         } else {
-            const ports = state ? state.tables.map(t => `:${t.listenPort}`).join(" ") : "";
+            const ports = state ? state.portals.map(t => `:${t.listenPort}`).join(" ") : "";
             exitTui(`detached — waterfall still running${ports ? ` on ${ports}` : ""} (llama-waterfall stop to kill it)`);
         }
     }
@@ -1080,14 +1228,17 @@ async function tui(args, opts = { owns: false }) {
     });
     state = await ctl.send("subscribe");
 
-    const T = () => state.tables[focus];
-    const cur = () => cursors[focus];
+    const T = () => state.portals[focus];
+    const cur = () => cursors.get(T()?.name) ?? 0;
+    const setCur = (v) => cursors.set(T().name, Math.max(0, Math.min(v, T().endpoints.length - 1)));
 
     function clampCursors() {
         if (!state) return;
-        state.tables.forEach((t, ti) => {
-            if (cursors[ti] >= t.endpoints.length) cursors[ti] = Math.max(0, t.endpoints.length - 1);
-        });
+        if (focus >= state.portals.length) focus = Math.max(0, state.portals.length - 1);
+        for (const t of state.portals) {
+            const c = cursors.get(t.name) ?? 0;
+            if (c >= t.endpoints.length) cursors.set(t.name, Math.max(0, t.endpoints.length - 1));
+        }
     }
 
     function stateCell(ep, t) {
@@ -1108,7 +1259,7 @@ async function tui(args, opts = { owns: false }) {
         L.push(`${A.dim}   #  endpoint                     state        latency   req   fail  model${A.reset}`);
         const models = new Set(t.endpoints.filter(e => e.model).map(e => e.model));
         t.endpoints.forEach((ep, i) => {
-            const sel = focused && i === cursors[ti];
+            const sel = focused && i === (cursors.get(t.name) ?? 0);
             const active = i === t.active;
             const addr = `${ep.host}:${ep.port}${ep.label ? ` ${A.dim}(${ep.label})${A.reset}` : ""}`;
             const mism = ep.model && models.size > 1;
@@ -1126,6 +1277,15 @@ async function tui(args, opts = { owns: false }) {
         return L;
     }
 
+    // One-line pane summary — used for unfocused panes when the terminal is
+    // too short to show every portal expanded.
+    function paneSummary(t) {
+        const healthy = t.endpoints.filter(e => e.state === "healthy").length;
+        const act = t.active !== null ? t.endpoints[t.active] : null;
+        const pinTxt = t.pinned !== null ? `  ${A.magenta}PIN→${t.pinned + 1}${A.reset}` : "";
+        return `${A.dim}${A.bold} ${t.name.toUpperCase()} :${t.listenPort}${A.reset}${pinTxt}  ${A.dim}${t.endpoints.length} tier(s), ${healthy} healthy${act ? ` — active ${act.host}:${act.port}` : ""}${A.reset}`;
+    }
+
     function render() {
         if (!state) return;
         const rows = out.rows || 40, cols = out.columns || 100;
@@ -1134,9 +1294,15 @@ async function tui(args, opts = { owns: false }) {
             ? `${A.magenta}owned — q stops server${A.reset}`
             : `${A.dim}attached — q detaches${A.reset}`;
         L.push(`${A.bold} llama-waterfall${A.reset}${state.dirty ? ` ${A.yellow}[+]${A.reset}` : ""}   ${owner}   ${A.dim}uptime ${fmtUptime(state.uptimeSec)}   conf ${state.configPath}${A.reset}`);
-        state.tables.forEach((t, ti) => {
+        // N stacked panes; when they cannot all fit expanded, unfocused
+        // panes collapse to a one-line summary so the focused one stays whole.
+        const expanded = state.portals.map((t, ti) => paneLines(t, ti, cols));
+        const fullHeight = 1 + expanded.reduce((a, l) => a + l.length + 1, 0) + 3 + 4;  // header + panes(+sep) + footer + min log
+        const collapse = fullHeight > rows;
+        state.portals.forEach((t, ti) => {
             L.push(A.dim + "─".repeat(Math.min(cols, 110)) + A.reset);
-            L.push(...paneLines(t, ti, cols));
+            if (collapse && ti !== focus) L.push(paneSummary(t));
+            else L.push(...expanded[ti]);
         });
 
         L.push(A.dim + "─".repeat(Math.min(cols, 110)) + A.reset);
@@ -1155,9 +1321,9 @@ async function tui(args, opts = { owns: false }) {
         if (mode === "input") {
             L.push(` ${A.bold}${inputPrompt}${A.reset}${inputBuf}${A.inv} ${A.reset}`);
         } else if (helpVisible) {
-            L.push(` ${A.dim}Tab pane  j/k move  g/G top/bot  J/K rank  a add  dd remove  e edit  x drain  X hard-off  p pin  t test  w write  u undo  r reload  C-e/C-y log  q quit  Q stop-all${A.reset}`);
+            L.push(` ${A.dim}h/l/Tab pane  j/k move  C-d/C-u jump  g/G top/bot  J/K rank  a add  dd remove  e edit  x drain  X hard-off  p pin  t test  A add-portal  D rm-portal  w write  u undo  r reload  C-e/C-y log  q quit  Q stop-all${A.reset}`);
         } else {
-            L.push(` ${flash ? A.yellow + flash + A.reset : A.dim + "[?] help   Tab j/k J/K a dd e x p t w u r q Q" + A.reset}`);
+            L.push(` ${flash ? A.yellow + flash + A.reset : A.dim + "[?] help   h/l Tab j/k J/K g/G a dd e x p t A D w u r q Q" + A.reset}`);
         }
         out.write(A.clear + L.slice(0, rows).map(l => truncVis(l, cols - 1)).join("\n"));
     }
@@ -1184,7 +1350,7 @@ async function tui(args, opts = { owns: false }) {
     function say(msg) { flash = msg; render(); setTimeout(() => { if (flash === msg) { flash = ""; render(); } }, 3000); }
 
     async function cmd(c, extra) {
-        try { state = await ctl.send(c, { table: T().name, ...extra }); clampCursors(); render(); }
+        try { state = await ctl.send(c, { portal: T()?.name, ...extra }); clampCursors(); render(); }
         catch (err) { say(`error: ${err.message}`); }
     }
 
@@ -1212,19 +1378,32 @@ async function tui(args, opts = { owns: false }) {
         }
 
         const n = T()?.endpoints.length ?? 0;
+        const nPanes = state.portals.length;
         const wasD = pendingD; pendingD = false;
         switch (key) {
             case "q": case "\x03": quit(false); break;
             case "Q": quit(true); break;
-            case "\t": case "\x1b[Z": focus = (focus + 1) % state.tables.length; render(); break;
-            case "j": case "\x1b[B": if (cur() < n - 1) cursors[focus]++; render(); break;
-            case "k": case "\x1b[A": if (cur() > 0) cursors[focus]--; render(); break;
-            case "g": cursors[focus] = 0; render(); break;
-            case "G": cursors[focus] = Math.max(0, n - 1); render(); break;
-            case "J": if (cur() < n - 1) { cmd("move", { index: cur(), to: cur() + 1 }); cursors[focus]++; } break;
-            case "K": if (cur() > 0) { cmd("move", { index: cur(), to: cur() - 1 }); cursors[focus]--; } break;
+            case "\t": case "l": focus = (focus + 1) % nPanes; render(); break;                        // next pane
+            case "\x1b[Z": case "h": focus = (focus - 1 + nPanes) % nPanes; render(); break;           // prev pane (Shift-Tab)
+            case "j": case "\x1b[B": setCur(cur() + 1); render(); break;
+            case "k": case "\x1b[A": setCur(cur() - 1); render(); break;
+            case "\x04": setCur(cur() + 5); render(); break;   // C-d half-jump
+            case "\x15": setCur(cur() - 5); render(); break;   // C-u half-jump
+            case "g": setCur(0); render(); break;              // g (and thus gg) = top
+            case "G": setCur(n - 1); render(); break;
+            case "J": if (cur() < n - 1) { cmd("move", { index: cur(), to: cur() + 1 }); setCur(cur() + 1); } break;
+            case "K": if (cur() > 0) { cmd("move", { index: cur(), to: cur() - 1 }); setCur(cur() - 1); } break;
             case "d": pendingD = !wasD; if (wasD && n) cmd("remove", { index: cur() }); break;
             case "a": openInput(`add to [${T().name}] (host:port [label]): `, "", (v) => cmd("add", { spec: v, index: n ? cur() + 1 : 0 })); break;
+            case "A": openInput("new portal (name:port): ", "", (v) => {
+                const m = v.match(/^([a-z0-9-]+)(?::(\d+))?$/);
+                if (!m) { say("bad portal spec (name[:port], name = [a-z0-9-]+)"); return; }
+                cmd("portalAdd", { name: m[1], port: m[2] ? Number(m[2]) : undefined });
+            }); break;
+            case "D": if (nPanes > 1) openInput(`remove portal [${T().name}]? (y/N): `, "", (v) => {
+                if (v === "y" || v === "Y") cmd("portalRemove", { name: T().name });
+                else render();
+            }); else say("cannot remove the last portal"); break;
             case "e": if (n) {
                 const ep = T().endpoints[cur()];
                 openInput(`edit [${T().name}] (host:port [label]): `, `${ep.host}:${ep.port}${ep.label ? " " + ep.label : ""}`, (v) => cmd("edit", { index: cur(), spec: v }));
@@ -1261,8 +1440,9 @@ async function autoTui(args) {
         const logFd = openSync(SERVER_LOG, "a");
         const serveArgs = [SCRIPT_PATH, "serve"];
         if (args._[0]) serveArgs.push(String(args._[0]));
-        for (const f of ["subagent-port", "config", "socket", "api-key", "poll-interval", "promote-after", "connect-timeout", "max-body-mb"]) {
-            if (args[f] !== undefined) serveArgs.push(`--${f}`, String(args[f]));
+        for (const f of ["subagent-port", "portal", "config", "socket", "api-key", "poll-interval", "promote-after", "connect-timeout", "stall-timeout", "max-body-mb"]) {
+            if (args[f] === undefined) continue;
+            for (const v of [].concat(args[f])) serveArgs.push(`--${f}`, String(v));  // --portal repeats
         }
         const child = spawn(process.execPath, serveArgs, { detached: true, stdio: ["ignore", logFd, logFd] });
         child.unref();
@@ -1284,7 +1464,10 @@ function parseArgs(argv) {
         if (a.startsWith("--")) {
             const name = a.slice(2);
             if (BOOL_FLAGS.has(name)) args[name] = true;
-            else args[name] = argv[++i];
+            else {
+                const v = argv[++i];
+                args[name] = name in args ? [].concat(args[name], v) : v;  // repeated flag → array (--portal)
+            }
         }
         else args._.push(a);
     }
@@ -1293,24 +1476,30 @@ function parseArgs(argv) {
 
 function usage(code) {
     console.error("usage: llama-waterfall                        start server if needed + open TUI (q closes what it opened; Q stops all)");
-    console.error("       llama-waterfall serve [agent-port] [--subagent-port <n>] [--config <path>] [--socket <path>]");
-    console.error("                             [--api-key <key>] [--poll-interval <sec>] [--promote-after <n>]");
+    console.error("       llama-waterfall serve [agent-port] [--subagent-port <n>] [--portal <name:port> …]");
+    console.error("                             [--config <path>] [--socket <path>] [--api-key <key>]");
+    console.error("                             [--poll-interval <sec>] [--promote-after <n>]");
     console.error("                             [--connect-timeout <ms>] [--stall-timeout <sec>] [--max-body-mb <n>]");
-    console.error(`                             (defaults: [agent] :${DEFAULT_AGENT_PORT}, [subagent] :${DEFAULT_SUBAGENT_PORT})`);
+    console.error(`                             (defaults: [agent] :${DEFAULT_PORTS.agent}, [subagent] :${DEFAULT_PORTS.subagent}; conf sections define further portals)`);
     console.error("       llama-waterfall tui  [--socket <path>]  attach-only dashboard (q detaches)");
     console.error("       llama-waterfall stop [--socket <path>]  stop the server and any attached TUIs (saves config)");
     console.error("");
+    console.error("  portals (named routing tables, one listener each; defined in waterfall.conf or at runtime):");
+    console.error("       llama-waterfall portal list [--json]");
+    console.error("       llama-waterfall portal add <name> [--port <n>]     name = [a-z0-9-]+ (persist with write / w)");
+    console.error("       llama-waterfall portal rm <name>");
+    console.error("");
     console.error("  control (ranks are 1-based, as shown in the TUI; all accept --json and --socket <path>;");
-    console.error("  per-tier commands act on [agent] unless --table subagent is given):");
+    console.error("  per-tier commands act on the first portal ([agent]) unless --portal <name> is given):");
     console.error("       llama-waterfall status");
-    console.error("       llama-waterfall pin <rank>|off [--table subagent]     force all traffic to one tier / clear pin");
-    console.error("       llama-waterfall disable <rank> [--hard] [--table …]   drain (or cut) a tier; enable <rank> restores");
-    console.error("       llama-waterfall add <host:port> [label…] [--rank <n>] [--table …]");
-    console.error("       llama-waterfall remove <rank> [--table …]");
-    console.error("       llama-waterfall move <rank> <new-rank> [--table …]");
-    console.error("       llama-waterfall edit <rank> <host:port> [label…] [--table …]");
-    console.error("       llama-waterfall write | reload            persist runtime tables / re-read waterfall.conf");
-    console.error("       llama-waterfall test <rank> [--table …]   health + 1-token completion probe");
+    console.error("       llama-waterfall pin <rank>|off [--portal <name>]     force all traffic to one tier / clear pin");
+    console.error("       llama-waterfall disable <rank> [--hard] [--portal …]  drain (or cut) a tier; enable <rank> restores");
+    console.error("       llama-waterfall add <host:port> [label…] [--rank <n>] [--portal …]");
+    console.error("       llama-waterfall remove <rank> [--portal …]");
+    console.error("       llama-waterfall move <rank> <new-rank> [--portal …]");
+    console.error("       llama-waterfall edit <rank> <host:port> [label…] [--portal …]");
+    console.error("       llama-waterfall write | reload            persist runtime portals / re-read waterfall.conf");
+    console.error("       llama-waterfall test <rank> [--portal …]  health + 1-token completion probe");
     process.exit(code);
 }
 
@@ -1324,6 +1513,7 @@ else {
     if (sub === "serve") serve(args);
     else if (sub === "tui") tui(args, { owns: false });
     else if (sub === "stop") stopCmd(args);
+    else if (sub === "portal") portalCmd(args);
     else if (CTL_SUBS.has(sub)) ctlCmd(sub, args);
     else usage(1);
 }

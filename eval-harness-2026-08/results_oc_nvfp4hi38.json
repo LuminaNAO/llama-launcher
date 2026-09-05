@@ -1,0 +1,262 @@
+[
+ {
+  "id": "M1",
+  "cat": "math",
+  "label": "oc-nvfp4hi38",
+  "content": "I verified this by direct computation. Since 101 \u2261 1 (mod 4), \u22121 is a quadratic residue mod 101, with roots n \u2261 10 and 91 (mod 101). Over 1,000,000 = 101\u00b79900 + 92, the full blocks give 9900\u00b72 = 19800 solutions, and the remaining residues 1\u201392 contain both roots 10 and 91, adding 2 more.\n\nANSWER: 19802",
+  "error": null,
+  "wall": 24.227972507476807,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "M2",
+  "cat": "math",
+  "label": "oc-nvfp4hi38",
+  "content": "The brute force and DP agree (2036); my quick enumeration had a bug (counted digit sum \u2264 13). Let me fix it to confirm:\nThree independent methods (DP over digit sum and mod 13, direct enumeration of 7-digit strings with exact digit sum, and brute force over 1..10,000,000) all agree on **2036**.\n\nANSWER: 2036",
+  "error": null,
+  "wall": 34.36090397834778,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "M3",
+  "cat": "math",
+  "label": "oc-nvfp4hi38",
+  "content": "Let me verify with a quick simulation.\nThe exact answer is 42.\n\nLet a = expected rolls needed starting fresh (no trailing six), and b = expected additional rolls given the previous roll was a six.\n\n- b = 1 + (1/6)\u00b70 + (5/6)\u00b7a \u2192 b = 1 + (5/6)a\n- a = 1 + (1/6)b + (5/6)a \u2192 (1/6)a = 1 + (1/6)b \u2192 a = 6 + b\n\nSubstituting: a = 6 + 1 + (5/6)a \u2192 (1/6)a = 7 \u2192 a = 42.\n\nANSWER: 42",
+  "error": null,
+  "wall": 9.867891311645508,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "M4",
+  "cat": "math",
+  "label": "oc-nvfp4hi38",
+  "content": "Total paths: C(20,10) = 184,756\nPaths through (5,5): C(10,5) \u00d7 C(10,5) = 252 \u00d7 252 = 63,504\nPaths avoiding (5,5): 184,756 \u2212 63,504 = **121,252**\n\nANSWER: 121252",
+  "error": null,
+  "wall": 6.407234191894531,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "M5",
+  "cat": "math",
+  "label": "oc-nvfp4hi38",
+  "content": "Solving via CRT (7\u00b711\u00b713 = 1001):\n\n- n = 3 + 7a. Mod 11: 7a \u2261 2 \u2192 a \u2261 5 (mod 11), so n = 38 + 77b.\n- Mod 13: 38 + 77b \u2261 \u22121 \u2212 b \u2261 7 \u2192 b \u2261 5 (mod 13), so n = 423 + 1001c.\n\nSmallest n > 1000: 423 + 1001 = 1424.\n\nCheck: 1424 = 203\u00b77 + 3 \u2713, 1424 = 129\u00b711 + 5 \u2713, 1424 = 109\u00b713 + 7 \u2713\n\nANSWER: 1424",
+  "error": null,
+  "wall": 8.498549699783325,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "M6",
+  "cat": "math",
+  "label": "oc-nvfp4hi38",
+  "content": "The square divisors of N = 2^5 \u00b7 3^4 \u00b7 5^2 must have even exponents for each prime.\n\n**Exponent choices per prime:**\n- 2: 0, 2, 4 \u2192 (1 + 4 + 16) = 21\n- 3: 0, 2, 4 \u2192 (1 + 9 + 81) = 91\n- 5: 0, 2 \u2192 (1 + 25) = 26\n\n**Sum** = 21 \u00d7 91 \u00d7 26 = 1911 \u00d7 26 = 49686\n\nANSWER: 49686",
+  "error": null,
+  "wall": 5.287353992462158,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "M7",
+  "cat": "math",
+  "label": "oc-nvfp4hi38",
+  "content": "Counting the hands:\n\n- Choose the two ranks that form the pairs: C(13,2) = 78\n- Choose the rank of the fifth card: 11\n- Choose the suits for each pair: C(4,2)\u00b2 = 36\n- Choose the fifth card's suit: 4\n\nNumerator: 78 \u00d7 11 \u00d7 36 \u00d7 4 = 124,752\nDenominator: C(52,5) = 2,598,960\n\nReducing: 124,752 / 2,598,960 = 198/4165 (verified by exact GCD computation).\n\nm + n = 198 + 4165 = 4363.\n\nANSWER: 4363",
+  "error": null,
+  "wall": 16.659260749816895,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "M8",
+  "cat": "math",
+  "label": "oc-nvfp4hi38",
+  "content": "The recursion bottoms out quickly: for n \u2265 1000, f(n) = n\u22123, and working downward, the values stabilize into an alternation where odd n \u2192 998 and even n \u2192 997 for all n \u2265 989. Since 1 is odd:\n\n**f(1) = 998**\n\nANSWER: 998",
+  "error": null,
+  "wall": 25.304423570632935,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "L1",
+  "cat": "logic",
+  "label": "oc-nvfp4hi38",
+  "content": "**Setting up the constraints** (T = knight, F = knave, statement truth must match type):\n\n- A: A \u21d4 (B=F and D=F)\n- B: B \u21d4 C\n- C: C \u21d4 (A=F)\n- D: D \u21d4 (exactly 2 knights)\n- E: E \u21d4 (A and C same type)\n\n**Case 1: A = T.** Then C = F (from C's statement), and B = F (from B \u21d4 C). A's statement forces D = F. E: A=T vs C=F \u2192 different, so E's claim is false \u2192 E=F.\nCount: only A is a knight = 1, so D's \"exactly two\" is false \u2192 D=F \u2713. All consistent. **TFFFF**\n\n**Case 2: A = F.** Then C = T and B = T. E: A\u2260C \u2192 E=F. Knights so far: B, C = 2. If D=F, the count is exactly 2 \u2192 D's statement true \u2192 contradiction. If D=T, count = 3 \u2192 statement false \u2192 contradiction. No solution.\n\n**Check of TFFFF:**\n- A(T): \"B and D are knaves\" \u2014 B=F, D=F \u2192 true \u2713\n- B(F): \"C is a knight\" \u2014 C=F \u2192 false \u2713\n- C(F): \"A is a knave\" \u2014 A=T \u2192 false \u2713\n- D(F): \"Exactly two are knights\" \u2014 only 1 is \u2192 false \u2713\n- E(F): \"A and C same type\" \u2014 T vs F \u2192 false \u2713\n\nANSWER: TFFFF",
+  "error": null,
+  "wall": 12.05966305732727,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "L2",
+  "cat": "logic",
+  "label": "oc-nvfp4hi38",
+  "content": "Looking at this constraint puzzle:\n\n**Constraints:** P \u2260 Mon; Q adjacent to R; S > P; T \u2208 {Tue, Wed, Thu}; R < S.\n\n**Testing Sam's possible days (S must be \u2265 Wed since P < S and P \u2260 Mon):**\n\n**S = Wed (3):** P must be Tue (2). R < 3 forces R = Mon. Q adjacent to R \u2192 Q = Tue, taken by P. \u2717 No solution.\n\n**S = Thu (4):**\n- P = Tue: R \u2208 {Mon, Wed}. R=Mon \u2192 Q=Tue (taken). R=Wed \u2192 Q \u2208 {Tue, Thu}, both taken. \u2717\n- P = Wed: R \u2208 {Mon, Tue}. R=Mon \u2192 Q=Tue, leaving T=Fri (forbidden). R=Tue \u2192 Q=Mon, leaving T=Fri (forbidden). \u2717 No solution.\n\n**S = Fri (5):**\n- P = Wed: (P=Wed, R=Mon, Q=Tue, T=Thu) \u2713; (P=Wed, R=Tue, Q=Mon, T=Thu) \u2713\n- P = Thu: (P=Thu, R=Mon, Q=Tue, T=Wed) \u2713; (P=Thu, R=Tue, Q=Mon, T=Wed) \u2713\n- (P = Tue leads to T = Mon, forbidden)\n\nOnly Sam = Friday yields valid schedules, and indeed Sam is Friday in every one of them (matching the puzzle's claim).\n\nANSWER: Fri",
+  "error": null,
+  "wall": 18.193528652191162,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "L3",
+  "cat": "logic",
+  "label": "oc-nvfp4hi38",
+  "content": "Let n be the number of false statements.\n\n- If n = 1: S1 would be true (its claim matches), but S2, S3, S4 would all be false \u2014 that's 3 false, not 1. Contradiction.\n- If n = 2: S2 would be true, leaving S1, S3, S4 false \u2014 that's 3 false, not 2. Contradiction.\n- If n = 3: S3 would be true, and S1, S2, S4 false \u2014 exactly 3 false. **Consistent.**\n- If n = 4: S4 would be true (its claim matches), making only 3 false. Contradiction.\n\nOnly n = 3 works: S1, S2, and S4 are false, while S3 is true.\n\nANSWER: 3",
+  "error": null,
+  "wall": 6.8340277671813965,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "L4",
+  "cat": "logic",
+  "label": "oc-nvfp4hi38",
+  "content": "**6 moves.** The optimal sequence:\n\n1. Fill the 7L jug \u2192 (7, 0)\n2. Pour 7L into 5L until full \u2192 (2, 5)\n3. Empty the 5L jug \u2192 (2, 0)\n4. Pour the 2L into the 5L jug \u2192 (0, 2)\n5. Fill the 7L jug \u2192 (7, 2)\n6. Pour from 7L into 5L (which needs 3L to fill) \u2192 **(4, 5)**\n\nExactly 4 litres now sit in the 7L jug. A breadth-first search over jug states confirms no solution exists in fewer than 6 moves \u2014 the first 4-litre state is reachable only at depth 6.\n\nANSWER: 6",
+  "error": null,
+  "wall": 28.40085196495056,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "L5",
+  "cat": "logic",
+  "label": "oc-nvfp4hi38",
+  "content": "There are exactly two such triples: (5, 10, 49) and (7, 7, 50).\n\nCheck:\n- 5\u00b710\u00b749 = 2450, and 5+10+49 = 64 \u2713\n- 7\u00b77\u00b750 = 2450, and 7+7+50 = 64 \u2713\n\nANSWER: 2",
+  "error": null,
+  "wall": 16.088796854019165,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "L6",
+  "cat": "logic",
+  "label": "oc-nvfp4hi38",
+  "content": "I spotted a bug in the row-elimination logic \u2014 the next row should be `cur ^ 1` (to make the previous row end ON), not `cur`. Fixing and rerunning:\nThe brute-force loop is too slow in pure Python. Let me kill it and use exact GF(2) linear algebra plus the forced-row enumeration (which is a complete enumeration of all valid press patterns) instead:\nBoth independent methods agree, and the solution grid verifies under full simulation.\n\n**Approach:**\n1. **Row-chasing (complete enumeration):** The first row of presses is free (2\u2075 = 32 options). Every subsequent row is then *forced* \u2014 row r+1 must be chosen so that row r ends up all ON (row r's final state depends only on rows r\u22121, r, r+1). Checking the bottom row leaves exactly **4 valid solutions**, and their press counts are 15, 15, 15, 21 (minimum 15).\n2. **GF(2) linear algebra cross-check:** The 25\u00d725 toggle matrix has rank 23 over GF(2), so the system has 4 solutions (matching method 1). Enumerating the full affine solution space gives a minimum-weight solution of 15.\n3. **Independent verification:** Simulating the 15-press pattern lamp-by-lamp confirms all 25 end ON.\n\nExample optimal 15-press pattern (`#` = press):\n```\n. . . # #\n# # . # #\n# # # . .\n. # # # .\n# . # # .\n```\n\nThis is consistent with the classic Lights Out result: on the 5\u00d75 board, 15 is the maximum presses needed for any solvable configuration \u2014 all-on-from-all-off is exactly one of the hardest cases.\n\nANSWER: 15",
+  "error": null,
+  "wall": 211.2602035999298,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "C1",
+  "cat": "code_predict",
+  "label": "oc-nvfp4hi38",
+  "content": "Tracing the calls:\n\n1. `f(1)` \u2192 default `b` is `x`; appends \u2192 `x=[1]`, returns 1\n2. `f(2)` \u2192 `b` is `x`; appends \u2192 `x=[1,2]`, returns 2\n3. `f(3, [])` \u2192 `b` is a fresh list; appends \u2192 returns 1\n4. `f(4)` \u2192 `b` is `x` (now `[1,2]`); appends \u2192 `x=[1,2,4]`, returns 3\n\n`r = 1 + 2 + 1 + 3 = 7`\n\nANSWER: 7",
+  "error": null,
+  "wall": 5.5052807331085205,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "C2",
+  "cat": "code_predict",
+  "label": "oc-nvfp4hi38",
+  "content": "ANSWER: 18",
+  "error": null,
+  "wall": 4.795978784561157,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "C3",
+  "cat": "code_predict",
+  "label": "oc-nvfp4hi38",
+  "content": "ANSWER: 6 12",
+  "error": null,
+  "wall": 5.211438894271851,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "C4",
+  "cat": "code_predict",
+  "label": "oc-nvfp4hi38",
+  "content": "`7 aaa `\n\nANSWER: 7 aaa",
+  "error": null,
+  "wall": 13.051589727401733,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "C5",
+  "cat": "code_predict",
+  "label": "oc-nvfp4hi38",
+  "content": "ANSWER: 2 2",
+  "error": null,
+  "wall": 6.877118349075317,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "W1",
+  "cat": "code_write",
+  "label": "oc-nvfp4hi38",
+  "content": "I found a bug in my test where I expected -1 but the function was returning something else for an interval set that can't cover the range [1,2). I'm fixing the test now.\nI found the issue in my brute-force check\u2014it's requiring exact match when it should check for containment. Let me fix the brute force and rerun.\n```python\ndef interval_cover(intervals, span):\n    \"\"\"Minimum number of intervals from `intervals` that fully cover `span`.\n\n    `intervals`: list of (start, end) tuples of integers.\n    `span`: (start, end) tuple of the range to cover.\n    Returns the minimum count, or -1 if the span cannot be covered.\n    Touching endpoints count as covered (an interval starting exactly at\n    the current coverage boundary may be chained on).\n    \"\"\"\n    s, e = span\n    if s > e:\n        return -1\n    if s == e:\n        return 0  # degenerate span: nothing needs to be covered\n\n    # Keep only intervals that could extend coverage past `s` toward `e`.\n    cands = sorted((a, b) for a, b in intervals if a < e and b > s)\n\n    i = 0\n    n = len(cands)\n    covered = s   # right edge of what is covered so far\n    count = 0\n\n    while covered < e:\n        best = covered\n        # Greedy step: among all intervals starting at or before `covered`\n        # (i.e., that connect to the coverage so far), take the one whose\n        # end is farthest. This is optimal for minimum-count covering.\n        while i < n and cands[i][0] <= covered:\n            if cands[i][1] > best:\n                best = cands[i][1]\n            i += 1\n        if best <= covered:\n            return -1  # cannot make progress\n        covered = best\n        count += 1\n\n    return count\n```",
+  "error": null,
+  "wall": 58.21278715133667,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "W2",
+  "cat": "code_write",
+  "label": "oc-nvfp4hi38",
+  "content": "Small bug in the token-kind check \u2014 fixing:\nSame bug pattern in the other loops \u2014 let me just rewrite the file cleanly:\n```python\ndef eval_expr(s):\n    \"\"\"Evaluate an arithmetic expression string with non-negative integers,\n    + - * / ( ), and unary minus. '/' is float division. Returns a float.\n    No eval/exec/ast. Raises ValueError on malformed input.\"\"\"\n    # Tokenize\n    tokens = []\n    i, n = 0, len(s)\n    while i < n:\n        c = s[i]\n        if c.isspace():\n            i += 1\n        elif c.isdigit():\n            j = i\n            while j < n and s[j].isdigit():\n                j += 1\n            tokens.append((\"num\", int(s[i:j])))\n            i = j\n        elif c in \"+-*/()\":\n            tokens.append((\"op\", c))\n            i += 1\n        else:\n            raise ValueError(f\"Unexpected character: {c!r}\")\n\n    pos = 0\n\n    def peek():\n        return tokens[pos] if pos < len(tokens) else None\n\n    def take():\n        nonlocal pos\n        if pos >= len(tokens):\n            raise ValueError(\"Unexpected end of expression\")\n        tok = tokens[pos]\n        pos += 1\n        return tok\n\n    # Grammar (recursive descent):\n    #   expr    := term (('+' | '-') term)*\n    #   term    := factor (('*' | '/') factor)*\n    #   factor  := ('+' | '-') factor | primary\n    #   primary := NUMBER | '(' expr ')'\n    def parse_expr():\n        value = parse_term()\n        while True:\n            tok = peek()\n            if tok is not None and tok[0] == \"op\" and tok[1] in \"+-\":\n                op = take()[1]\n                right = parse_term()\n                value = value + right if op == \"+\" else value - right\n            else:\n                return value\n\n    def parse_term():\n        value = parse_factor()\n        while True:\n            tok = peek()\n            if tok is not None and tok[0] == \"op\" and tok[1] in \"*/\":\n                op = take()[1]\n                right = parse_factor()\n                value = value * right if op == \"*\" else value / right\n            else:\n                return value\n\n    def parse_factor():\n        tok = peek()\n        if tok is not None and tok[0] == \"op\" and tok[1] in \"+-\":\n            op = take()[1]\n            value = parse_factor()\n            return -value if op == \"-\" else value\n        return parse_primary()\n\n    def parse_primary():\n        tok = take()\n        if tok[0] == \"num\":\n            return float(tok[1])\n        if tok[0] == \"op\" and tok[1] == \"(\":\n            value = parse_expr()\n            if peek() is None or peek()[1] != \")\":\n                raise ValueError(\"Missing closing parenthesis\")\n            take()\n            return value\n        raise ValueError(f\"Unexpected token: {tok!r}\")\n\n    result = parse_expr()\n    if peek() is not None:\n        raise ValueError(f\"Unexpected token: {peek()!r}\")\n    return float(result)\n```",
+  "error": null,
+  "wall": 46.66870999336243,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "W3",
+  "cat": "code_write",
+  "label": "oc-nvfp4hi38",
+  "content": "```python\ndef topo_count(n, edges):\n    \"\"\"Number of distinct topological orderings of a DAG with nodes 0..n-1.\"\"\"\n    pred = [0] * n\n    for u, v in edges:\n        pred[v] |= 1 << u\n    full = 1 << n\n    dp = [0] * full\n    dp[0] = 1\n    for mask in range(full):\n        if dp[mask] == 0:\n            continue\n        for v in range(n):\n            if (mask >> v) & 1 == 0 and (pred[v] & ~mask) == 0:\n                dp[mask | (1 << v)] += dp[mask]\n    return dp[full - 1]\n```",
+  "error": null,
+  "wall": 13.186946630477905,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "I1",
+  "cat": "instruct",
+  "label": "oc-nvfp4hi38",
+  "content": "Tides offer a clean and renewable source of power.\nThe ocean's shifting waters produce a steady, clean output.\nTurbines convert the tide's kinetic force into power.\nSuch plants deliver steady electricity with little or no fuel.",
+  "error": null,
+  "wall": 17.143214225769043,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "I2",
+  "cat": "instruct",
+  "label": "oc-nvfp4hi38",
+  "content": "{\"primes\":[37,31,29,23,19,17,13,11,7,5,3,2],\"sum\":197,\"concat\":\"2-3-5-7-11-13-17-19-23-29-31-37\",\"meta\":{\"count\":12,\"even_count\":1}}",
+  "error": null,
+  "wall": 5.0949811935424805,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "I3",
+  "cat": "instruct",
+  "label": "oc-nvfp4hi38",
+  "content": "1\n2\nfizz\n4\nbuzz\nfizz\n7\n8\nfizz\nbuzz\n11\nfizz\n13\n14\nfizzbuzz\n16\n17\nfizz\n19\nbuzz\nbuzz\n22\n23\nbuzz\nfizz\n26\nbuzz\n28\n29\nfizzbuzz",
+  "error": null,
+  "wall": 4.124293565750122,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ },
+ {
+  "id": "I4",
+  "cat": "instruct",
+  "label": "oc-nvfp4hi38",
+  "content": "Beneath the sunlit swells of the vast and mysterious Indian Ocean, warm waters circle ancient maritime trade routes that sailors have followed for many millennia, guided by shifting seasonal currents. Whales glide through turquoise lagoons near fragrant coral gardens, where monsoon tides shape the daily lives of coastal peoples, and where the endless, shimmering blue finally meets the distant horizon.",
+  "error": null,
+  "wall": 25.179735898971558,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-NVFP4-MTP-HIGHEST/Qwen3.8-27B-NVFP4-MTP-HIGHEST.gguf"
+ }
+]

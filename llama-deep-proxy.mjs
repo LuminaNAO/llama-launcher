@@ -305,8 +305,8 @@ function parseSlotActionBody(r) {
 
 function slotSaveSucceeded(r) {
   const body = parseSlotActionBody(r);
-  const nSaved = Number(body.n_saved ?? 0);
-  const nWritten = Number(body.n_written ?? 0);
+  const nSaved = Number(body.n_saved ?? body.n_tokens ?? 0);
+  const nWritten = Number(body.n_written ?? body.n_bytes ?? 0);
   return {
     ok: r.status === 200 && nSaved > 0 && nWritten > 0,
     nSaved,
@@ -316,8 +316,8 @@ function slotSaveSucceeded(r) {
 
 function slotRestoreSucceeded(r) {
   const body = parseSlotActionBody(r);
-  const nRestored = Number(body.n_restored ?? 0);
-  const nRead = Number(body.n_read ?? 0);
+  const nRestored = Number(body.n_restored ?? body.n_tokens ?? 0);
+  const nRead = Number(body.n_read ?? body.n_bytes ?? 0);
   return {
     ok: r.status === 200 && nRestored > 0 && nRead > 0,
     nRestored,

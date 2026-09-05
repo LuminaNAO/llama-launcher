@@ -11,9 +11,11 @@
 #   llama-waterfall tui                # attach-only vim-keyed dashboard
 #   llama-waterfall status [--json]    # plus pin/disable/enable/add/remove/
 #                                      # move/edit/write/reload/test, each
-#                                      # accepting --table agent|subagent
+#                                      # accepting --portal <name>, and
+#                                      # portal list/add/rm
 #
-# Two routing tables: [agent] on :40800 and [subagent] on :40810.
+# N named portals (routing tables): [agent] on :40800 and [subagent] on
+# :40810 by default, plus any waterfall.conf section (port = N per portal).
 # Full design: docs/WATERFALL.md
 
 set -euo pipefail

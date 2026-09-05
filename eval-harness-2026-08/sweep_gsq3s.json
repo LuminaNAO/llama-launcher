@@ -1,0 +1,348 @@
+{
+ "d3": {
+  "nmax": 3,
+  "code": {
+   "tg": 132.2,
+   "pp": 787,
+   "n": 1200,
+   "acc": 0.50666,
+   "mlen": 2.52
+  },
+  "reason": {
+   "tg": 122.9,
+   "pp": 1837,
+   "n": 1200,
+   "acc": 0.44814,
+   "mlen": 2.34
+  },
+  "edit": {
+   "tg": 196.2,
+   "pp": 4669,
+   "n": 691,
+   "acc": 0.93223,
+   "mlen": 3.8
+  },
+  "tg_mean": 150.4,
+  "vram_mib": 19998,
+  "spec_log": "l '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'\n\u001b[34m0.05.659.285\u001b[0m \u001b[32mI \u001b[0mcommon_speculative_init_result: creating MTP draft context against the target model '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'"
+ },
+ "d2": {
+  "nmax": 2,
+  "code": {
+   "tg": 124.6,
+   "pp": 911,
+   "n": 1200,
+   "acc": 0.59199,
+   "mlen": 2.18
+  },
+  "reason": {
+   "tg": 119.8,
+   "pp": 1904,
+   "n": 1200,
+   "acc": 0.55175,
+   "mlen": 2.1
+  },
+  "edit": {
+   "tg": 157.9,
+   "pp": 4780,
+   "n": 691,
+   "acc": 0.94958,
+   "mlen": 2.9
+  },
+  "tg_mean": 134.1,
+  "vram_mib": 19848,
+  "spec_log": "l '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'\n\u001b[34m0.02.046.833\u001b[0m \u001b[32mI \u001b[0mcommon_speculative_init_result: creating MTP draft context against the target model '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'"
+ },
+ "d4": {
+  "nmax": 4,
+  "code": {
+   "tg": 104.1,
+   "pp": 975,
+   "n": 1200,
+   "acc": 0.28185,
+   "mlen": 2.13
+  },
+  "reason": {
+   "tg": 129.6,
+   "pp": 1814,
+   "n": 1200,
+   "acc": 0.41908,
+   "mlen": 2.68
+  },
+  "edit": {
+   "tg": 214.7,
+   "pp": 4704,
+   "n": 699,
+   "acc": 0.87903,
+   "mlen": 4.52
+  },
+  "tg_mean": 149.5,
+  "vram_mib": 20146,
+  "spec_log": "l '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'\n\u001b[34m0.01.999.707\u001b[0m \u001b[32mI \u001b[0mcommon_speculative_init_result: creating MTP draft context against the target model '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'"
+ },
+ "d5": {
+  "nmax": 5,
+  "code": {
+   "tg": 95.2,
+   "pp": 872,
+   "n": 1200,
+   "acc": 0.23094,
+   "mlen": 2.15
+  },
+  "reason": {
+   "tg": 121.3,
+   "pp": 1830,
+   "n": 1200,
+   "acc": 0.3543,
+   "mlen": 2.77
+  },
+  "edit": {
+   "tg": 218.7,
+   "pp": 4725,
+   "n": 699,
+   "acc": 0.82794,
+   "mlen": 5.14
+  },
+  "tg_mean": 145.1,
+  "vram_mib": 20296,
+  "spec_log": "l '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'\n\u001b[34m0.02.110.094\u001b[0m \u001b[32mI \u001b[0mcommon_speculative_init_result: creating MTP draft context against the target model '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'"
+ },
+ "psplit05": {
+  "nmax": 3,
+  "extra": "--spec-draft-p-split 0.05",
+  "code": {
+   "tg": 131.8,
+   "pp": 896,
+   "n": 1200,
+   "acc": 0.50666,
+   "mlen": 2.52
+  },
+  "reason": {
+   "tg": 122.8,
+   "pp": 1820,
+   "n": 1200,
+   "acc": 0.44814,
+   "mlen": 2.34
+  },
+  "edit": {
+   "tg": 194.0,
+   "pp": 4728,
+   "n": 691,
+   "acc": 0.93223,
+   "mlen": 3.8
+  },
+  "tg_mean": 149.5,
+  "vram_mib": 19998,
+  "spec_log": "l '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'\n\u001b[34m0.02.102.528\u001b[0m \u001b[32mI \u001b[0mcommon_speculative_init_result: creating MTP draft context against the target model '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'"
+ },
+ "psplit20": {
+  "nmax": 3,
+  "extra": "--spec-draft-p-split 0.20",
+  "code": {
+   "tg": 132.3,
+   "pp": 963,
+   "n": 1200,
+   "acc": 0.50666,
+   "mlen": 2.52
+  },
+  "reason": {
+   "tg": 123.0,
+   "pp": 1845,
+   "n": 1200,
+   "acc": 0.44814,
+   "mlen": 2.34
+  },
+  "edit": {
+   "tg": 194.9,
+   "pp": 4739,
+   "n": 691,
+   "acc": 0.93223,
+   "mlen": 3.8
+  },
+  "tg_mean": 150.1,
+  "vram_mib": 19998,
+  "spec_log": "l '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'\n\u001b[34m0.02.039.393\u001b[0m \u001b[32mI \u001b[0mcommon_speculative_init_result: creating MTP draft context against the target model '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'"
+ },
+ "mtp+ngramk4v": {
+  "nmax": 3,
+  "spec": "draft-mtp,ngram-map-k4v",
+  "code": {
+   "tg": 124.5,
+   "pp": 858,
+   "n": 1200,
+   "acc": 0.45514,
+   "mlen": 2.41
+  },
+  "reason": {
+   "tg": 122.2,
+   "pp": 1875,
+   "n": 1200,
+   "acc": 0.44967,
+   "mlen": 2.35
+  },
+  "edit": {
+   "tg": 206.7,
+   "pp": 4655,
+   "n": 692,
+   "acc": 0.58654,
+   "mlen": 5.16
+  },
+  "tg_mean": 151.1,
+  "vram_mib": 20030,
+  "spec_log": "MTP draft context against the target model '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'\n\u001b[34m0.16.498.864\u001b[0m \u001b[32mI \u001b[0mcommon_ngram_map_begin: refresh map: idx_last_draft=1267, new begin=93, #keys_checked=1, #keys_del=1, #values_del=0, #hashes_upd=1124"
+ },
+ "mtp+ngrammod": {
+  "nmax": 3,
+  "spec": "draft-mtp,ngram-mod",
+  "code": {
+   "tg": 132.1,
+   "pp": 852,
+   "n": 1200,
+   "acc": 0.50666,
+   "mlen": 2.52
+  },
+  "reason": {
+   "tg": 121.8,
+   "pp": 1855,
+   "n": 1200,
+   "acc": 0.42839,
+   "mlen": 2.34
+  },
+  "edit": {
+   "tg": 206.2,
+   "pp": 4704,
+   "n": 691,
+   "acc": 0.65201,
+   "mlen": 4.54
+  },
+  "tg_mean": 153.4,
+  "vram_mib": 20000,
+  "spec_log": "last_draft=1267, new begin=93, #keys_checked=1, #keys_del=1, #values_del=0, #hashes_upd=1124\n\u001b[34m0.02.120.714\u001b[0m \u001b[32mI \u001b[0mcommon_speculative_init_result: creating MTP draft context against the target model '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'"
+ },
+ "kvq8": {
+  "nmax": 3,
+  "kv": "q8_0",
+  "code": {
+   "tg": 103.6,
+   "pp": 927,
+   "n": 1200,
+   "acc": 0.32239,
+   "mlen": 1.97
+  },
+  "reason": {
+   "tg": 120.0,
+   "pp": 1854,
+   "n": 1200,
+   "acc": 0.42875,
+   "mlen": 2.28
+  },
+  "edit": {
+   "tg": 196.9,
+   "pp": 4728,
+   "n": 843,
+   "acc": 0.93393,
+   "mlen": 3.8
+  },
+  "tg_mean": 140.2,
+  "pp62k": {
+   "tg": 139.9,
+   "pp": 6266,
+   "n": 32,
+   "acc": 0.77778,
+   "mlen": 3.33
+  },
+  "deep201k": {
+   "tg": 85.9,
+   "pp": 3955,
+   "n": 400,
+   "acc": 0.55457,
+   "mlen": 2.66
+  },
+  "vram_mib": 24096,
+  "spec_log": "l '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'\n\u001b[34m0.02.119.061\u001b[0m \u001b[32mI \u001b[0mcommon_speculative_init_result: creating MTP draft context against the target model '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'"
+ },
+ "kvq8-ub1024": {
+  "nmax": 3,
+  "kv": "q8_0",
+  "ub": 1024,
+  "code": {
+   "tg": 103.7,
+   "pp": 870,
+   "n": 1200,
+   "acc": 0.32239,
+   "mlen": 1.97
+  },
+  "reason": {
+   "tg": 119.4,
+   "pp": 1827,
+   "n": 1200,
+   "acc": 0.42875,
+   "mlen": 2.28
+  },
+  "edit": {
+   "tg": 195.7,
+   "pp": 4697,
+   "n": 843,
+   "acc": 0.93393,
+   "mlen": 3.8
+  },
+  "tg_mean": 139.6,
+  "pp62k": {
+   "tg": 137.8,
+   "pp": 6081,
+   "n": 32,
+   "acc": 0.77778,
+   "mlen": 3.33
+  },
+  "deep201k": {
+   "tg": 89.8,
+   "pp": 4066,
+   "n": 400,
+   "acc": 0.59441,
+   "mlen": 2.78
+  },
+  "vram_mib": 24778,
+  "spec_log": "l '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'\n\u001b[34m0.02.147.569\u001b[0m \u001b[32mI \u001b[0mcommon_speculative_init_result: creating MTP draft context against the target model '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'"
+ },
+ "base-deep": {
+  "nmax": 3,
+  "code": {
+   "tg": 131.9,
+   "pp": 858,
+   "n": 1200,
+   "acc": 0.50666,
+   "mlen": 2.52
+  },
+  "reason": {
+   "tg": 123.0,
+   "pp": 1876,
+   "n": 1200,
+   "acc": 0.44814,
+   "mlen": 2.34
+  },
+  "edit": {
+   "tg": 196.1,
+   "pp": 4786,
+   "n": 691,
+   "acc": 0.93223,
+   "mlen": 3.8
+  },
+  "tg_mean": 150.3,
+  "pp62k": {
+   "tg": 139.5,
+   "pp": 6270,
+   "n": 32,
+   "acc": 0.77778,
+   "mlen": 3.33
+  },
+  "deep201k": {
+   "tg": 88.5,
+   "pp": 3961,
+   "n": 400,
+   "acc": 0.57895,
+   "mlen": 2.73
+  },
+  "vram_mib": 20000,
+  "spec_log": "l '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'\n\u001b[34m0.02.098.644\u001b[0m \u001b[32mI \u001b[0mcommon_speculative_init_result: creating MTP draft context against the target model '/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'"
+ }
+}

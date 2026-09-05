@@ -1,0 +1,14 @@
+[143s] local-strix | S1-kbooking: PASS (pass) think=15153
+[179s] m5090-cuda | S1-kbooking: PASS (pass) think=15112
+[226s] fable-fusion | S1-kbooking: PASS (pass) think=11791
+[344s] local-strix | S2-topo-lex: PASS (pass) think=11200
+[372s] m5090-cuda | S2-topo-lex: PASS (pass) think=9337
+[455s] fable-fusion | S2-topo-lex: PASS (pass) think=19396
+[563s] local-strix | S3-lev-lcs: PASS (pass) think=9896
+[595s] m5090-cuda | S3-lev-lcs: PASS (pass) think=10080
+[630s] fable-fusion | S3-lev-lcs: PASS (pass) think=3007
+[995s] local-strix | S4-expr-eval: FAIL (AssertionError: ('2**3**2', 2, 512)) think=37020
+[1125s] m5090-cuda | S4-expr-eval: PASS (pass) think=49225
+[1404s] fable-fusion | S4-expr-eval: FAIL (NameError: name 'ev' is not defined [hit max_tokens]) think=74343
+[1655s] local-strix | S5-csv-parser: PASS (pass) think=28616
+[1748s] m5090-cuda | S5-csv-parser: PASS (pass) think=36544

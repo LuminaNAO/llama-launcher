@@ -1,0 +1,83 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-q6-262k-v1"
+model: "Qwen3"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-q6-262k-v1
+    Per-model config for: DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic
+    -NM-DAU-NEO-MAX-MTP-GGUF, quant MTP-Q6_K (22.38 GB on disk).
+    Target: RTX 5090, 32149 MiB VRAM, CUDA0. Host 62 GB RAM.
+
+    FULL NATIVE 262144 CONTEXT WITH VISION, on a quant whose weights are
+    3.3 GiB heavier than the NVFP4 builds. Two tricks make it fit; both are
+    load-bearing, do not remove either:
+
+      --kv-unified          without it the model fails to LOAD at even 212992.
+      --no-mmproj-offload   the vision projector stays in HOST RAM and images
+                            are encoded on CPU. This is what prevents the
+                            crash below, and it frees ~1.1 GiB of VRAM besides.
+
+    WHY THE PROJECTOR IS ON CPU -- the failure mode is not loading, it is the
+    image encode. Measured 2026-08-12 on the b10238 source build:
+        gpu projector, c=262144: loads at 32026 MiB, decodes fine, then dies
+        with "CUDA error: the resource allocation failed" the moment an image
+        is encoded (mtmd allocates ~150 MiB at request time; 539 MiB free
+        cannot absorb it plus compositor churn). This crash took down a live
+        session before it was understood.
+        cpu projector, c=262144: loads ~30.9 GiB, image encode PASSES with
+        ~1.7 GiB free after. Per-image encode is slower on CPU (occasional,
+        seconds); prefill keeps full -ub 512 speed, which dominates real
+        long-context work. The alternative (-ub 256, projector on GPU) also
+        passes but taxes every prefill ~9% for less margin -- rejected.
+
+    The pass criterion for all probes was a real image request answered
+    correctly with the server still alive, not merely "the model loaded".
+
+    REQUIRES A RECENT llama-hdd BUILD (verified on b10238 source). The older
+    b10123 package build allocates several GiB more and cannot reach these
+    contexts at all (its measured vision ceiling was 163840).
+
+    Checkpoints spread EVENLY across the full context:
+        MAX 32 x STEP 8192 = 262144 -- exact 100% coverage.
+    Checkpoints live in SYSTEM RAM, not VRAM (state is copied to a host
+    buffer), so count does not affect VRAM fit. Sized from the measured model
+        size(MiB) = 149.6 + 4.02 KiB/token (~1.2 GiB at pos 260K)
+    worst case ~22 GiB in RAM -- acceptable on 62 GB; lower MAX if the host
+    swaps, never STEP (that would break even coverage).
+
+    Sibling tunes: q6-143k-v1 is the everyday variant with ~2.6 GiB VRAM
+    headroom and GPU-side image encode. The NVFP4 tunes reach 262144 with the
+    projector on GPU and more margin -- prefer nvfp4nv when the finetune
+    doesn't have to be Fable Fusion.
+
+    Draft depth 3 per this model's measured sweep (peaks 3-4, regresses at 5).
+    --image-min-tokens 1024 required for Qwen-VL grounding accuracy.
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "32"
+  CHECKPOINT_MIN_STEP: "8192"
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "262144"
+  DIO: "1"
+  # hdd cache on by default (launcher fills in the machine's default slots dir)
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 3 -b 2048 -ub 512 --image-min-tokens 1024 --no-mmproj-offload"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

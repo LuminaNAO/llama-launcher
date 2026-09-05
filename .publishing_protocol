@@ -10,3 +10,17 @@ AUR_PACKAGE=llama-launcher
 # - PKGBUILD source= points at Codeberg; the vN tag must be on Codeberg
 #   before publishing (nao-aur-publish checks this).
 # - .SRCINFO is never committed here — generated at publish time.
+#
+# Step 0 privacy/malice audit (nao-aur-publish/audit-release.sh):
+# SENSITIVE audit values (real names, hostnames, usernames that must never
+# ship) live in .publishing_protocol.local — gitignored, local-only, NOT in
+# this repo. Rationale: a denylist committed to a public mirror publishes the
+# very identifiers it names (2026-08-26: AUDIT_KNOWN_NAMES/HOSTNAMES were
+# committed into the v24 chain and had to be rewritten out).
+# .publishing_protocol.local format (same key=value lines):
+#   AUDIT_KNOWN_NAMES=...
+#   AUDIT_HOSTNAMES=...
+#   AUDIT_IDENTITY_ALLOW=name|email,...
+# If the local file is absent, the audit runs with its built-in defaults
+# (no known-names, Lumina identity allowlist) and prints a notice — it does
+# NOT block on the missing file.

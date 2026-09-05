@@ -1,0 +1,262 @@
+[
+ {
+  "id": "M1",
+  "cat": "math",
+  "label": "oc-coldfusion38",
+  "content": "This is a pure number theory problem.\n\n**Step 1: Find solutions to n\u00b2 \u2261 -1 (mod 101)**\n\nSince 101 is prime and 101 \u2261 1 (mod 4), -1 is a quadratic residue, so solutions exist.\n\nChecking: 10\u00b2 = 100 \u2261 -1 (mod 101). \u2713\nSo n \u2261 10 (mod 101) works. The other solution is n \u2261 -10 \u2261 91 (mod 101).\n\nVerification: 91\u00b2 = 8281, and 8281 = 101\u00b782 \u2212 1, so 91\u00b2 \u2261 -1 (mod 101). \u2713\n\nA quadratic congruence x\u00b2 \u2261 a (mod p) has at most 2 solutions, so {10, 91} are exactly the two residue classes.\n\n**Step 2: Count n in [1, 1,000,000] for each class**\n\n1,000,000 = 101\u00b79,900 + 100, so there are 9,900 complete periods plus a remainder of 100 numbers (residues 1 through 100).\n\n- n \u2261 10 (mod 101): residue 10 is in 1\u2013100, so it appears 9,900 + 1 = **9,901 times**\n- n \u2261 91 (mod 101): residue 91 is in 1\u2013100, so it appears 9,900 + 1 = **9,901 times**\n\n**Total = 9,901 + 9,901 = 19,802**\n\nANSWER: 19802",
+  "error": null,
+  "wall": 34.345834493637085,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "M2",
+  "cat": "math",
+  "label": "oc-coldfusion38",
+  "content": "I verified with a direct check (iterating through multiples of 13 up to 10,000,000 and counting those whose digits sum to 13), and a second pass iterating all numbers confirmed the same result.\n\nANSWER: 2036",
+  "error": null,
+  "wall": 7.868321895599365,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "M3",
+  "cat": "math",
+  "label": "oc-coldfusion38",
+  "content": "To get two consecutive sixes, we can set up expected values. Let E be the expected rolls needed when we haven't just rolled a six, and E\u2081 when we have.\n\n- E = 1 + (5/6)E + (1/6)E\u2081\n- E\u2081 = 1 + (5/6)E\n\nSubstituting the second into the first:\n- E = 1 + (5/6)E + 1/6 + (5/36)E\n- E = 7/6 + (35/36)E\n- (1/36)E = 7/6 \u2192 E = 42\n\nThis matches the general formula for two consecutive successes with probability p: 1/p\u00b2 + 1/p = 36 + 6 = 42.\n\nANSWER: 42",
+  "error": null,
+  "wall": 6.370703458786011,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "M4",
+  "cat": "math",
+  "label": "oc-coldfusion38",
+  "content": "Total paths from (0,0) to (10,10): C(20,10) = 184756\n\nPaths through (5,5): C(10,5) \u00d7 C(10,5) = 252 \u00d7 252 = 63504\n\nPaths avoiding (5,5): 184756 \u2212 63504 = 121252\n\nANSWER: 121252",
+  "error": null,
+  "wall": 4.8492467403411865,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "M5",
+  "cat": "math",
+  "label": "oc-coldfusion38",
+  "content": "Setting up the system:\n- n = 7a + 3, then 7a + 3 \u2261 5 (mod 11) \u2192 7a \u2261 2 (mod 11) \u2192 a \u2261 5 (mod 11) \u2192 n = 77k + 38\n- 77k + 38 \u2261 7 (mod 13) \u2192 12k + 12 \u2261 7 (mod 13) \u2192 12k \u2261 8 (mod 13) \u2192 k \u2261 5 (mod 13)\n- n = 1001m + 423\n\nChecking n > 1000: m = 1 gives n = 1424.\n\nVerify: 1424 = 203\u00b77 + 3 \u2713, 129\u00b711 + 5 \u2713, 109\u00b713 + 7 \u2713\n\nANSWER: 1424",
+  "error": null,
+  "wall": 9.095164060592651,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "M6",
+  "cat": "math",
+  "label": "oc-coldfusion38",
+  "content": "For a divisor of N to be a perfect square, each exponent must be even:\n\n- 2^a: a \u2208 {0, 2, 4} \u2192 sum = 1 + 4 + 16 = 21\n- 3^b: b \u2208 {0, 2, 4} \u2192 sum = 1 + 9 + 81 = 91\n- 5^c: c \u2208 {0, 2} \u2192 sum = 1 + 25 = 26\n\nTotal = 21 \u00d7 91 \u00d7 26 = 49,686\n\nANSWER: 49686",
+  "error": null,
+  "wall": 5.565538644790649,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "M7",
+  "cat": "math",
+  "label": "oc-coldfusion38",
+  "content": "Classic poker probability problem.\n\n**Total hands:** C(52,5) = 2,598,960\n\n**Two-pair hands:**\n- Choose 2 ranks for the pairs: C(13,2) = 78\n- Choose 2 suits for each pair: C(4,2)\u00b2 = 6\u00b2 = 36\n- Choose the fifth card's rank from the 11 remaining: 11\n- Choose its suit: 4\n\nTotal = 78 \u00d7 36 \u00d7 11 \u00d7 4 = 123,552\n\n**Probability:** 123,552 / 2,598,960\n\n**Reduce:** GCD = 624\n- 123,552 \u00f7 624 = 198\n- 2,598,960 \u00f7 624 = 4,165\n\nSo m/n = 198/4165 (already reduced: 198 = 2\u00b73\u00b2\u00b711, 4165 = 5\u00b77\u00b2\u00b717)\n\nm + n = 198 + 4165 = 4363\n\nANSWER: 4363",
+  "error": null,
+  "wall": 12.57763957977295,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "M8",
+  "cat": "math",
+  "label": "oc-coldfusion38",
+  "content": "Let me verify this with a quick computation.\nThis is a classic puzzle function. The base case gives f(n) = n-3 for n \u2265 1000, so f(1000)=997, f(1001)=998, etc. Working downward:\n\n- f(999) = f(f(1004)) = f(1001) = 998\n- f(998) = f(f(1003)) = f(1000) = 997\n- f(997) = f(f(1002)) = f(999) = 998\n\nThis creates a stable pattern: f(n) = 997 for even n, f(n) = 998 for odd n. Since 1 is odd, f(1) = 998 \u2014 verified by computation.\n\nANSWER: 998",
+  "error": null,
+  "wall": 21.273117303848267,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "L1",
+  "cat": "logic",
+  "label": "oc-coldfusion38",
+  "content": "Looking at this puzzle, let me test both cases.\n\n**Case 1: A is a knight (T)**\n- A's statement is true \u2192 B and D are both knaves\n- B is a knave \u2192 \"C is a knight\" is false \u2192 C is a knave\n- C is a knave \u2192 \"A is a knave\" is false \u2192 A is a knight \u2713\n- E: \"A and C are the same type\" \u2192 A=T, C=F, so different \u2192 false \u2192 E is a knave\n- Result: 1 knight (A), so D's \"exactly two knights\" is false \u2713 (consistent with D being a knave)\n- **Solution: TFFFF**\n\n**Case 2: A is a knave (F)**\n- \"B and D are both knaves\" is false \u2192 at least one is a knight\n- C: \"A is a knave\" \u2192 true \u2192 C is a knight\n- B: \"C is a knight\" \u2192 true \u2192 B is a knight\n- E: \"A and C are the same type\" \u2192 A=F, C=T, different \u2192 false \u2192 E is a knave\n- Now B and C are already 2 knights. If D is a knight, that's 3, making D's statement false\u2014contradiction. If D is a knave, knights are exactly B and C (2), making D's statement true\u2014also a contradiction.\n\nOnly Case 1 works.\n\nANSWER: TFFFF",
+  "error": null,
+  "wall": 11.873163223266602,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "L2",
+  "cat": "logic",
+  "label": "oc-coldfusion38",
+  "content": "Let me work through this systematically.\n\n**Setup:** Days 1-5 (Mon-Fri). Constraints: P\u22601, |Q-R|=1, S>P, T\u2208{2,3,4}, R<S.\n\n**Case S=3 (Wed):** Then P=2, R=1, forcing Q=2 \u2014 conflicts with P. No solution.\n\n**Case S=4 (Thu):** P\u2208{2,3}, R<S.\n- P=2, R=1 \u2192 Q=2 (only neighbor of Mon), conflict.\n- P=2, R=3 \u2192 Q\u2208{2,4}, both taken.\n- P=3, R=1 \u2192 Q=2, leaving T=5 (Fri \u2014 not allowed).\n- P=3, R=2 \u2192 Q=1 (Q=3 conflicts), leaving T=5 (not allowed).\nNo solution.\n\n**Case S=5 (Fri):** P\u2208{2,3,4}, R<S.\n- P=2: R=3 \u2192 Q=4, T=1 \u2717 (T can't be Mon). R=4 \u2192 Q=3, T=1 \u2717.\n- P=3, R=2 \u2192 Q=1, T=4 \u2713 \u2192 **Valid: Q=Mon, R=Tue, P=Wed, T=Thu, S=Fri**\n- P=4, R=2, Q=1 \u2192 T=3 \u2713 \u2192 **Valid: Q=Mon, R=Tue, T=Wed, P=Thu, S=Fri**\n- Other subcases all force T=1 or T=5, or conflict Q.\n\nBoth valid schedules place **Sam on Friday**.\n\nANSWER: Fri",
+  "error": null,
+  "wall": 25.92893886566162,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "L3",
+  "cat": "logic",
+  "label": "oc-coldfusion38",
+  "content": "Let k be the number of false statements.\n\n- S1 is true only if k = 1\n- S2 is true only if k = 2\n- S3 is true only if k = 3\n- S4 is true only if k = 4\n\nCheck each case:\n- k = 0: All would be true, but then S4 (\"four are false\") would be true \u2014 contradiction.\n- k = 1: Only S1 true \u2192 but that gives 3 false, not 1.\n- k = 2: Only S2 true \u2192 that gives 3 false, not 2.\n- k = 3: Only S3 true, S1/S2/S4 false \u2192 3 false. \u2705 Consistent.\n- k = 4: Only S4 true \u2192 3 false, not 4.\n\nOnly k = 3 works: S3 is the sole true statement, and exactly three statements are false.\n\nANSWER: 3",
+  "error": null,
+  "wall": 8.10245656967163,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "L4",
+  "cat": "logic",
+  "label": "oc-coldfusion38",
+  "content": "Shortest solution (6 moves):\n\n1. Fill the 7L jug \u2192 (7, 0)\n2. Pour 7L into 5L until full \u2192 (2, 5)\n3. Empty the 5L jug \u2192 (2, 0)\n4. Pour remaining 2L into 5L \u2192 (0, 2)\n5. Fill the 7L jug again \u2192 (7, 2)\n6. Pour 7L into 5L until full (it holds 3 more) \u2192 (4, 5) \u2713\n\nExactly 4 litres now sit in the 7-litre jug.\n\nANSWER: 6",
+  "error": null,
+  "wall": 37.04748725891113,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "L5",
+  "cat": "logic",
+  "label": "oc-coldfusion38",
+  "content": "Found 2 triples that satisfy both conditions: (5, 10, 49) and (7, 7, 50).\n\nVerification:\n- 5\u00b710\u00b749 = 2450, 5+10+49 = 64 \u2713\n- 7\u00b77\u00b750 = 2450, 7+7+50 = 64 \u2713\n\nANSWER: 2",
+  "error": null,
+  "wall": 23.850843906402588,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "L6",
+  "cat": "logic",
+  "label": "oc-coldfusion38",
+  "content": "**15 presses.**\n\nI verified this by exhaustive search. In these toggle puzzles, the first row of presses completely determines the rest: once row 0 is chosen, each subsequent row is forced (you must press a lamp in row r+1 exactly where the lamp above it is still off). That leaves only 2\u2075 = 32 cases to check, and 15 is the minimum weight solution that lights all 25 lamps.\n\nOne optimal pattern (row by row, 1 = press):\n\n```\n1 1 0 0 0\n1 1 0 1 1\n0 0 1 1 1\n0 1 1 1 0\n0 1 1 0 1\n```\n\nSimulating it: every lamp ends up ON, and no solution with fewer than 15 presses exists.\n\nANSWER: 15",
+  "error": null,
+  "wall": 22.181965112686157,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "C1",
+  "cat": "code_predict",
+  "label": "oc-coldfusion38",
+  "content": "Tracing through:\n\n1. `f(1)` \u2014 `b` defaults to `x`: `x=[1]`, returns 1\n2. `f(2)` \u2014 `b` is still `x`: `x=[1,2]`, returns 2\n3. `f(3, [])` \u2014 `b` is a fresh list: `[]\u2192[3]`, returns 1\n4. `f(4)` \u2014 `b` is `x` again: `x=[1,2,4]`, returns 3\n\nr = 1 + 2 + 1 + 3 = 7\n\nANSWER: 7",
+  "error": null,
+  "wall": 4.839854717254639,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "C2",
+  "cat": "code_predict",
+  "label": "oc-coldfusion38",
+  "content": "ANSWER: 18",
+  "error": null,
+  "wall": 7.504170179367065,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "C3",
+  "cat": "code_predict",
+  "label": "oc-coldfusion38",
+  "content": "6 12\n\nANSWER: 6 12",
+  "error": null,
+  "wall": 7.637999773025513,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "C4",
+  "cat": "code_predict",
+  "label": "oc-coldfusion38",
+  "content": "Let me verify this by actually running the code:\nThe exact stdout is `7 aaa ` (with a trailing space, since `parts[-1]` is the empty string after the last match, and `print` joins its three arguments with spaces).\n\nANSWER: 7 aaa",
+  "error": null,
+  "wall": 17.717295169830322,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "C5",
+  "cat": "code_predict",
+  "label": "oc-coldfusion38",
+  "content": "ANSWER: 2 2",
+  "error": null,
+  "wall": 4.525151252746582,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "W1",
+  "cat": "code_write",
+  "label": "oc-coldfusion38",
+  "content": "```python\ndef interval_cover(intervals, span):\n    \"\"\"\n    Return the minimum number of intervals needed to fully cover span,\n    or -1 if impossible. Touching endpoints count as covered.\n    \"\"\"\n    target_start, target_end = span\n    if target_start >= target_end:\n        return 0\n    if not intervals:\n        return -1\n\n    intervals = sorted(intervals)\n    n = len(intervals)\n    i = 0\n    used = 0\n    current_left = target_start\n\n    while current_left < target_end:\n        best_end = current_left\n        # Consider all intervals that start at or before the current gap start\n        while i < n and intervals[i][0] <= current_left:\n            best_end = max(best_end, intervals[i][1])\n            i += 1\n        # No interval extends coverage\n        if best_end == current_left:\n            return -1\n        current_left = best_end\n        used += 1\n\n    return used\n```",
+  "error": null,
+  "wall": 16.510859489440918,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "W2",
+  "cat": "code_write",
+  "label": "oc-coldfusion38",
+  "content": "```python\ndef eval_expr(s):\n    tokens = _tokenize(s)\n    if not tokens:\n        raise ValueError(\"Empty expression\")\n    pos = 0\n\n    def peek():\n        nonlocal pos\n        return tokens[pos] if pos < len(tokens) else None\n\n    def advance():\n        nonlocal pos\n        t = tokens[pos]\n        pos += 1\n        return t\n\n    def parse_expr():\n        val = parse_term()\n        while peek() in ('+', '-'):\n            op = advance()\n            rhs = parse_term()\n            val = val + rhs if op == '+' else val - rhs\n        return val\n\n    def parse_term():\n        val = parse_factor()\n        while peek() in ('*', '/'):\n            op = advance()\n            rhs = parse_factor()\n            val = val * rhs if op == '*' else val / rhs\n        return val\n\n    def parse_factor():\n        t = peek()\n        if t == '-':\n            advance()\n            return -parse_factor()\n        if t == '+':\n            advance()\n            return parse_factor()\n        return parse_atom()\n\n    def parse_atom():\n        t = advance()\n        if t == '(':\n            val = parse_expr()\n            if peek() != ')':\n                raise ValueError(\"Missing closing parenthesis\")\n            advance()\n            return val\n        return float(t)\n\n    result = parse_expr()\n    if pos != len(tokens):\n        raise ValueError(f\"Unexpected token: {tokens[pos]!r}\")\n    return float(result)\n\n\ndef _tokenize(s):\n    tokens = []\n    i, n = 0, len(s)\n    while i < n:\n        c = s[i]\n        if c.isspace():\n            i += 1\n        elif c.isdigit():\n            j = i\n            while j < n and s[j].isdigit():\n                j += 1\n            tokens.append(int(s[i:j]))\n            i = j\n        elif c in '+-*/()':\n            tokens.append(c)\n            i += 1\n        else:\n            raise ValueError(f\"Unexpected character: {c!r}\")\n    return tokens\n```",
+  "error": null,
+  "wall": 12.695170879364014,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "W3",
+  "cat": "code_write",
+  "label": "oc-coldfusion38",
+  "content": "```python\ndef topo_count(n, edges):\n    pred = [0] * n\n    for u, v in edges:\n        pred[v] |= 1 << u\n    dp = [0] * (1 << n)\n    dp[0] = 1\n    for mask in range(1 << n):\n        if dp[mask] == 0:\n            continue\n        for u in range(n):\n            bit = 1 << u\n            if (mask & bit) == 0 and (pred[u] & mask) == pred[u]:\n                dp[mask | bit] += dp[mask]\n    return dp[(1 << n) - 1]\n```",
+  "error": null,
+  "wall": 7.923141956329346,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "I1",
+  "cat": "instruct",
+  "label": "oc-coldfusion38",
+  "content": "Tides can drive big new power plants today.\nOcean tides hold a vast, clean energy source.\nTurbines convert tidal flow into steady grid power.\nSuch plants can deliver clean power at sea.",
+  "error": null,
+  "wall": 10.798876762390137,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "I2",
+  "cat": "instruct",
+  "label": "oc-coldfusion38",
+  "content": "{\"primes\":[37,31,29,23,19,17,13,11,7,5,3,2],\"sum\":209,\"concat\":\"2-3-5-7-11-13-17-19-23-29-31-37\",\"meta\":{\"count\":12,\"even_count\":1}}",
+  "error": null,
+  "wall": 3.8172450065612793,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "I3",
+  "cat": "instruct",
+  "label": "oc-coldfusion38",
+  "content": "1\n2\nfizz\n4\nbuzz\nfizz\n7\n8\nfizz\nbuzz\n11\nfizz\n13\n14\nfizzbuzz\n16\n17\nfizz\n19\nbuzz\nbuzz\n22\n23\nbuzz\nfizz\n26\nbuzz\n28\n29\nfizzbuzz",
+  "error": null,
+  "wall": 5.27872633934021,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "I4",
+  "cat": "instruct",
+  "label": "oc-coldfusion38",
+  "content": "Beneath the warm waters of the Indian Ocean, hidden sea currents whisper stories older than civilization itself. Turquoise shallows cradle coral reefs teeming with life while monsoon winds stir currents across open blue seas. Hidden treasures rest in the depths while islands like Madagascar rise as lush green oases. For millennia, sailors chased spice and wonder ever toward the horizon.",
+  "error": null,
+  "wall": 45.230366945266724,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-MTP/Qwen3.8-27B-Cold-Fusion-GAIN-V1.1-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf"
+ }
+]

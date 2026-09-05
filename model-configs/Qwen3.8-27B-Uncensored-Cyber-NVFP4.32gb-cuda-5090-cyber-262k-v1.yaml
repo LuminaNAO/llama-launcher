@@ -1,0 +1,74 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-cyber-262k-v1"
+model: "Qwen3"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-q38nvfp4-262k-v1
+    Per-model config for: utautako/Qwen3.8-27B-Uncensored-Cyber-NVFP4-GGUF
+    (17.81 GiB, sha256-verified). NVIDIA NVFP4 quant, MTP block preserved,
+    attention at Q8_0, NOT abliterated. Same author and recipe as the Qwen3.6
+    nvfp4 daily driver, and byte-for-byte the same weight size.
+
+    WHY THIS EXISTS: the UD-Q6_K_XL build of 3.8 is 24.13 GiB -- 6.3 GiB more
+    weight to stream per token -- and decode is bandwidth-bound, so it ran far
+    slower and sat ~600 MiB from the VRAM ceiling. Measured 2026-08-16,
+    llama-bench, -fa 1, q4_0 KV, no MTP (raw decode):
+        model                 size        pp512          tg128
+        3.8 NVFP4        17.80 GiB   5253 +/- 325   73.62 +/- 0.12
+        3.6 NVFP4        17.80 GiB   5308 +/- 204   73.61 +/- 0.07
+        3.8 UD-Q6_K_XL   24.13 GiB   3687 +/-  81   57.32 +/- 0.08
+    NVFP4 recovers +43% prefill and +28% decode over UD-Q6, and is a dead heat
+    with 3.6 -- there is no 3.8-vs-3.6 architectural penalty, it was the quant.
+
+    Served with MTP at nmax=3: 141.9 t/s decode (vs ~81 t/s median observed on
+    UD-Q6 in real traffic).
+
+    DRAFT DEPTH swept on this model 2026-08-16 (c=16384, temp 0, same prompt):
+        nmax  tg t/s   acceptance  mean len
+          2   132.93     0.659       2.32
+          3   141.94     0.558       2.67   <- peak, keep
+          4   121.87     0.367       2.47
+          5   115.57     0.300       2.50
+    Same peak as 3.6, but acceptance is notably lower (0.56 vs 3.6's 0.82 on a
+    coding prompt) -- throughput is acceptance x draft length, and 3 still wins
+    on the product. Worth re-sweeping on a coding workload before assuming 3 is
+    optimal for every task mix.
+
+    LOADS at full native 262144 with vision: 27244 MiB used, 5363 MiB free.
+    That headroom is the point -- the UD-Q6 tune ran at 617 MiB free and took
+    two Xid 8 GPU lock-ups in 2.5 hours. Vision verified correct on load
+    ("Red circle on white background"), projector on GPU, no --no-mmproj-offload
+    needed at this weight.
+
+    Draft depth 3 per the sweep above.
+    --image-min-tokens 1024 required for Qwen-VL grounding accuracy.
+
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "20"
+  CHECKPOINT_MIN_STEP: "4096"
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "262144"
+  DIO: "1"
+  # hdd cache on by default (launcher fills in the machine's default slots dir)
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 3 -b 2048 -ub 512 --image-min-tokens 1024"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

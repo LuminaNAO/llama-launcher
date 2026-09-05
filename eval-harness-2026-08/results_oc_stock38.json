@@ -1,0 +1,236 @@
+[
+ {
+  "id": "M1",
+  "cat": "math",
+  "label": "oc-stock38",
+  "content": "Modulo 101, n\u00b2 \u2261 \u22121 has exactly two solutions since 101 \u2261 1 (mod 4): n \u2261 10 and n \u2261 91 (because 10\u00b2 = 100 \u2261 \u22121 mod 101). In the range 1 \u2264 n \u2264 1,000,000, each residue class appears \u230a10\u2076/101\u230b + 1 = 9901 times (since 10\u2076 = 9900\u00b7101 + 100, and both 10 and 91 \u2264 100). So the total count is 2 \u00d7 9901 = 19,802, confirmed by direct computation.\n\nANSWER: 19802",
+  "error": null,
+  "wall": 19.910224676132202,
+  "rc": 0
+ },
+ {
+  "id": "M2",
+  "cat": "math",
+  "label": "oc-stock38",
+  "content": "2036 (verified by both a digit DP over the 7 digit slots and a brute-force count over all multiples of 13 up to 10,000,000 \u2014 10,000,000 itself has digit sum 1, so it's excluded either way).\n\nANSWER: 2036",
+  "error": null,
+  "wall": 15.596617937088013,
+  "rc": 0
+ },
+ {
+  "id": "M3",
+  "cat": "math",
+  "label": "oc-stock38",
+  "content": "Let $E$ = expected additional rolls from scratch, and $E_1$ = expected additional rolls given the previous roll was a six.\n\n- From scratch: $E = 1 + \\frac{1}{6}E_1 + \\frac{5}{6}E \\implies E = 6 + E_1$\n- Given a six so far: $E_1 = 1 + \\frac{5}{6}E$ (a six ends the process; anything else resets)\n\nSubstituting: $E = 7 + \\frac{5}{6}E \\implies \\frac{1}{6}E = 7 \\implies E = 42$.\n\n(Sanity check via the pattern-waiting formula: for a face with probability $p = 1/6$, the expected wait for two consecutive occurrences is $(1+p)/p^2 = (7/6)\\cdot 36 = 42$.)\n\n ANSWER: 42",
+  "error": null,
+  "wall": 13.726548910140991,
+  "rc": 0
+ },
+ {
+  "id": "M4",
+  "cat": "math",
+  "label": "oc-stock38",
+  "content": "Total paths from (0,0) to (10,10): C(20,10) = 184,756.\n\nPaths through (5,5): C(10,5) \u00b7 C(10,5) = 252 \u00b7 252 = 63,504.\n\nPaths avoiding (5,5): 184,756 \u2212 63,504 = 121,252.\n\nANSWER: 121252",
+  "error": null,
+  "wall": 4.84830117225647,
+  "rc": 0
+ },
+ {
+  "id": "M5",
+  "cat": "math",
+  "label": "oc-stock38",
+  "content": "**Solving with CRT** (7\u00b711\u00b713 = 1001, so solutions are unique mod 1001):\n\n1. n = 7a + 3; substituting into mod 11: 7a \u2261 2 (mod 11) \u2192 a \u2261 5 (mod 11) \u2192 n = 77b + 38\n2. Substituting into mod 13: 77b + 38 \u2261 7 \u2192 12b \u2261 8 (mod 13) \u2192 b \u2261 5 (mod 13)\n3. So n = 1001c + 423\n\nThe smallest n > 1000 uses c = 1: **n = 1424**\n\nVerification:\n- 1424 = 7\u00b7203 + 3 \u2713 (\u2261 3 mod 7)\n- 1424 = 11\u00b7129 + 5 \u2713 (\u2261 5 mod 11)\n- 1424 = 13\u00b7109 + 7 \u2713 (\u2261 7 mod 13)\n\nANSWER: 1424",
+  "error": null,
+  "wall": 8.921024084091187,
+  "rc": 0
+ },
+ {
+  "id": "M6",
+  "cat": "math",
+  "label": "oc-stock38",
+  "content": "A divisor of N = 2\u2075\u00b73\u2074\u00b75\u00b2 is a perfect square iff all its exponents are even:\n\n- Powers of 2: 2\u2070, 2\u00b2, 2\u2074 \u2192 1 + 4 + 16 = 21\n- Powers of 3: 3\u2070, 3\u00b2, 3\u2074 \u2192 1 + 9 + 81 = 91\n- Powers of 5: 5\u2070, 5\u00b2 \u2192 1 + 25 = 26\n\nSum = 21 \u00d7 91 \u00d7 26 = 49686.\n\nANSWER: 49686",
+  "error": null,
+  "wall": 5.05462121963501,
+  "rc": 0
+ },
+ {
+  "id": "M7",
+  "cat": "math",
+  "label": "oc-stock38",
+  "content": "**Counting the outcomes:**\n- Total hands: C(52,5) = 2,598,960\n- Two-pair hands: choose the two pair ranks C(13,2) = 78, pick suits for each pair C(4,2)\u00b2 = 36, choose the kicker's rank from the remaining C(11,1) = 11, and its suit 4 \u2192 78 \u00d7 36 \u00d7 11 \u00d7 4 = 123,552\n\n**Reducing:** 123,552 / 2,598,960, dividing by gcd 624 \u2192 198/4165.\n\nSo m + n = 198 + 4165 = 4363.\n\nANSWER: 4363",
+  "error": null,
+  "wall": 27.954784154891968,
+  "rc": 0
+ },
+ {
+  "id": "M8",
+  "cat": "math",
+  "label": "oc-stock38",
+  "content": "This is a classic recursive function puzzle. Computing f(1) directly via memoized recursion gives 998.\n\n**Why:** Every recursive step jumps +5, so from n=1 the chain reaches the base case at n \u2265 1000. Once f lands on values \u2265 1000, the recursion unwinds: any n in [995, 999] satisfies f(n) = f(f(n+5)), which collapses to 998 (and alternates 997/998 for n in [990, 999]). Since 1 \u2261 998 (mod 5) chains resolve to 998 \u2014 verified by direct computation.\n\nANSWER: 998",
+  "error": null,
+  "wall": 22.876059770584106,
+  "rc": 0
+ },
+ {
+  "id": "L1",
+  "cat": "logic",
+  "label": "oc-stock38",
+  "content": "Solving by case analysis:\n\n**Case A = knight:** Then A's claim is true \u2192 B and D are both knaves.\n- B = knave \u2192 \"C is a knight\" is false \u2192 C = knave.\n- C = knave \u2192 \"A is a knave\" is false \u2192 A is a knight \u2713 (consistent).\n- E: \"A and C are the same type\" \u2014 A=knight, C=knave, so the statement is false \u2192 E = knave.\n- Knight count = 1 (only A). D = knave says \"exactly two are knights,\" which is indeed false \u2713.\n\nAll consistent.\n\n**Case A = knave:** Then \"A is a knave\" makes C's statement true \u2192 C = knight. Then B's statement (\"C is a knight\") is true \u2192 B = knight. E's statement (\"A and C same type\") is false \u2192 E = knave.\n- If D = knight: 3 knights, but D claims exactly 2 \u2192 contradiction.\n- If D = knave: only B, C are knights = 2, so D's claim would be true, but D is a knave \u2192 contradiction.\n\nImpossible. The unique solution is A=knight, B=C=D=E=knaves.\n\nANSWER: TFTFF",
+  "error": null,
+  "wall": 10.377463340759277,
+  "rc": 0
+ },
+ {
+  "id": "L2",
+  "cat": "logic",
+  "label": "oc-stock38",
+  "content": "Looking at this, I'll enumerate the possibilities.\n\n**Setting up:** Days 1\u20135 (Mon\u2013Fri). Sam (S) must come after both Priya (P) and Rosa (R), so S \u2265 Wed.\n\n**S = Wed (3):** forces P = Tue, R = Mon, leaving Q adjacent to R=Mon \u2192 Q=Tue (taken). Impossible.\n\n**S = Thu (4):** \n- P=Tue, R=Mon \u2192 remaining {Wed, Fri}; Tariq must be Tue/Wed/Thu \u2192 T=Wed, Q=Fri, but Q not adjacent to R. \u2717\n- P=Tue, R=Wed \u2192 no day left for Tariq in {Tue, Wed, Thu}. \u2717\n- P=Wed, R=Mon \u2192 T=Thu, Q=Fri, Q not adjacent to R. \u2717\n- P=Wed, R=Tue \u2192 no day left for Tariq. \u2717\nNo solutions.\n\n**S = Fri (5):** valid schedules found:\n1. R=Mon, Q=Tue, P=Wed, T=Thu, S=Fri\n2. Q=Mon, R=Tue, P=Wed, T=Thu, S=Fri\n3. R=Mon, Q=Tue, T=Wed, P=Thu, S=Fri\n4. Q=Mon, R=Tue, T=Wed, P=Thu, S=Fri\n\nEach satisfies all constraints (P\u2260Mon, Q adjacent to R, P<S, T\u2208{Tue,Wed,Thu}, R<S). In every valid schedule, Priya, Quinn, Rosa, and Tariq all vary (Wed/Thu, Mon/Tue, Mon/Tue, Wed/Thu respectively), while **Sam is always on Friday**.\n\nANSWER: Fri",
+  "error": null,
+  "wall": 26.292534828186035,
+  "rc": 0
+ },
+ {
+  "id": "L3",
+  "cat": "logic",
+  "label": "oc-stock38",
+  "content": "Let me check each possible number of false statements:\n\n- **1 false**: S1 would be true, but S2 and S3 would also have to be true (only S4 false) \u2014 yet S2 claims 2 are false. Contradiction.\n- **2 false**: S2 would be true, and exactly one of S1/S3/S4 would also be false. But whichever one it is, the remaining two include S1 (claims 1 false) and/or S4 (claims 4 false) \u2014 both would be falsely stated as true, or force another true statement that's wrong. No consistent assignment.\n- **3 false**: S3 is true, and S1, S2, S4 are false. Verify: S1 claims exactly 1 false \u2192 actually 3, so S1 is false \u2713. S2 claims exactly 2 false \u2192 false \u2713. S4 claims all 4 false \u2192 false \u2713. S3 claims exactly 3 false \u2192 true \u2713. Fully consistent!\n- **4 false**: S4 would then be true (since all four are false), contradiction.\n\nOnly the \"3 false\" scenario is consistent.\n\nANSWER: 3",
+  "error": null,
+  "wall": 8.588354110717773,
+  "rc": 0
+ },
+ {
+  "id": "L4",
+  "cat": "logic",
+  "label": "oc-stock38",
+  "content": "Let me work through this with a systematic search (BFS over jug states):\n\n**Depth 1:** Fill 7L \u2192 (7,0); Fill 5L \u2192 (0,5)\n**Depth 2:** (2,5) [pour 7\u21925], (5,0) [pour 5\u21927]\n**Depth 3:** (2,0), (5,5)\n**Depth 4:** (0,2), (7,3)\n**Depth 5:** (7,2), (0,3)\n**Depth 6:** (4,5) \u2713\n\nNo state at depth 1\u20135 has 4 litres in either jug, so 6 is provably minimal.\n\n**The sequence (6 moves):**\n1. Fill the 7L jug \u2192 (7, 0)\n2. Pour 7L into 5L \u2192 (2, 5)\n3. Empty the 5L jug \u2192 (2, 0)\n4. Pour the 2L from 7L into 5L \u2192 (0, 2)\n5. Fill the 7L jug \u2192 (7, 2)\n6. Pour from 7L into 5L until full (it needs 3L) \u2192 **(4, 5)** \u2713\n\nExactly 4 litres in the 7-litre jug.\n\nANSWER: 6",
+  "error": null,
+  "wall": 13.926908016204834,
+  "rc": 0
+ },
+ {
+  "id": "L5",
+  "cat": "logic",
+  "label": "oc-stock38",
+  "content": "Checking all factor triples of 2450 with a\u2264b\u2264c:\n\n- **5\u00b710\u00b749 = 2450** and 5+10+49 = 64 \u2713\n- **7\u00b77\u00b750 = 2450** and 7+7+50 = 64 \u2713\n\nA full enumeration (a up to \u221b2450, b \u2265 a, c = 2450/(ab) \u2265 b, sum = 64) confirms there are no other solutions.\n\nANSWER: 2",
+  "error": null,
+  "wall": 17.361586332321167,
+  "rc": 0
+ },
+ {
+  "id": "L6",
+  "cat": "logic",
+  "label": "oc-stock38",
+  "content": "I solved this as a linear system over GF(2): each lamp's final state = parity of presses on itself plus its orthogonal neighbors, and that parity must be 1 for all 25 lamps.\n\nGaussian elimination on the 25\u00d725 toggle matrix gives rank 23, so the solution space has 2 free variables \u2192 exactly 4 solutions. All 4 of them have weight 15, so the minimum is unambiguously:\n\n**Minimum presses: 15**\n\nOne valid pressing pattern (1 = press):\n\n```\n. # # . #\n. # # # .\n. . # # #\n# # . # #\n# # . . .\n```\n\nVerified: applying these 15 toggles turns all 25 lamps ON.\n\nANSWER: 15",
+  "error": null,
+  "wall": 50.76830267906189,
+  "rc": 0
+ },
+ {
+  "id": "C1",
+  "cat": "code_predict",
+  "label": "oc-stock38",
+  "content": "The default argument `b=x` is bound to the same list object at def time, so `f(1)`, `f(2)`, `f(4)` share `x` (which grows to `[1,2,4]`), while `f(3, [])` uses a fresh list:\n- f(1) \u2192 1\n- f(2) \u2192 2\n- f(3, []) \u2192 1\n- f(4) \u2192 3\n\nTotal: 1+2+1+3 = 7\n\nANSWER: 7",
+  "error": null,
+  "wall": 5.106247425079346,
+  "rc": 0
+ },
+ {
+  "id": "C2",
+  "cat": "code_predict",
+  "label": "oc-stock38",
+  "content": "ANSWER: 18",
+  "error": null,
+  "wall": 4.0131447315216064,
+  "rc": 0
+ },
+ {
+  "id": "C3",
+  "cat": "code_predict",
+  "label": "oc-stock38",
+  "content": "ANSWER: 6 12",
+  "error": null,
+  "wall": 7.316237926483154,
+  "rc": 0
+ },
+ {
+  "id": "C4",
+  "cat": "code_predict",
+  "label": "oc-stock38",
+  "content": "ANSWER: 7 aaa ccc",
+  "error": null,
+  "wall": 8.638813257217407,
+  "rc": 0
+ },
+ {
+  "id": "C5",
+  "cat": "code_predict",
+  "label": "oc-stock38",
+  "content": "ANSWER: 2 2",
+  "error": null,
+  "wall": 7.343365669250488,
+  "rc": 0
+ },
+ {
+  "id": "W1",
+  "cat": "code_write",
+  "label": "oc-stock38",
+  "content": "```python\ndef interval_cover(intervals, span):\n    \"\"\"Return the minimum number of intervals needed to fully cover span, or -1 if impossible.\"\"\"\n    s, e = span\n    if s >= e:\n        return 0\n\n    # Sort intervals by start, then by end (descending) for tie-breaking\n    ivs = sorted(intervals, key=lambda x: (x[0], -x[1]))\n\n    i = 0\n    n = len(ivs)\n    count = 0\n    pos = s  # current covered position\n\n    while pos < e:\n        best_end = None\n        # Consider all intervals that start at or before `pos` (touching counts)\n        while i < n and ivs[i][0] <= pos:\n            if best_end is None or ivs[i][1] > best_end:\n                best_end = ivs[i][1]\n            i += 1\n\n        if best_end is None or best_end <= pos:\n            return -1  # gap: no interval extends coverage\n\n        pos = best_end\n        count += 1\n\n    return count\n```",
+  "error": null,
+  "wall": 5.407616853713989,
+  "rc": 0
+ },
+ {
+  "id": "W2",
+  "cat": "code_write",
+  "label": "oc-stock38",
+  "content": "I found a bug where whitespace is being skipped during digit scanning, causing \"1 2\" to be parsed as 12. I'll fix the digit-continuation logic to use a raw character check.\n```python\ndef eval_expr(s):\n    \"\"\"Evaluate an arithmetic expression string.\n\n    Supports non-negative integers, + - * / ( ), and unary minus.\n    Division is float division. Returns a float.\n    \"\"\"\n    pos = [0]\n    n = len(s)\n\n    def peek():\n        \"\"\"Return next non-whitespace char (without consuming), or None.\"\"\"\n        i = pos[0]\n        while i < n and s[i].isspace():\n            i += 1\n        pos[0] = i\n        return s[i] if i < n else None\n\n    def next_tok():\n        \"\"\"Consume and return next non-whitespace char, or None.\"\"\"\n        i = pos[0]\n        while i < n and s[i].isspace():\n            i += 1\n        if i < n:\n            c = s[i]\n            pos[0] = i + 1\n            return c\n        return None\n\n    def peek_raw():\n        \"\"\"Peek at the raw next character (no whitespace skipping).\"\"\"\n        return s[pos[0]] if pos[0] < n else None\n\n    def parse_expr():\n        v = parse_term()\n        while True:\n            c = peek()\n            if c == '+':\n                next_tok()\n                v += parse_term()\n            elif c == '-':\n                next_tok()\n                v -= parse_term()\n            else:\n                return v\n\n    def parse_term():\n        v = parse_factor()\n        while True:\n            c = peek()\n            if c == '*':\n                next_tok()\n                v *= parse_factor()\n            elif c == '/':\n                next_tok()\n                v /= parse_factor()\n            else:\n                return v\n\n    def parse_factor():\n        c = peek()\n        if c == '+':\n            next_tok()\n            return parse_factor()\n        if c == '-':\n            next_tok()\n            return -parse_factor()\n        return parse_primary()\n\n    def parse_primary():\n        c = next_tok()\n        if c is None:\n            raise ValueError(\"unexpected end of expression\")\n        if c == '(':\n            v = parse_expr()\n            if peek() != ')':\n                raise ValueError(\"expected ')'\")\n            next_tok()\n            return float(v)\n        if c.isdigit():\n            num = c\n            while peek_raw() is not None and peek_raw().isdigit():\n                num += next_tok()\n            return float(num)\n        raise ValueError(f\"unexpected character {c!r}\")\n\n    result = parse_expr()\n    if peek() is not None:\n        raise ValueError(\"unexpected trailing characters\")\n    return float(result)\n```",
+  "error": null,
+  "wall": 33.22504377365112,
+  "rc": 0
+ },
+ {
+  "id": "W3",
+  "cat": "code_write",
+  "label": "oc-stock38",
+  "content": "```python\ndef topo_count(n, edges):\n    \"\"\"Count distinct topological orderings of a DAG with nodes 0..n-1.\n\n    Uses DP over subsets (bitmasks): dp[mask] = number of valid orderings\n    whose set of placed nodes is exactly `mask`.\n    \"\"\"\n    pred = [0] * n\n    for u, v in edges:\n        pred[v] |= 1 << u\n\n    size = 1 << n\n    dp = [0] * size\n    dp[0] = 1\n    for mask in range(1, size):\n        total = 0\n        m = mask\n        while m:\n            bit = m & -m\n            v = bit.bit_length() - 1\n            if not (pred[v] & ~mask):  # all predecessors of v already placed\n                total += dp[mask ^ bit]\n            m ^= bit\n        dp[mask] = total\n    return dp[size - 1]\n```",
+  "error": null,
+  "wall": 17.053361177444458,
+  "rc": 0
+ },
+ {
+  "id": "I1",
+  "cat": "instruct",
+  "label": "oc-stock38",
+  "content": "Tidal energy uses ocean currents to create power.\nThe rising and falling tides drive this process.\nTurbines spin with the tide to generate electricity.\nThis renewable source can supply several coastal towns.",
+  "error": null,
+  "wall": 9.94515347480774,
+  "rc": 0
+ },
+ {
+  "id": "I2",
+  "cat": "instruct",
+  "label": "oc-stock38",
+  "content": "{\"primes\": [37, 31, 29, 23, 19, 17, 13, 11, 7, 5, 3, 2], \"sum\": 197, \"concat\": \"2-3-5-7-11-13-17-19-23-29-31-37\", \"meta\": {\"count\": 12, \"even_count\": 1}}",
+  "error": null,
+  "wall": 5.112262010574341,
+  "rc": 0
+ },
+ {
+  "id": "I3",
+  "cat": "instruct",
+  "label": "oc-stock38",
+  "content": "1\n2\nfizz\n4\nbuzz\nfizz\n7\n8\nfizz\nbuzz\n11\nfizz\n13\n14\nfizzbuzz\n16\n17\nfizz\n19\nbuzz\nbuzz\n22\n23\nbuzz\nfizz\n26\nbuzz\n28\n29\nfizzbuzz",
+  "error": null,
+  "wall": 5.2035627365112305,
+  "rc": 0
+ },
+ {
+  "id": "I4",
+  "cat": "instruct",
+  "label": "oc-stock38",
+  "content": "Beneath the vast and shimmering waters of the Indian Ocean, life flourishes quietly in the hidden depths, where coral gardens bloom and ancient whales glide slowly through warm silver currents, weaving between four continents, carrying rain, heat, and whispered stories to distant shores. Monsoons stir these restless waves each season, and every tide whispers its secrets toward the endless horizon.",
+  "error": null,
+  "wall": 31.128071784973145,
+  "rc": 0
+ }
+]

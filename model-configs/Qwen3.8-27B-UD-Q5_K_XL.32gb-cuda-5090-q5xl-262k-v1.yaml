@@ -1,0 +1,49 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-q5xl-262k-v1"
+model: "Qwen3.8"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-q5xl-262k-v1
+    Per-model config for: unsloth/Qwen3.8-27B-GGUF, quant UD-Q5_K_XL
+    (20.22 GB / 18.83 GiB on disk — 5.3 GiB lighter than the Q6_K_XL).
+    Fallback / memory-pressure rotation target for the Q6_K_XL tune
+    (32gb-cuda-5090-q6xl-262k-v1); same load-bearing structure:
+    --kv-unified + --no-mmproj-offload for full 262144 ctx with vision,
+    q4_0 KV, MTP draft via the GGUF's blk.64 nextn head.
+
+    -ub 512 here (Q6XL needs 256): the ~5.3 GiB of weight headroom pays
+    for the larger compute buffer, buying back prefill speed. If this
+    tune ever OOMs under load, drop to -ub 256 before touching context.
+
+    Sampling per Qwen3.8 thinking-mode card: temp 1.0, top-p 0.95,
+    top-k 20, min-p 0. reasoning_effort defaults to xhigh in-template;
+    override per-request via chat_template_kwargs
+    {"reasoning_effort": "low"|"medium"|"xhigh"} ("none" 400s on b10242).
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "16"
+  CHECKPOINT_MIN_STEP: "16384"
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "262144"
+  DIO: "1"
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 3 -b 2048 -ub 512 --min-p 0 --image-min-tokens 1024 --no-mmproj-offload"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "1.0"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

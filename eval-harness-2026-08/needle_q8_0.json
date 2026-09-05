@@ -1,0 +1,54 @@
+{
+ "label": "q8_0",
+ "items": [
+  {
+   "depth": 0.05,
+   "expect": "7Q4-KESTREL-19",
+   "got": "7Q4-KESTREL-19",
+   "ok": true,
+   "prompt_tokens": 309968,
+   "wall": 104.2
+  },
+  {
+   "depth": 0.2,
+   "expect": "Cape Naturaliste",
+   "got": "Cape Naturaliste",
+   "ok": true,
+   "prompt_tokens": 2712,
+   "wall": 3.0
+  },
+  {
+   "depth": 0.4,
+   "expect": "4,312",
+   "got": "4,312",
+   "ok": true,
+   "prompt_tokens": 2710,
+   "wall": 3.2
+  },
+  {
+   "depth": 0.6,
+   "expect": "17 March 2021",
+   "got": "17 March 2021",
+   "ok": true,
+   "prompt_tokens": 2704,
+   "wall": 2.9
+  },
+  {
+   "depth": 0.8,
+   "expect": "PERIWINKLE",
+   "got": "PERIWINKLE",
+   "ok": true,
+   "prompt_tokens": 2698,
+   "wall": 2.6
+  },
+  {
+   "depth": 0.95,
+   "expect": "611",
+   "got": "611",
+   "ok": true,
+   "prompt_tokens": 2712,
+   "wall": 2.7
+  }
+ ],
+ "score": "6/6"
+}

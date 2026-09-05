@@ -78,6 +78,24 @@ metadata:
     quant does not have. Vision is configured on the Q6_K tune, where it is
     verified working (correct image description, MTP draft acceptance 0.864
     with an image in the prompt).
+    CHECKPOINT SIZING, MEASURED FROM LIVE LOGS (2026-08-08). Context
+    checkpoints live in SYSTEM RAM, not VRAM -- llama_state_seq_get_data_ext
+    copies KV state out of the backend into a host buffer, so the budget is the
+    62 GB host, not the 32 GB card. Fitted from 19 logged checkpoint sizes:
+
+        size(MiB) = 149.6 + 4.02 KiB per token
+        => 0.40 GiB @ 65536 tok, 0.65 GiB @ 131072, 1.15 GiB @ 262144
+
+    CHECKPOINT_MIN_STEP was doubled 2048 -> 4096. The server was logging a
+    constant stream of
+        W slot create_check: erasing old context checkpoint (...)
+    i.e. it hit CHECKPOINT_MAX and evicted on nearly every new checkpoint,
+    discarding exactly the mid-conversation restore points that avoid a cold
+    prefill. Halving checkpoint density doubles the span the same number of
+    slots can cover, for the same RAM.
+    Here: MAX 16 x STEP 4096 = 65536 tokens, which exceeds this tune's
+    49152 context -- full coverage, ~4 GiB RAM.
+
 settings:
   RECOMMENDED_BACKEND: "cuda"
   API_KEY: "ollama-local"
@@ -85,7 +103,7 @@ settings:
   CACHE_TYPE_K: "q4_0"
   CACHE_TYPE_V: "q4_0"
   CHECKPOINT_MAX: "16"
-  CHECKPOINT_MIN_STEP: "2048"
+  CHECKPOINT_MIN_STEP: "4096"
   SLOT_SAVE_MAX_CHECKPOINTS: "10"
   CONTEXT: "49152"
   DIO: "1"

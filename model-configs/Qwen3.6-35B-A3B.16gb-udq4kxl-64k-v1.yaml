@@ -1,0 +1,92 @@
+kind: llama-launcher-tune
+version: 1
+name: "16gb-udq4kxl-64k-v1"
+model: "Qwen3"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 16gb-udq4kxl-64k-v1
+    Per-model config for: Qwen3.6-35B-A3B UD-Q4_K_XL (hybrid Gated-DeltaNet +
+    Gated-Attention MoE, 256 experts / 8 routed + 1 shared active).
+    Source: https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF
+    Target: AMD RX 6800 XT (16 GB discrete, gfx1030 / RDNA 2)
+    Backend: vulkan or rocm (gfx1030). On RDNA2, Vulkan tends to win token
+    generation, ROCm wins prompt processing — bench both with this tune.
+    Core idea: the UD-Q4_K_XL file is 20.8 GiB and does NOT fit in 16 GB, but
+    ~92% of it (19 GiB) is routed-expert FFN tensors and only ~3B params are
+    active per token. So: -ngl 99 puts everything in VRAM, then
+    --n-cpu-moe N pulls the experts of the FIRST N layers back to system RAM
+    (computed on CPU). Attention, norms, router, shared expert, output head and
+    the remaining (40-N) layers' experts stay in VRAM. Static placement —
+    nothing moves at runtime.
+    Architecture (recap, from HF config.json):
+    - 40 layers, full_attention_interval=4 → 10 full-attention layers,
+      30 linear-state Gated-DeltaNet layers (+1 MTP layer).
+    - Full attention: 16 Q / 2 KV heads, head_dim=256. Native ctx 262144.
+    - Only the 10 full-attn layers carry quadratic KV → KV is tiny:
+      ~10 KiB/token at q8_0 → 64k ctx ≈ 0.63 GiB.
+    - Routed experts ≈ 450-470 MiB per layer at this quant.
+    VRAM math at N=20, 64k ctx, q8_0 KV, -ub 256:
+    Non-expert weights (attn, DeltaNet,
+    shared experts, embeddings):            ~2.3-2.8 GiB
+    Experts on GPU (20 layers x 0.46):      ~9.2 GiB
+    Attention KV (10 layers, q8_0 @ 64k):   ~0.65 GiB
+    DeltaNet recurrent state:               ~0.3 GiB constant
+    FA + compute scratch @ -ub 256:         ~0.7-1.0 GiB
+    Total: ~13.2-13.9 GiB → ~1-1.5 GiB headroom with a desktop compositor
+    on the same GPU.
+    Tuning N (the only knob that matters):
+    - Start at the value here (20). If OOM, increment. If headroom > 1.5 GiB
+      in amdgpu_top / server log, decrement — each step moves ~0.46 GiB.
+      Likely optimum with a desktop attached is N=18.
+    - Headless: try 16. Max-speed 16-32k-ctx variant: N=16, q8_0 KV.
+      Max-context 262144 variant: N=23-24, q8_0 KV, -ub 256 mandatory.
+    Expected performance (community datapoints, same model class):
+    - RTX 3060 12GB, N=32: 33-36 tok/s; RTX 5080 16GB + DDR5-6000: 48-75;
+      6800 XT via Vulkan on the 3.5-35B-A3B sibling: ~38. Expect ~25-45 tok/s
+      tg here depending on host RAM speed — tg is bound by SYSTEM RAM
+      bandwidth (CPU-side experts), not the GPU. 3090 fully-offloaded
+      reference: ~100 tok/s.
+    - Prompt processing stays GPU-fast: for batches >= 32 tokens ggml streams
+      CPU-resident expert weights over PCIe to the GPU instead of computing
+      on CPU.
+    Host RAM: N=20 keeps ~9.6 GiB of experts in system RAM. NO_MMAP=1 assumes
+    a >= 32 GB host; on a smaller host set NO_MMAP=0 so weights stay
+    file-backed and the kernel pages them.
+    Requires llama-hdd >= v2 (base b9859): --n-cpu-moe landed upstream in
+    b6089, -ot in b5028, so any current build qualifies. Nothing newer than
+    b9859 matters for single-GPU RDNA2 MoE offload (verified against master
+    b9937, 2026-07).
+    FLASH_ATTN=1 is required for the q8_0 KV quantization to take effect.
+    -ub 256: conservative compute-scratch sizing for a 16 GB card with a
+    desktop attached; RDNA2 also benefits at long context (avoids compute
+    timeouts). Headless max-prefill: try -ub 512 -b 1024.
+    Checkpoints (llama-hdd): KV is small here, so checkpoints are cheap.
+    CHECKPOINT_MAX=32 @ 64k is bounded by the 0.63 GiB full-ctx KV plus
+    DeltaNet state per checkpoint — measure after first run and adjust.
+    SLOT_SAVE_MAX_CHECKPOINTS=10 thins disk sidecars (llama-hdd only).
+    Sampling: HF card thinking-mode defaults temp=0.6 top_p=0.95 top_k=20,
+    same as the other Qwen3.6 tunes.
+    JINJA=1 (launcher default) is needed for Qwen3's chat template / tool calls.
+settings:
+  API_KEY: "ollama-local"
+  CACHE_RAM: "10240"
+  CACHE_TYPE_K: "q8_0"
+  CACHE_TYPE_V: "q8_0"
+  CHECKPOINT_MAX: "32"
+  CHECKPOINT_MIN_STEP: "2048"
+  SLOT_SAVE_MAX_CHECKPOINTS: "10"
+  CONTEXT: "65536"
+  DIO: "1"
+  EXTRA_ARGS: "--n-cpu-moe 20 -ub 256"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  NGL: "99"
+  NO_MMAP: "1"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

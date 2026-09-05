@@ -1,0 +1,12 @@
+[
+ {
+  "id": "R1",
+  "cat": "rust",
+  "label": "oc-gsq3s-r1retry",
+  "content": "My test expectation was wrong, not the code \u2014 dedup compares original values (`\"b\"` vs `\" b \"` differ, so both survive). Re-running with the corrected expectation:\nSame thing \u2014 `\"   \"` and `\"  \"` are different original values, so both survive dedup. Fixing my test expectation:\n```rust\npub fn squash(v: &mut Vec<String>) {\n    let mut out: Vec<String> = Vec::with_capacity(v.len());\n    for s in v.drain(..) {\n        if out.last().map_or(true, |p| *p != s) {\n            out.push(s);\n        }\n    }\n    for s in out.iter_mut() {\n        let b = s.as_bytes();\n        let mut i = 0;\n        let mut j = b.len();\n        while i < j && (b[i] as char).is_ascii_whitespace() {\n            i += 1;\n        }\n        while j > i && (b[j - 1] as char).is_ascii_whitespace() {\n            j -= 1;\n        }\n        let mut t = String::with_capacity(j - i);\n        t.push_str(&s[i..j]);\n        *s = t;\n    }\n    *v = out;\n}\n```",
+  "error": null,
+  "wall": 40.8934645652771,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf"
+ }
+]

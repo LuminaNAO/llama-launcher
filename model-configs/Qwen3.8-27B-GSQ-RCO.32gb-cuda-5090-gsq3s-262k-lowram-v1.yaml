@@ -1,0 +1,80 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-gsq3s-262k-lowram-v1"
+model: "Qwen3.8"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-gsq3s-262k-lowram-v1   (2026-09-05)
+    LOW SYSTEM-RAM variant of gsq3s-262k-v1 for a 5090 host with little free
+    host memory (target: <= ~5 GB resident, worst case). Same model, same
+    VRAM-side configuration, same speed: weights, KV cache, MTP drafter and
+    mmproj all live in VRAM, so decode/prefill throughput is unchanged.
+    Only the host-side checkpoint budget differs. Read gsq3s-262k-v1's notes
+    for everything else (model, quality screen, sweep, KV A/B).
+
+    WHERE HOST RAM GOES (measured 2026-09-05 on the production build):
+      floor, idle, 0 checkpoints:  RSS 1.64 GiB = 0.51 anon + 0.38 pinned
+        CUDA host buffers + ~0.7 file-backed (mmapped weight pages, which the
+        kernel may reclaim — the working copy is in VRAM; DIO=1 keeps most
+        of them out of page cache in the first place).
+      context checkpoints: the only variable. Upper bound per checkpoint
+        (from sidecar sizes) 150 MiB + 4.02 KiB x tokens; measured resident
+        cost is lower. A single long prefill creates ONE checkpoint at its
+        end (100k -> anon 0.85 GiB, 200k -> 0.94, 256k -> 1.23); they
+        accumulate across turns up to CHECKPOINT_MAX. So the worst case is
+        MAX resident checkpoints at full depth:
+          16384 x 16 (v1)     <= 10.9 GiB   rollback <= 16k tok (~3-4 s)
+          32768 x 8           <=  5.7 GiB   rollback <= 32k tok (~6-8 s)
+          65536 x 4  <- this  <=  3.1 GiB   rollback <= 64k tok (~12-15 s)
+          131072 x 2          <=  1.8 GiB   rollback <= 128k tok (~30 s)
+          0 (disabled)            0         every divergence = full re-prefill
+        Coverage is still the full 262144 in every row; what shrinks is
+        rollback granularity. Checkpoints matter only when a client re-sends
+        a history that diverges from the cached one (harness compaction,
+        edited turns): the server rolls back to the nearest checkpoint at or
+        before the divergence and re-prefills from there (~4k t/s here).
+      no host prompt cache: CACHE_RAM 0 (llama-server's default is 8 GiB —
+        never leave it default on a small box). Slot save/restore streams
+        to/from the slot cache; the sidecar holds at most
+        SLOT_SAVE_MAX_CHECKPOINTS (= all 4 here).
+
+    BUDGET WITH THIS TUNE: ~0.9 GiB non-reclaimable floor + <= 3.1 GiB of
+    checkpoints worst case = ~4 GiB; typical sessions far less. Proxy ~55 MiB.
+    If the box is tighter still, use 131072 x 2 (<= 2.7 GiB total) or set
+    CHECKPOINT_MAX 0 (~1 GiB, full re-prefill on any divergence). Optional:
+    GGML_CUDA_NO_PINNED=1 in the environment drops the 0.38 GiB of pinned
+    transfer buffers at a small PCIe cost. The launcher adds --mlock when
+    memlock is unlimited; with DIO that pins little, but on a very small box
+    keep memlock limited so it is not added.
+
+    NOT YET RUN on a low-RAM host; validated only by the measurements above
+    on the 62 GB box (production traffic was live, so no test launch here).
+    Verify on first use: `VmRSS`/`RssAnon` of llama-server after a deep,
+    multi-turn session should sit under ~4 GiB.
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "4"
+  CHECKPOINT_MIN_STEP: "65536"
+  SLOT_SAVE_MAX_CHECKPOINTS: "4"
+  CONTEXT: "262144"
+  DIO: "1"
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 3 -b 2048 -ub 512 --min-p 0 --image-min-tokens 1024 --chat-template-file qwen38-froggeric-fixed.jinja --reasoning-format deepseek --chat-template-kwargs {\"reasoning_effort\":\"xhigh\"}"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "180"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "1.0"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

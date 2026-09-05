@@ -1,0 +1,52 @@
+[
+ {
+  "id": "R1",
+  "cat": "rust",
+  "label": "oc-tfcf6",
+  "content": "```rust\npub fn squash(v: &mut Vec<String>) {\n    v.dedup();\n    for s in v.iter_mut() {\n        *s = s.trim_ascii().to_string();\n    }\n}\n```",
+  "error": null,
+  "wall": 15.168044328689575,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP/Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "R2",
+  "cat": "rust",
+  "label": "oc-tfcf6",
+  "content": "```rust\nuse std::collections::HashMap;\n\npub struct Lru<K, V> {\n    map: HashMap<K, V>,\n    order: Vec<K>,\n    cap: usize,\n}\n\nimpl<K: Eq + std::hash::Hash + Clone, V> Lru<K, V> {\n    pub fn new(cap: usize) -> Self {\n        assert!(cap >= 1);\n        Lru {\n            map: HashMap::with_capacity(cap),\n            order: Vec::with_capacity(cap),\n            cap,\n        }\n    }\n\n    pub fn get(&mut self, k: &K) -> Option<&V> {\n        if self.map.contains_key(k) {\n            let pos = self.order.iter().position(|x| x == k);\n            if let Some(p) = pos {\n                self.order.remove(p);\n            }\n            self.order.push(k.clone());\n            self.map.get(k)\n        } else {\n            None\n        }\n    }\n\n    pub fn put(&mut self, k: K, v: V) {\n        if self.map.contains_key(&k) {\n            let pos = self.order.iter().position(|x| x == &k);\n            if let Some(p) = pos {\n                self.order.remove(p);\n            }\n            self.order.push(k.clone());\n            self.map.insert(k, v);\n        } else {\n            if self.map.len() >= self.cap {\n                let lru = self.order.remove(0);\n                self.map.remove(&lru);\n            }\n            self.order.push(k.clone());\n            self.map.insert(k, v);\n        }\n    }\n}\n```",
+  "error": null,
+  "wall": 19.190855026245117,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP/Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "R3",
+  "cat": "rust",
+  "label": "oc-tfcf6",
+  "content": "```rust\nuse std::sync::{Arc, Mutex};\nuse std::thread;\n\npub fn parallel_map<T, R, F>(items: Vec<T>, f: F, workers: usize) -> Vec<R>\nwhere\n    T: Send + 'static,\n    R: Send + 'static,\n    F: Fn(T) -> R + Send + Sync + 'static,\n{\n    let n = items.len();\n    let f = Arc::new(f);\n    let results: Arc<Mutex<Vec<Option<R>>>> =\n        Arc::new(Mutex::new(vec![None; n]));\n\n    // Work queue: (original index, item)\n    let queue: Arc<Mutex<Vec<(usize, T)>>> =\n        Arc::new(Mutex::new(items.into_iter().enumerate().collect()));\n\n    let mut handles = Vec::with_capacity(workers);\n    for _ in 0..workers {\n        let queue = Arc::clone(&queue);\n        let results = Arc::clone(&results);\n        let f = Arc::clone(&f);\n\n        let handle = thread::spawn(move || {\n            loop {\n                let job = {\n                    let mut q = queue.lock().unwrap();\n                    q.pop()\n                };\n\n                match job {\n                    Some((idx, item)) => {\n                        let result = f(item);\n                        let mut r = results.lock().unwrap();\n                        r[idx] = Some(result);\n                    }\n                    None => break,\n                }\n            }\n        });\n\n        handles.push(handle);\n    }\n\n    for handle in handles {\n        handle.join().unwrap();\n    }\n\n    let final_results = results.lock().unwrap();\n    final_results.into_iter().map(|opt| opt.unwrap()).collect()\n}\n```",
+  "error": null,
+  "wall": 15.770711898803711,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP/Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "R4",
+  "cat": "rust",
+  "label": "oc-tfcf6",
+  "content": "```rust\npub struct PairsMut<'a, T> {\n    ptr: *mut T,\n    len: usize,\n    _marker: std::marker::PhantomData<&'a mut T>,\n}\n\npub fn pairs_mut<T>(s: &mut [T]) -> PairsMut<'_, T> {\n    PairsMut {\n        ptr: s.as_mut_ptr(),\n        len: s.len(),\n        _marker: std::marker::PhantomData,\n    }\n}\n\nimpl<'a, T> Iterator for PairsMut<'a, T> {\n    type Item = (&'a mut T, &'a mut T);\n\n    fn next(&mut self) -> Option<Self::Item> {\n        if self.len < 2 {\n            return None;\n        }\n        let first = unsafe { &mut *self.ptr };\n        let second = unsafe { &mut *self.ptr.offset(1) };\n        self.ptr = unsafe { self.ptr.add(2) };\n        self.len -= 2;\n        Some((first, second))\n    }\n}\n```",
+  "error": null,
+  "wall": 33.53357791900635,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP/Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-MTP-Q6_K.gguf"
+ },
+ {
+  "id": "R5",
+  "cat": "rust",
+  "label": "oc-tfcf6",
+  "content": "```rust\nuse std::future::Future;\nuse std::pin::Pin;\nuse std::sync::Arc;\nuse std::task::{ArcWake, Context, Poll};\nuse std::thread;\n\nstruct ExecutorThread {\n    thread: thread::Thread,\n}\n\nimpl ArcWake for ExecutorThread {\n    fn wake_by_ref(arc_self: &Arc<Self>) {\n        arc_self.thread.unpark();\n    }\n}\n\npub fn block_on<F: Future>(fut: F) -> F::Output {\n    let mut fut = Pin::new(Box::new(fut));\n    let executor = Arc::new(ExecutorThread {\n        thread: thread::current(),\n    });\n    let waker = std::task::Waker::from(executor);\n    let cx = Context::from_waker(&waker);\n\n    loop {\n        match fut.as_mut().poll(&cx) {\n            Poll::Ready(val) => return val,\n            Poll::Pending => {\n                thread::park();\n            }\n        }\n    }\n}\n\npub struct YieldNow {\n    pub remaining: u32,\n}\n\nimpl Future for YieldNow {\n    type Output = ();\n\n    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {\n        if self.remaining == 0 {\n            Poll::Ready(())\n        } else {\n            self.remaining -= 1;\n            cx.waker().wake_by_ref();\n            Poll::Pending\n        }\n    }\n}\n```",
+  "error": null,
+  "wall": 28.09984254837036,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP/Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-MTP-Q6_K.gguf"
+ }
+]
