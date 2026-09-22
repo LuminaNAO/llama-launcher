@@ -908,6 +908,14 @@ else
     cmake --build "$BUILD_DIR" -j$(nproc)
 fi
 
+# Record provenance so the launcher can detect a stale build — package
+# upgrades and source pulls never refresh builds/ on their own.
+{
+    echo "src_dir=$(pwd)"
+    echo "src_commit=$(git rev-parse HEAD 2>/dev/null || true)"
+    echo "build_epoch=$(date +%s)"
+} > "$BUILD_DIR/.build-info"
+
 echo ""
 echo "✅ Build complete! ($BUILD_TYPE)"
 echo "   Server: $BUILD_DIR/bin/llama-server"

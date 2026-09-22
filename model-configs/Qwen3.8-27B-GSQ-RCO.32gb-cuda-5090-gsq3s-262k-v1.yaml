@@ -112,7 +112,7 @@ settings:
   FLASH_ATTN: "1"
   HOST: "0.0.0.0"
   KV_UNIFIED: "1"
-  MAX_TOTAL_SLOTS_GB: "180"
+  MAX_TOTAL_SLOTS_GB: "300"
   MIN_FREE_GB: "80"
   NGL: "999"
   NO_MMAP: "0"

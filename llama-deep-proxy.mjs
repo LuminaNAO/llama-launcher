@@ -1328,7 +1328,7 @@ async function handleRequest(clientReq, clientRes) {
       const sessionInfo = cacheInfoFromBody(bodyBuf.toString("utf8"), clientReq.headers);
       const sessionId = sessionInfo?.sessionId ?? null;
       requestLog(
-        `REQUEST ${tag} body_bytes=${bodyBuf.length} (${formatBytes(bodyBuf.length)}) content_length=${clientReq.headers["content-length"] ?? "chunked"} session=${sessionId ?? "none"} identity=${sessionInfo?.identitySource ?? "none"} agent=${sessionInfo?.agentKind ?? "unknown"} cache=${sessionInfo?.cachePolicy ?? "none"} access=${sessionInfo?.slotAccess ?? "none"}\n`,
+        `REQUEST ${tag} body_bytes=${bodyBuf.length} (${formatBytes(bodyBuf.length)}) content_length=${clientReq.headers["content-length"] ?? "chunked"} session=${sessionId ?? "none"} identity=${sessionInfo?.identitySource ?? "none"} agent=${sessionInfo?.agentKind ?? "unknown"} cache=${sessionInfo?.cachePolicy ?? "none"} access=${sessionInfo?.slotAccess ?? "none"} trigger=${sessionInfo?.openClaw?.trigger ?? "-"} run=${sessionInfo?.openClaw?.runId ?? "-"}\n`,
       );
       const run = () => processBufferedMessage(tag, clientReq, clientRes, bodyBuf, sessionInfo, finalize);
       if (slotCacheDir) {

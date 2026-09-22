@@ -1,0 +1,52 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-q35tiny-262k-v1"
+model: "Qwen3.5-0.8B"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-q35tiny-262k-v1   (TEST/SIM — not production)
+    Per-model config for: Qwen3.5-0.8B-UD-Q8_K_XL.gguf (1.11 GiB, Q8_K_XL)
+      + mmproj-BF16.gguf (0.19 GiB), same folder.
+    Purpose: fast stand-in for the context-pruning simulation harness
+    (utils/simlong.sh et al.) — tiny model, full 262144 context, so guard
+    behaviour can be A/B-tested in minutes instead of hours.
+
+    GGUF facts (read from the file header): arch qwen35 (hybrid: 24 blocks,
+    SSM/DeltaNet state_size 128 x16 groups + attention 8 heads / 2 KV heads),
+    context_length 262144, embedding 1024. NO MTP/nextn head, so no
+    --spec-type draft-mtp. Vision projector present; template is the embedded
+    one (has image/video macros) — no chat-template-file override.
+
+    Settings follow the production gsq3s-262k-v1 tune where arch-shaped
+    (KV q4_0 both halves, kv-unified, checkpoints 16384x16 — cheap here
+    because the model is tiny; slot files are ~100x smaller than the 27B).
+    Samplers are Qwen3-family thinking-card defaults. REASONING_FORMAT
+    deepseek via EXTRA_ARGS so reasoning_content stays out of visible text.
+    NOT throughput-tuned: this model exists to exercise context handling,
+    not to be fast at decode.
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "16"
+  CHECKPOINT_MIN_STEP: "16384"
+  SLOT_SAVE_MAX_CHECKPOINTS: "16"
+  CONTEXT: "262144"
+  DIO: "1"
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "-b 2048 -ub 512 --min-p 0 --reasoning-format deepseek"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "300"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

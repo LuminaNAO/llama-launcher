@@ -1,0 +1,55 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-q35small-262k-v1"
+model: "Qwen3.5-4B"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-q35small-262k-v1   (TEST/SIM — not production)
+    Per-model config for: Qwen3.5-4B-UD-Q8_K_XL.gguf (~4.5 GiB, Q8_K_XL)
+      from unsloth/Qwen3.5-4B-MTP-GGUF. MTP head baked in (nextn layer).
+    Purpose: fast stand-in for the context-pruning simulation harness
+    (utils/simtiny.sh et al.) — same qwen35 hybrid arch as production
+    (Gated DeltaNet + full attention every 4th layer), full 262144 context,
+    but ~6x faster turns than the 27B.
+
+    KEY DIFFERENCE from the q35tiny (0.8B) tune: this GGUF HAS the MTP head,
+    so --spec-type draft-mtp is on. That is not just speed: the hybrid-memory
+    partial tail trim requires n_rs_seq>0, which only a spec draft enables.
+    The 0.8B (no MTP head) GGML_ABORTed on every retokenized tail divergence
+    (upstream #22673); with MTP this model trims normally like the 27B.
+    Depth 3 matches the measured production choice (gsq3s sweep: d3 fastest).
+    Unsloth caveat honored: with MTP, llama.cpp supports neither -np>1 nor
+    mmproj — PARALLEL stays 1 and no vision projector is wired here.
+
+    Remaining settings follow the 0.8B/27B tunes where arch-shaped (KV q4_0
+    both halves, kv-unified, checkpoints 16384x16 — cheap at 4B). Samplers are
+    Qwen3.5 thinking-card defaults (temp 0.6 kept from q35tiny for harness
+    determinism). REASONING_FORMAT deepseek via EXTRA_ARGS so
+    reasoning_content stays out of visible text. Embedded chat template (has
+    tool calling) — no chat-template-file override.
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "16"
+  CHECKPOINT_MIN_STEP: "16384"
+  SLOT_SAVE_MAX_CHECKPOINTS: "16"
+  CONTEXT: "262144"
+  DIO: "1"
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--spec-type draft-mtp --spec-draft-n-max 3 -b 2048 -ub 512 --min-p 0 --reasoning-format deepseek"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "300"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  TEMP: "0.6"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

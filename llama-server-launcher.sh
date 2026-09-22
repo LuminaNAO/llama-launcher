@@ -16,6 +16,11 @@
 #   --tune <name>    Select a specific tune (e.g., "64gb", "128gb") — skips tune menu
 #   --seed <N>       Override the random seed (default: 42)
 #   --force          Skip all dependency and version checks (yq etc.)
+#                    Also bypasses the stale local-build guard: by default a
+#                    builds/<type>/ binary older than the installed llama-hdd
+#                    package is skipped in favor of the package binary (the
+#                    launch fails only if the package lacks the requested
+#                    backend). Bypass via LLAMA_LAUNCHER_ALLOW_STALE_BUILD=1.
 #   --context <N>    Override context size
 #   --parallel <N>   Override number of parallel slots
 #   --port <N>       Public port (default: from tune or 40801)
@@ -313,8 +318,6 @@ fi
 [ -n "$_env_slot_save_path" ] && LLAMACPP_SLOT_SAVE_PATH="$_env_slot_save_path"
 [ "$MIN_FREE_GB_TOUCHED" -eq 1 ] && MIN_FREE_GB="$_cli_min_free_gb"
 [ "$MAX_TOTAL_SLOTS_GB_TOUCHED" -eq 1 ] && MAX_TOTAL_SLOTS_GB="$_cli_max_total_slots_gb"
-_host_min_free_gb="${MIN_FREE_GB:-}"
-_host_max_total_slots_gb="${MAX_TOTAL_SLOTS_GB:-}"
 unset _env_models_dir _env_slot_save_path _cli_min_free_gb _cli_max_total_slots_gb
 
 config_quote() {
@@ -628,6 +631,147 @@ else
         echo "❌ llama-server not found at $LLAMACPP_SERVER_PATH"
         echo "   Run: bash build-llamacpp.sh $BUILD_TYPE"
         exit 1
+    fi
+
+    # ── Stale local-build guard ────────────────────────────────────────────
+    # builds/<type>/ binaries never refresh themselves: paru -S llama-hdd
+    # only rebuilds /usr/bin/llama-server, and a git pull in the source tree
+    # never reaches here either - without this guard a launch can silently
+    # keep using a months-old binary. Package-newer-than-build is fatal (the
+    # user just rebuilt expecting it to take effect); source drift only warns.
+    # Bypass: --force or LLAMA_LAUNCHER_ALLOW_STALE_BUILD=1.
+    if [ "$FORCE_SKIP_CHECKS" -eq 0 ] && [ "${LLAMA_LAUNCHER_ALLOW_STALE_BUILD:-0}" != "1" ]; then
+        _sl_src_dir=""
+        _sl_src_commit=""
+        _sl_build_epoch=""
+        if [ -f "$BUILD_DIR/.build-info" ]; then
+            _sl_src_dir="$(sed -n 's/^src_dir=//p' "$BUILD_DIR/.build-info")"
+            _sl_src_commit="$(sed -n 's/^src_commit=//p' "$BUILD_DIR/.build-info")"
+            _sl_build_epoch="$(sed -n 's/^build_epoch=//p' "$BUILD_DIR/.build-info")"
+        fi
+        if [ -z "$_sl_src_dir" ] && [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
+            _sl_src_dir="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$BUILD_DIR/CMakeCache.txt")"
+        fi
+        if ! [[ "$_sl_build_epoch" =~ ^[0-9]+$ ]]; then
+            _sl_build_epoch="$(stat -c %Y "$LLAMACPP_SERVER_PATH" 2>/dev/null || echo 0)"
+        fi
+
+        # the package comparison only applies to builds from the llama-hdd
+        # fork; experimental builds from other trees are never shadowed by it
+        _sl_hdd_src=1
+        if [ -n "$_sl_src_dir" ]; then
+            case "$(basename "$_sl_src_dir")" in
+                *llama-hdd*) ;;
+                *) _sl_hdd_src=0 ;;
+            esac
+        fi
+
+        _sl_pkg_ver=""
+        _sl_pkg_epoch=0
+        if [ "$_sl_hdd_src" -eq 1 ] && command -v pacman >/dev/null 2>&1; then
+            _sl_pkg_ver="$(pacman -Q llama-hdd 2>/dev/null || true)"
+            if [ -n "$_sl_pkg_ver" ]; then
+                _sl_pkg_date="$(pacman -Qi llama-hdd 2>/dev/null | sed -n 's/^Install Date[^:]*: //p')"
+                _sl_pkg_epoch="$(date -d "$_sl_pkg_date" +%s 2>/dev/null || echo 0)"
+            fi
+        fi
+
+        if [ "$_sl_pkg_epoch" -gt 0 ] && [ "$_sl_build_epoch" -gt 0 ] && [ "$_sl_pkg_epoch" -gt "$_sl_build_epoch" ]; then
+            echo "╔══════════════════════════════════════════════════════════════════╗"
+            echo "║  ⚠️  STALE LOCAL BUILD - shadowed by the installed llama-hdd       ║"
+            echo "╚══════════════════════════════════════════════════════════════════╝"
+            echo "builds/$BUILD_TYPE/bin/llama-server is older than the installed package:"
+            echo "  this build : $(date -d "@$_sl_build_epoch" '+%Y-%m-%d %H:%M' 2>/dev/null || echo unknown)"
+            echo "  package    : $_sl_pkg_ver (installed $(date -d "@$_sl_pkg_epoch" '+%Y-%m-%d %H:%M' 2>/dev/null || echo unknown))"
+            echo ""
+
+            # The package is the same fork, freshly built - it is a safe
+            # automatic fallback, but only if it has the requested backend.
+            _sl_sys_ok=0
+            if [ -x /usr/bin/llama-server ]; then
+                _sl_sys_ok=1
+                case "$BUILD_TYPE" in
+                    cuda*)   ldd /usr/bin/llama-server 2>/dev/null | grep -qE 'libcudart|libggml-cuda'   || _sl_sys_ok=0 ;;
+                    rocm*)   ldd /usr/bin/llama-server 2>/dev/null | grep -qE 'libamdhip64|libggml-hip'  || _sl_sys_ok=0 ;;
+                    vulkan*) ldd /usr/bin/llama-server 2>/dev/null | grep -qE 'libvulkan|libggml-vulkan' || _sl_sys_ok=0 ;;
+                esac
+            fi
+
+            _sl_use_system=0
+            if [ -t 0 ]; then
+                _sl_default=a
+                echo "  r) rebuild builds/$BUILD_TYPE from source now"
+                if [ "$_sl_sys_ok" -eq 1 ]; then
+                    echo "  s) use the package binary (/usr/bin/llama-server)"
+                    _sl_default=s
+                fi
+                echo "  c) continue with the stale build anyway"
+                echo "  a) abort"
+                read -rp "Choice [r/s/c/a, default $_sl_default]: " _sl_sel
+                case "${_sl_sel:-$_sl_default}" in
+                    r|R)
+                        if command -v llama-build >/dev/null 2>&1; then
+                            llama-build "$BUILD_TYPE" || { echo "❌ rebuild failed"; exit 1; }
+                        elif [ -f "$SCRIPT_DIR/build-llamacpp.sh" ]; then
+                            bash "$SCRIPT_DIR/build-llamacpp.sh" "$BUILD_TYPE" || { echo "❌ rebuild failed"; exit 1; }
+                        elif [ -f "$LLAMA_LAUNCHER_LIB_DIR/build-llamacpp.sh" ]; then
+                            bash "$LLAMA_LAUNCHER_LIB_DIR/build-llamacpp.sh" "$BUILD_TYPE" || { echo "❌ rebuild failed"; exit 1; }
+                        else
+                            echo "❌ build-llamacpp.sh not found"; exit 1
+                        fi
+                        ;;
+                    s|S)
+                        if [ "$_sl_sys_ok" -eq 1 ]; then
+                            _sl_use_system=1
+                        else
+                            echo "❌ the installed package has no $BUILD_TYPE backend - cannot use it"
+                            exit 1
+                        fi
+                        ;;
+                    c|C)
+                        echo "⚠️  continuing with the stale build"
+                        ;;
+                    *)
+                        exit 1
+                        ;;
+                esac
+            elif [ "$_sl_sys_ok" -eq 1 ]; then
+                _sl_use_system=1
+                echo "⚠️  using the package binary instead - no manual step needed."
+                echo "   To return to the local build, refresh it: llama-build $BUILD_TYPE"
+            else
+                echo "Refusing to launch the stale build: no compatible package binary to fall back to."
+                if [ -x /usr/bin/llama-server ]; then
+                    echo "  The installed package was built WITHOUT the ${BUILD_TYPE%%-*} backend;"
+                    echo "  reinstall it with LLAMA_HDD_BACKEND=${BUILD_TYPE%%-*}, or rebuild locally:"
+                fi
+                echo "  llama-build $BUILD_TYPE   # rebuild from source (repo checkout: bash build-llamacpp.sh $BUILD_TYPE)"
+                echo "  --force                   # bypass this guard (or LLAMA_LAUNCHER_ALLOW_STALE_BUILD=1)"
+                exit 1
+            fi
+
+            if [ "$_sl_use_system" -eq 1 ]; then
+                BUILD_TYPE="system"
+                BUILD_DIR=""
+                LLAMACPP_SERVER_PATH="/usr/bin/llama-server"
+            fi
+        elif [ -n "$_sl_src_dir" ] && [ -d "$_sl_src_dir/.git" ]; then
+            # source drift: warn only - the binary works, it is just behind
+            if [ -z "$_sl_src_commit" ]; then
+                _sl_ver_line="$("$LLAMACPP_SERVER_PATH" --version 2>/dev/null | head -1)"
+                _sl_src_commit="$(printf '%s' "$_sl_ver_line" | sed -n 's/.*commit \([0-9a-f]\{7,\}\).*/\1/p')"
+                [ -z "$_sl_src_commit" ] && _sl_src_commit="$(printf '%s' "$_sl_ver_line" | sed -n 's/.*(\([0-9a-f]\{7,\}\)).*/\1/p')"
+            fi
+            _sl_src_head="$(git -C "$_sl_src_dir" rev-parse HEAD 2>/dev/null || true)"
+            if [ -n "$_sl_src_commit" ] && [ -n "$_sl_src_head" ] && [ "$_sl_src_commit" != "$_sl_src_head" ] \
+                && git -C "$_sl_src_dir" merge-base --is-ancestor "$_sl_src_commit" "$_sl_src_head" 2>/dev/null; then
+                _sl_nbehind="$(git -C "$_sl_src_dir" rev-list --count "$_sl_src_commit..$_sl_src_head" 2>/dev/null || echo '?')"
+                echo "⚠️  builds/$BUILD_TYPE is $_sl_nbehind commit(s) behind $_sl_src_dir"
+                echo "   rebuild to pick up: llama-build $BUILD_TYPE (or: bash build-llamacpp.sh $BUILD_TYPE)"
+                echo ""
+            fi
+        fi
+        unset _sl_src_dir _sl_src_commit _sl_build_epoch _sl_hdd_src _sl_pkg_ver _sl_pkg_date _sl_pkg_epoch _sl_sel _sl_ver_line _sl_src_head _sl_nbehind _sl_sys_ok _sl_use_system _sl_default
     fi
 fi
 
@@ -1380,11 +1524,6 @@ else
     done
 fi
 
-# Host-wide disk policy from local config or CLI wins over per-model tunes.
-[ -n "$_host_min_free_gb" ] && MIN_FREE_GB="$_host_min_free_gb"
-[ -n "$_host_max_total_slots_gb" ] && MAX_TOTAL_SLOTS_GB="$_host_max_total_slots_gb"
-unset _host_min_free_gb _host_max_total_slots_gb
-
 # ── Auto-detect vision projector ─────────────────────────────────────────────
 # Searches the same folder as the selected model — no prefix matching needed
 MMPROJ=""
@@ -1853,9 +1992,32 @@ DIO_FLAG=""
 if [ "$DIO" = "1" ]; then
     if server_supports_flag "--direct-io"; then
         DIO_FLAG="-dio"
-    else
+    elif ! server_supports_flag "--load-mode"; then
         echo "⚠️  DIO=1 ignored: this llama-server has no --direct-io."
     fi
+fi
+# ── Model load mode ─────────────────────────────────────────────────────────
+# llama.cpp b10990+ folded --mmap/--no-mmap, --mlock and --direct-io into one
+# --load-mode enum (auto|none|mmap|mlock|mmap+mlock|dio) and removed the old
+# flags, so passing them aborts the server ("invalid argument"). Translate the
+# tune's NO_MMAP / DIO / mlock choice into the single mode and drop the legacy
+# flags; older servers (no --load-mode) keep getting the legacy flags above.
+# dio is exclusive with mlock there — DIO wins: with -ngl offloading the whole
+# model, mlock pinned only the host staging buffers anyway.
+LOAD_MODE_FLAG=""
+if server_supports_flag "--load-mode"; then
+    if [ "$DIO" = "1" ]; then
+        LOAD_MODE_FLAG="--load-mode dio"
+        [ -n "$MLOCK_FLAG" ] && echo "ℹ️  mlock: not combinable with --load-mode dio on this llama-server; dio kept."
+    elif [ -n "$MLOCK_FLAG" ]; then
+        if [ "$NO_MMAP" = "1" ]; then LOAD_MODE_FLAG="--load-mode mlock"; else LOAD_MODE_FLAG="--load-mode mmap+mlock"; fi
+    elif [ "$NO_MMAP" = "1" ]; then
+        LOAD_MODE_FLAG="--load-mode none"
+    fi
+    MMAP_FLAG=""
+    DIO_FLAG=""
+    MLOCK_FLAG=""
+    [ -n "$LOAD_MODE_FLAG" ] && echo "📦 load mode: ${LOAD_MODE_FLAG#--load-mode }"
 fi
 CTX_CKPT_FLAG=""
 if server_supports_flag "--ctx-checkpoints"; then
@@ -2019,6 +2181,7 @@ LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
   --threads "$THREADS"
   ${MMAP_FLAG:+$MMAP_FLAG}
   ${DIO_FLAG:+$DIO_FLAG}
+  ${LOAD_MODE_FLAG:+$LOAD_MODE_FLAG}
   --timeout "$TIMEOUT"
   --host "${LLAMA_BIND_HOST:-127.0.0.1}"
   --port "$INTERNAL_PORT"
