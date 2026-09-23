@@ -2086,6 +2086,30 @@ if [ "$NO_PROXY" -eq 0 ]; then
         EFFECTIVE_SLOT_SAVE_PATH="$SLOT_SAVE_PATH/$_model_basename"
         mkdir -p "$EFFECTIVE_SLOT_SAVE_PATH"
         echo "💾 Slot save namespace: $EFFECTIVE_SLOT_SAVE_PATH"
+        # llama-hdd: checkpoint sidecars (.bin.ckpt) carry draft-context state
+        # that only the drafter that wrote them can load (LSCKPT4 fingerprint).
+        # Remember the drafter per namespace and warn when it changes while
+        # sidecars exist - the server ignores those sidecars, so the first
+        # divergence per restored session re-prefills until it is saved again.
+        _drafter_id="none"
+        if [[ "${EXTRA_ARGS:-}" =~ --spec-type[[:space:]]+([^[:space:]]+) ]]; then
+            _drafter_id="${BASH_REMATCH[1]}"
+            if [[ "${EXTRA_ARGS:-}" =~ (^|[[:space:]])(-md|--model-draft)[[:space:]]+([^[:space:]]+) ]]; then
+                _drafter_id="$_drafter_id:$(basename "${BASH_REMATCH[3]}")"
+            fi
+        fi
+        _drafter_marker="$EFFECTIVE_SLOT_SAVE_PATH/.drafter"
+        if [ -f "$_drafter_marker" ]; then
+            _prev_drafter="$(cat "$_drafter_marker" 2>/dev/null)"
+            if [ "$_prev_drafter" != "$_drafter_id" ] && compgen -G "$EFFECTIVE_SLOT_SAVE_PATH/*.bin.ckpt" >/dev/null 2>&1; then
+                _ckpt_count=$(ls "$EFFECTIVE_SLOT_SAVE_PATH"/*.bin.ckpt 2>/dev/null | wc -l)
+                echo "⚠️  Drafter changed for this slot namespace: $_prev_drafter -> $_drafter_id"
+                echo "   $_ckpt_count checkpoint sidecar(s) were written by the previous drafter and will be"
+                echo "   ignored by the server; affected sessions re-prefill on their first divergence."
+                echo "   Slot .bin files (the saved context itself) are unaffected."
+            fi
+        fi
+        printf '%s\n' "$_drafter_id" > "$_drafter_marker" 2>/dev/null || true
         # One-time warning for stale flat-layout files from before namespacing
         if compgen -G "$SLOT_SAVE_PATH/*.bin" >/dev/null 2>&1; then
             _stale_count=$(ls "$SLOT_SAVE_PATH"/*.bin 2>/dev/null | wc -l)

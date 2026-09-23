@@ -1,0 +1,43 @@
+=== 1. MTP: run, save, inspect header
+  [mtp-first] prompt_n=7506 cached=0 tg=40 answer='freight'
+{"id_slot":0,"filename":"t-mtp.bin","n_saved":7545,"n_written":296175484,"timings":{"save_ms":278.861}}
+
+0.06.871.746 I slot process_sing: id  0 | task -1 | saved 5/5 context checkpoint(s), sidecar size = 826.376 MiB
+magic=b'LSCKPT4\x00' state_ver=3 fingerprint='none,draft-mtp|n_ctx=65536' count=5
+=== 1b. MTP same-drafter round trip: restore + divergent prompt (expect checkpoint restore, no crash)
+{"id_slot":0,"filename":"t-mtp.bin","n_restored":7545,"n_read":296175484,"timings":{"restore_ms":190.569}}
+
+0.07.089.671 I slot process_sing: id  0 | task -1 | restored 5 context checkpoint(s), sidecar size = 826.376 MiB
+  [mtp-diverge] prompt_n=5434 cached=2078 tg=40 answer='freight'
+  server: alive
+=== 2. DFLASH: restore MTP sidecar (expect fingerprint warning, sidecar ignored, no crash)
+{"id_slot":0,"filename":"t-mtp.bin","n_restored":7545,"n_read":296175484,"timings":{"restore_ms":44.302}}
+
+0.06.056.767 W load_slot_checkpoints: checkpoint sidecar was written by drafter 'none,draft-mtp|n_ctx=65536' but the runtime drafter is 'none,draft-dflash|dflash ?B Q8_0|n_ctx=65536', ignoring: /usr/l
+  [dfl-after-mtp-restore] prompt_n=7512 cached=0 tg=40 answer='freight'
+  server: alive
+=== 3. DFLASH same-drafter round trip
+  [dfl-first] prompt_n=5428 cached=2078 tg=40 answer='freight'
+{"id_slot":0,"filename":"t-dfl.bin","n_saved":7545,"n_written":296175484,"timings":{"save_ms":2097.71}}
+
+magic=b'LSCKPT4\x00' state_ver=3 fingerprint='none,draft-dflash|dflash ?B Q8_0|n_ctx=65536' count=5
+{"id_slot":0,"filename":"t-dfl.bin","n_restored":7545,"n_read":296175484,"timings":{"restore_ms":181.793}}
+
+0.13.064.432 I slot process_sing: id  0 | task -1 | restored 5 context checkpoint(s), sidecar size = 908.906 MiB
+  [dfl-diverge] prompt_n=5434 cached=2078 tg=40 answer='freight'
+  server: alive
+=== 4. DFLASH: forged fingerprint on the MTP sidecar (expect non-fatal 'restore failed ... re-processing', no crash)
+patched fingerprint 'none,draft-mtp|n_ctx=65536' -> 'none,draft-dflash|dflash ?B Q8_0|n_ctx=65536'
+{"id_slot":0,"filename":"t-forged.bin","n_restored":7545,"n_read":296175484,"timings":{"restore_ms":262.536}}
+
+0.16.759.398 I slot process_sing: id  0 | task -1 | restored 5 context checkpoint(s), sidecar size = 826.376 MiB
+  [dfl-forged-diverge] prompt_n=7512 cached=0 tg=40 answer='freight'
+0.16.793.183 E load_dft: draft checkpoint size mismatch: expected 8561408, got 0 (checkpoint written by a different drafter?)
+0.16.793.185 W slot   operator(): id  0 | task 45 | context checkpoint restore failed (tgt = 1, dft = 0), dropping 5 checkpoint(s) and re-processing the prompt
+  server: alive
+=== 5. DFLASH: legacy LSCKPT3 sidecar (expect 'expected LSCKPT4, ignoring')
+{"id_slot":0,"filename":"t-old.bin","n_restored":69,"n_read":158168524,"timings":{"restore_ms":51.261}}
+
+0.19.380.387 W load_slot_checkpoints: invalid or stale checkpoint sidecar (expected LSCKPT4), ignoring: /usr/local/share/llama.cpp/llama-slots-test/sidecar-drafter/t-old.bin.ckpt
+  server: alive
+=== DONE
