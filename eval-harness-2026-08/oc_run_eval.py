@@ -40,7 +40,8 @@ for i, q in enumerate(Q):
         content, err = "", None
         try:
             d = json.loads(raw[raw.index("{"):]) if "{" in raw else {}
-            # tolerate several shapes: {reply|text|message|payloads:[{text}]}
+            # OpenClaw 15 nests under result.{payloads,meta}; older builds put them top-level
+            if isinstance(d.get("result"), dict): d = d["result"]
             content = "\n".join((x.get("text") or "") for x in (d.get("payloads") or []) if isinstance(x, dict))
         except Exception as e:
             err = f"parse: {e}; raw head: {raw[:200]}"

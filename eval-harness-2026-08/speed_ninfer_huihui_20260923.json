@@ -1,0 +1,53 @@
+{
+ "label": "ninfer_huihui_20260923",
+ "shallow_prose": {
+  "pp_tps": 980.9,
+  "pp_n": 69,
+  "tg_tps": 115.8,
+  "tg_n": 900,
+  "accept": 0.13898,
+  "mean_len": 2.38,
+  "finish": "length",
+  "wall": 7.8
+ },
+ "shallow_code": {
+  "pp_tps": 1231.8,
+  "pp_n": 71,
+  "tg_tps": 99.6,
+  "tg_n": 1200,
+  "accept": 0.10614,
+  "mean_len": 2.05,
+  "finish": "length",
+  "wall": 12.1
+ },
+ "shallow_reason": {
+  "pp_tps": 1628.0,
+  "pp_n": 93,
+  "tg_tps": 129.8,
+  "tg_n": 1200,
+  "accept": 0.16797,
+  "mean_len": 2.67,
+  "finish": "length",
+  "wall": 9.3
+ },
+ "prefill_32k": {
+  "pp_tps": 8242.4,
+  "pp_n": 31110,
+  "tg_tps": 230.7,
+  "tg_n": 32,
+  "accept": 0.45455,
+  "mean_len": 4.57,
+  "finish": "length",
+  "wall": 3.9
+ },
+ "deep_100k": {
+  "pp_tps": 5100.4,
+  "pp_n": 100764,
+  "tg_tps": 140.9,
+  "tg_n": 400,
+  "accept": 0.26325,
+  "mean_len": 3.57,
+  "finish": "length",
+  "wall": 22.6
+ }
+}

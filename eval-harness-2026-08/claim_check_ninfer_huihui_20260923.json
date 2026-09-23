@@ -1,0 +1,72 @@
+{
+ "recall8k_greedy_nothink": {
+  "pp_tps": 9754,
+  "pp_n": 4946,
+  "tg_tps": 391.4,
+  "tg_n": 42,
+  "accept": 0.8,
+  "think_chars": 0,
+  "answer": "753630 834583 532729 258870 937901 239237",
+  "wall": 0.6
+ },
+ "recall8k_default_nothink": {
+  "pp_tps": 9984,
+  "pp_n": 5047,
+  "tg_tps": 326.7,
+  "tg_n": 42,
+  "accept": 0.65,
+  "think_chars": 0,
+  "answer": "778960 367151 972087 980722 893423 389772",
+  "wall": 0.6
+ },
+ "recall8k_default_think": {
+  "pp_tps": 10003,
+  "pp_n": 5056,
+  "tg_tps": 263.6,
+  "tg_n": 343,
+  "accept": 0.452,
+  "think_chars": 743,
+  "answer": "452150 475417 839780 574236 273584 716154",
+  "wall": 1.8
+ },
+ "recall32k_greedy_nothink": {
+  "pp_tps": 9059,
+  "pp_n": 20026,
+  "tg_tps": 378.8,
+  "tg_n": 42,
+  "accept": 0.72,
+  "think_chars": 0,
+  "answer": "964299 699082 919704 112641 831914 647015",
+  "wall": 2.3
+ },
+ "prose_greedy_nothink": {
+  "pp_tps": 536,
+  "pp_n": 29,
+  "tg_tps": 115.7,
+  "tg_n": 900,
+  "accept": 0.138,
+  "think_chars": 0,
+  "answer": "The history of gold mining in Western Australia is a narrative woven from threads of desperation, discovery, and transformative economic power. While the state\u2019",
+  "wall": 7.8
+ },
+ "prose_default_nothink": {
+  "pp_tps": 180,
+  "pp_n": 7,
+  "tg_tps": 117.1,
+  "tg_n": 900,
+  "accept": 0.142,
+  "think_chars": 0,
+  "answer": "The history of gold mining in Western Australia is a narrative woven deeply into the fabric of the state\u2019s identity, marking it not merely as an economic driver",
+  "wall": 7.7
+ },
+ "code_greedy_nothink": {
+  "pp_tps": 572,
+  "pp_n": 31,
+  "tg_tps": 233.1,
+  "tg_n": 1200,
+  "accept": 0.381,
+  "think_chars": 0,
+  "answer": "```rust //! A generic bounded Multi-Producer Multi-Consumer (MPMC) queue. //! //! This module provides a thread-safe, lock-based bounded MPMC queue using //! st",
+  "wall": 5.2
+ }
+}
