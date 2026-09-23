@@ -1,0 +1,76 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-gsq3s-dflash2-262k-v1"
+model: "Qwen3.8"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-gsq3s-dflash2-262k-v1
+    Per-model config for ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF:
+      Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf (12.12 GB, 3.50 bpw)
+    External speculative drafter from z-lab/Qwen3.8-27B-DFlash2-GGUF:
+      Qwen3.8-27B-DFlash2-Q8_0.gguf (2.06 GB)
+      revision 2d9571f8ce46e151f61c6499c99dee6079e1d610
+      sha256 c18e800daedc59ca68fd13b6a856d795746af6d399a9279ac6a277d1d422f87e
+    Target: RTX 5090, 32 GiB VRAM, CUDA0, Blackwell sm_120. Host 62 GB.
+
+    Derived from gsq3s-262k-v1. The target, q4_0 K/V, 262144 context,
+    checkpoint layout, vision projector, prompt batching, sampling, template,
+    and HDD-cache policy are unchanged. DFlash2 replaces the embedded MTP
+    head for speculative decoding. The draft is target-specific and must not
+    be reused with a different base model family.
+
+    MEASURED 2026-09-20 with llama-hdd 0.4.1-dev build 10245/f8f9719b1.
+    The existing speed_probe.py harness was run directly against llama-server
+    with vision loaded and HDD persistence disabled during measurement. MTP
+    depth 3 was measured immediately before DFlash2 on the same target:
+
+                         MTP d3   DFlash2 n5   change
+      prose, shallow       94.7       145.9     +54.1%
+      code, shallow       103.0       115.0     +11.7%
+      reasoning, shallow  108.6       128.6     +18.4%
+      decode at ~100k      80.7        99.5     +23.3%
+      prefill at ~32k    3024.7      3103.2      +2.6%
+
+    DFlash2 n5 acceptance/mean accepted run was 0.420/3.10 prose,
+    0.278/2.39 code, 0.340/2.69 reasoning, and 0.433/3.17 at ~100k.
+    Served VRAM was 22348 MiB including the vision projector, leaving about
+    10 GiB free on the 32607 MiB card.
+
+    DRAFT WIDTH SWEEP: n5 beat n7 on every decode probe (n7 was
+    140.6/109.0/119.6 shallow and 94.8 at ~100k). A matching 1200-token code
+    probe at n4 produced 105.4 t/s versus 115.0 at n5. Values above 7 are
+    invalid for this checkpoint: n10 is clamped to 7 because the trained
+    block size is 8. Therefore n5 is selected.
+
+    Keep the absolute model path: unlike the embedded MTP head, DFlash2 is a
+    separate target-specific GGUF. The Q8_0 draft was chosen over Q4_K_M for
+    this first production tune because it fits with ample VRAM headroom and
+    avoids adding draft quantization as a second benchmark variable.
+
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q4_0"
+  CACHE_TYPE_V: "q4_0"
+  CHECKPOINT_MAX: "16"
+  CHECKPOINT_MIN_STEP: "16384"
+  SLOT_SAVE_MAX_CHECKPOINTS: "16"
+  CONTEXT: "262144"
+  DIO: "1"
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--spec-type draft-dflash -md /usr/local/share/llama.cpp/models/Qwen3.8-27B-DFlash2/Qwen3.8-27B-DFlash2-Q8_0.gguf --spec-draft-n-max 5 -b 2048 -ub 512 --min-p 0 --image-min-tokens 1024 --chat-template-file qwen38-froggeric-fixed.jinja --reasoning-format deepseek --chat-template-kwargs {\"reasoning_effort\":\"xhigh\"}"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "300"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "1.0"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"
