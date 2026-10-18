@@ -2229,16 +2229,35 @@ LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
   ${EXTRA_ARGS:+$EXTRA_ARGS}
 )
 
+# Highlight slot-cache and checkpoint lines in the server log: save/restore of
+# checkpoints and draft state in magenta, other checkpoint lines in yellow, and
+# the progress fragment of prompt-processing lines in cyan. Only plain INFO
+# lines are recoloured; warnings and errors keep llama.cpp's own colours.
+colorize_llama_log() {
+    if [ "$LOG_COLORS" = "0" ]; then
+        cat
+        return
+    fi
+    local e=$'\033'
+    local info="(${e}\\[32mI ${e}\\[0m)(.*)$"
+    sed -u -E \
+        -e "/draft state|(appended|restored) [0-9]+ context checkpoint\\(s\\)|slot save|slot restore/{" \
+        -e "s/${info}/\\1${e}[35m\\2${e}[0m/" -e "b" -e "}" \
+        -e "/context checkpoint|speculative checkpoint|restore checkpoint|checkpoints/{" \
+        -e "s/${info}/\\1${e}[33m\\2${e}[0m/" -e "b" -e "}" \
+        -e "/prompt processing,/s/(progress = [^,]*)/${e}[36m\\1${e}[0m/"
+}
+
 tee_status=0
 if [ "$NO_LOG" -eq 1 ]; then
     "${LAUNCH_CMD[@]}" 2>&1
     server_status=$?
     launch_status=$server_status
 else
-    "${LAUNCH_CMD[@]}" 2>&1 | tee -a "$LLAMA_LOG_FILE"
+    "${LAUNCH_CMD[@]}" 2>&1 | colorize_llama_log | tee -a "$LLAMA_LOG_FILE"
     launch_pipe_status=("${PIPESTATUS[@]}")
     server_status="${launch_pipe_status[0]:-1}"
-    tee_status="${launch_pipe_status[1]:-0}"
+    tee_status="${launch_pipe_status[2]:-0}"
     launch_status=$server_status
     if [ "$launch_status" -eq 0 ] && [ "$tee_status" -ne 0 ]; then
         launch_status=$tee_status
