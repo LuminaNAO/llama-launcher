@@ -35,6 +35,7 @@ package() {
     install -Dm755 "${pkgname}/utils/vram-stress-test.sh" "${pkgdir}/usr/bin/llama-vram-stress-test"
     install -Dm755 "${pkgname}/llama-deep-proxy.mjs" "${pkgdir}/usr/lib/llama-launcher/llama-deep-proxy.mjs"
     install -Dm755 "${pkgname}/llama-waterfall.mjs" "${pkgdir}/usr/lib/llama-launcher/llama-waterfall.mjs"
+    install -Dm644 "${pkgname}/utils/tokentail-emit.mjs" "${pkgdir}/usr/lib/llama-launcher/utils/tokentail-emit.mjs"
     # Bundled tunes + chat templates, read from BUNDLED_MODEL_CONFIG_DIR
     install -Dm644 "${pkgname}"/model-configs/* -t "${pkgdir}/usr/share/llama-launcher/model-configs"
     install -Dm644 "${pkgname}/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
