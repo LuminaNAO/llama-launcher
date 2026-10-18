@@ -1,0 +1,9 @@
+{
+  "name": "llama-launcher",
+  "private": true,
+  "description": "Helper scripts for building llama.cpp and running llama-server",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
