@@ -160,6 +160,9 @@ async function waitFor(fn, timeoutMs = 8000, everyMs = 100) {
 
 // ── Main ──────────────────────────────────────────────────────────────────
 const dir = mkdtempSync(join(tmpdir(), "wf-test-"));
+// Every serve child inherits this: its tokentail usage spool lands in the
+// temp dir, never in the real user spool.
+process.env.XDG_DATA_HOME = dir;
 const confPath = join(dir, "waterfall.conf");
 const sockPath = join(dir, "waterfall.sock");
 // Agent lines are deliberately headerless — legacy single-table conf compat.
