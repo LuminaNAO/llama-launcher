@@ -12,7 +12,7 @@ url="https://codeberg.org/LuminaNAO/llama-launcher"
 license=(AGPL-3.0-only)
 depends=('bash' 'cmake' 'curl' 'git' 'jq' 'yq' 'bc' 'nodejs' 'openssh')
 optdepends=(
-    'llama-hdd: llama-server binary (required to launch models)'
+    'llama.cpp: system llama-server binary (otherwise build one with llama-build)'
 )
 source=(git+https://codeberg.org/LuminaNAO/${pkgname}.git#tag="v${pkgver}")
 sha256sums=(SKIP)

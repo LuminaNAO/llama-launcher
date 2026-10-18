@@ -69,9 +69,9 @@ p-split a no-op, -ub irrelevant to tg):
 - [next] DFlash2 drafter in place of the embedded MTP head (branch feature/dflash2
   holds the parked draft tune): +51% code / +27%
   reasoning measured on HIGHEST 08-25 (longer accepted runs). GSQ-RCO is stock
-  Qwen3.8 so the drafter's distribution matches. Blocker: cherry-pick llama.cpp
-  PR #27342 onto llama-hdd and rebuild (vanilla cuda-dflash2 build lacks
-  hdd-cache/checkpoints); validate hdd-cache + vision + gauntlet after.
+  Qwen3.8 so the drafter's distribution matches. DONE 09-23 (production tune
+  gsq3s-dflash2-262k-v1); since 10-18 production runs upstream llama.cpp,
+  which saves checkpoints and draft state in the slot file (llama-hdd retired).
 - Unrotated KV: the Hadamard rotation costs ~10-12% tg upstream. f16 KV needs no
   rotation (fits: ~30.5 GiB at 262k, no headroom; 4x KV bytes so slower at
   depth) or q8_0 with LLAMA_ATTN_ROT_DISABLE=1 (upstream: good, not lossless).

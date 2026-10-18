@@ -10,12 +10,11 @@ CODE_DIR="$(dirname "$ROOT_DIR")"
 
 declare -A TEMPLATES=(
     [llama-launcher]="$ROOT_DIR/PKGBUILD"
-    [llama-hdd]="$CODE_DIR/llama-hdd.cpp/aur/PKGBUILD"
     [freeclaw]="$CODE_DIR/freeclaw/aur/PKGBUILD"
 )
 
 rc=0
-for pkg in llama-launcher llama-hdd freeclaw; do
+for pkg in llama-launcher freeclaw; do
     template="${TEMPLATES[$pkg]}"
     if [ ! -f "$template" ]; then
         echo "?? $pkg: template not found at $template (skipping)"

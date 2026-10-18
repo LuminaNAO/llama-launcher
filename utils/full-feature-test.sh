@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
-# Full-feature test of the packaged llama-launcher + llama-hdd in a fresh
-# Arch container — the "did we break the AUR user" test, without AUR.
+# Full-feature test of the packaged llama-launcher in a fresh Arch
+# container — the "did we break the AUR user" test, without AUR. The
+# llama-server comes from upstream llama.cpp built with the packaged
+# llama-build (cpu), from a local checkout mounted read-only.
 #
 # Modes:
 #   (default)  fast: makepkg on the host, pacman -U in the container
 #   --paru     the real thing: build paru from the AUR inside the container,
-#              paru -S freeclaw (real AUR), paru -Bi the local packages —
-#              the full `paru -S freeclaw llama-hdd llama-launcher` journey
+#              paru -S freeclaw (real AUR), paru -Bi the local package —
+#              the full `paru -S freeclaw llama-launcher` + llama-build journey
 #   --keep     keep the work dir for inspection
 #
-# Asserts: tunes shipped, system build discovered, tune menu lists the smoke
-# tune, full launch (proxy + HDD cache) on a ~1 MB model, /health, a
-# completion, session-switch slot-cache write, clean stop.
+# LLAMACPP_SRC overrides the llama.cpp checkout (default: ../llama.cpp).
+#
+# Asserts: tunes shipped, llama-build produces a cpu build, tune menu lists
+# the smoke tune, full launch (proxy + HDD cache) on a ~1 MB model, /health,
+# a completion, session-switch slot-cache write, clean stop.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-HDD_SRC="$(realpath "$(dirname "$ROOT_DIR")/llama-hdd.cpp")"
+LLAMACPP_SRC="$(realpath "${LLAMACPP_SRC:-$(dirname "$ROOT_DIR")/llama.cpp}")"
+[ -f "$LLAMACPP_SRC/CMakeLists.txt" ] || { echo "no llama.cpp checkout at $LLAMACPP_SRC"; exit 1; }
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/llama-fft.XXXXXX")"
 KEEP=0 MODE=fast
 for arg in "$@"; do
@@ -33,23 +38,18 @@ run_docker() {
 }
 
 launcher_branch="$(git -C "$ROOT_DIR" branch --show-current)"
-hdd_branch="$(git -C "$HDD_SRC" branch --show-current)"
 
 if [ "$MODE" = "fast" ]; then
     echo "=== build packages on host (fast mode)"
-    mkdir -p "$WORK/hdd" "$WORK/launcher"
-    cp "$HDD_SRC/aur/PKGBUILD" "$WORK/hdd/"
-    sed -i "s|git+https://[^\"#]*#tag=v\${pkgver}|git+file://$HDD_SRC#branch=$hdd_branch|" "$WORK/hdd/PKGBUILD"
+    mkdir -p "$WORK/launcher"
     cp "$ROOT_DIR/PKGBUILD" "$WORK/launcher/"
     sed -i "s|git+https://[^\"#]*#tag=\"v\${pkgver}\"|git+file://$ROOT_DIR#branch=$launcher_branch|" "$WORK/launcher/PKGBUILD"
-    (cd "$WORK/hdd" && LLAMA_HDD_BACKEND=cpu makepkg -fd > makepkg.log 2>&1) || { tail -20 "$WORK/hdd/makepkg.log"; exit 1; }
     (cd "$WORK/launcher" && makepkg -fd > makepkg.log 2>&1) || { tail -20 "$WORK/launcher/makepkg.log"; exit 1; }
 fi
 
 cat > "$WORK/inner.sh" << INNERVARS
 #!/bin/bash
 INSTALL_MODE="$MODE"
-HDD_BRANCH="$hdd_branch"
 LAUNCHER_BRANCH="$launcher_branch"
 INNERVARS
 cat >> "$WORK/inner.sh" << 'INNER'
@@ -57,7 +57,7 @@ set -uo pipefail
 fail() { echo "FAIL: $*"; exit 1; }
 pass() { echo "PASS: $*"; }
 
-RUNTIME_DEPS="gcc-libs glibc openmp curl bash cmake git jq yq bc nodejs openssh util-linux"
+RUNTIME_DEPS="gcc-libs glibc openmp curl bash cmake git jq yq bc nodejs openssh util-linux base-devel"
 
 if [ "$INSTALL_MODE" = "paru" ]; then
     pacman -Syu --noconfirm --needed base-devel git sudo $RUNTIME_DEPS > /pacman.log 2>&1 || fail "base install"
@@ -69,19 +69,16 @@ if [ "$INSTALL_MODE" = "paru" ]; then
     pass "freeclaw from real AUR: $(pacman -Q freeclaw)"
 
     sudo -u builder bash -ec "
-    mkdir -p ~/aur/llama-hdd ~/aur/llama-launcher
-    cp /srv/llama-hdd.cpp/aur/PKGBUILD ~/aur/llama-hdd/
-    sed -i 's|git+https://[^\"#]*#tag=v\${pkgver}|git+file:///srv/llama-hdd.cpp#branch=$HDD_BRANCH|' ~/aur/llama-hdd/PKGBUILD
+    mkdir -p ~/aur/llama-launcher
     cp /srv/llama-launcher/PKGBUILD ~/aur/llama-launcher/
     sed -i 's|git+https://[^\"#]*#tag=\"v\${pkgver}\"|git+file:///srv/llama-launcher#branch=$LAUNCHER_BRANCH|' ~/aur/llama-launcher/PKGBUILD
-    cd ~/aur/llama-hdd && LLAMA_HDD_BACKEND=cpu paru -Bi --noconfirm . > ~/paru-hdd.log 2>&1 || { tail -20 ~/paru-hdd.log; exit 1; }
     cd ~/aur/llama-launcher && paru -Bi --noconfirm . > ~/paru-launcher.log 2>&1 || { tail -20 ~/paru-launcher.log; exit 1; }
-    " || fail "paru -Bi local packages"
+    " || fail "paru -Bi local package"
 else
     pacman -Syu --noconfirm --needed $RUNTIME_DEPS > /pacman.log 2>&1 || fail "base install"
-    pacman -U --noconfirm /work/hdd/llama-hdd-*.pkg.tar.* /work/launcher/llama-launcher-*.pkg.tar.* >> /pacman.log 2>&1 || fail "package install"
+    pacman -U --noconfirm /work/launcher/llama-launcher-*.pkg.tar.* >> /pacman.log 2>&1 || fail "package install"
 fi
-pass "packages installed: $(pacman -Q llama-hdd llama-launcher | tr '\n' ' ')"
+pass "package installed: $(pacman -Q llama-launcher)"
 
 # tunes shipped?
 n_tunes=$(pacman -Ql llama-launcher | grep -c "usr/share/llama-launcher/model-configs/.*\.yaml") || true
@@ -92,8 +89,13 @@ pass "package ships $n_tunes tunes"
 probe="$(printf 'a: "1"\n' | yq -r '.a')" && [ "$probe" = "1" ] || fail "yq probe"
 pass "yq works ($(yq --version 2>/dev/null))"
 
-llama-server --version >/dev/null 2>&1 || fail "llama-server --version"
-pass "system llama-server: $(llama-server --version 2>&1 | head -1)"
+# llama-server from upstream llama.cpp, built by the packaged llama-build
+mkdir -p /root/code && cp -a /srv/llama.cpp /root/code/llama.cpp
+LLAMACPP_SRC=/root/code/llama.cpp llama-build cpu < /dev/null > /build.log 2>&1 || { tail -30 /build.log; fail "llama-build cpu"; }
+server_bin="$(find /root -path '*/builds/cpu/bin/llama-server' -type f 2>/dev/null | head -1)"
+[ -n "$server_bin" ] || { tail -30 /build.log; fail "llama-build produced no builds/cpu/bin/llama-server"; }
+"$server_bin" --version >/dev/null 2>&1 || fail "llama-server --version"
+pass "cpu build: $("$server_bin" --version 2>&1 | head -1)"
 
 # tiny model
 mkdir -p /root/llama-launcher/models/stories260K
@@ -102,15 +104,15 @@ curl -sL --retry 3 -o /root/llama-launcher/models/stories260K/stories260K.gguf \
 pass "model downloaded ($(du -h /root/llama-launcher/models/stories260K/stories260K.gguf | cut -f1))"
 
 # tune menu lists the smoke tune (interactive path; abort after menu)
-menu_out="$(printf '0\n' | timeout 20 script -qec "llama-launcher --build system --model /root/llama-launcher/models/stories260K/stories260K.gguf --proxy --log --port 40801 --internal-port 40802" /dev/null 2>&1 | head -40 || true)"
+menu_out="$(printf '0\n' | timeout 20 script -qec "llama-launcher --build cpu --model /root/llama-launcher/models/stories260K/stories260K.gguf --proxy --log --port 40801 --internal-port 40802" /dev/null 2>&1 | head -40 || true)"
 echo "$menu_out" | grep -q "Available tunes for stories260K" || fail "tune menu did not appear: $menu_out"
 echo "$menu_out" | grep -q "cpu-smoke-v1" || fail "bundled smoke tune not listed: $menu_out"
 llama-launcher stop >/dev/null 2>&1 || true
 pass "tune menu shows bundled cpu-smoke-v1"
 
-# full launch: system build + tune + proxy + hdd cache
+# full launch: cpu build + tune + proxy + hdd cache
 cd /root
-nohup llama-launcher --build system \
+nohup llama-launcher --build cpu \
     --model /root/llama-launcher/models/stories260K/stories260K.gguf \
     --tune cpu-smoke-v1 --hdd-cache --proxy --log \
     --port 40801 --internal-port 40802 --parallel 1 > /launch.log 2>&1 &
@@ -172,7 +174,7 @@ chmod +x "$WORK/inner.sh"
 
 echo "=== run in fresh archlinux container ($MODE mode)"
 if [ "$MODE" = "paru" ]; then
-    run_docker run --rm -v "$WORK:/work:ro" -v "$HDD_SRC:/srv/llama-hdd.cpp:ro" -v "$ROOT_DIR:/srv/llama-launcher:ro" archlinux:latest bash /work/inner.sh
+    run_docker run --rm -v "$WORK:/work:ro" -v "$LLAMACPP_SRC:/srv/llama.cpp:ro" -v "$ROOT_DIR:/srv/llama-launcher:ro" archlinux:latest bash /work/inner.sh
 else
-    run_docker run --rm -v "$WORK:/work:ro" archlinux:latest bash /work/inner.sh
+    run_docker run --rm -v "$WORK:/work:ro" -v "$LLAMACPP_SRC:/srv/llama.cpp:ro" archlinux:latest bash /work/inner.sh
 fi

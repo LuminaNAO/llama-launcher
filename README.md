@@ -41,7 +41,7 @@ It symlinks `llama-launcher`, `llama-build`, and `llama-download-model` into `/u
 
 Builds llama.cpp into `builds/<backend>/`. For GPU backends, the GPU arch (gfx target or CUDA compute cap) is auto-detected via `rocminfo` / `nvidia-smi` and can be overridden.
 When installed, this script is available as `llama-build`.
-For packaged installs, source discovery also checks AUR helper build caches such as `~/.cache/paru/clone/llama-hdd/src/llama-hdd` and `~/.cache/yay/llama-hdd/src/llama-hdd`.
+It builds upstream [llama.cpp](https://github.com/ggml-org/llama.cpp) by default (`~/code/llama.cpp`, or set `LLAMACPP_SRC`), offering to clone it when missing. For packaged installs, source discovery also checks AUR helper build caches for `llama-rocmfpx-hdd`.
 
 ### `llama-server-launcher.sh`
 
@@ -59,7 +59,7 @@ Run without flags for the interactive launcher. Enter `s` from the recent-launch
 | `--seed <N>`     | Override seed |
 | `--context <N>`  | Override context size |
 | `--parallel <N>` | Override parallel slots |
-| `--hdd-cache`    | Enable disk-backed slot cache and force `CACHE_RAM=0`. For full benefit (prompt-checkpoint resumption — avoids cold prefill on prompt switch for hybrid/MTP models), install [`llama-hdd`](https://codeberg.org/LuminaNAO/git/llama-hdd.cpp) instead of vanilla `llama.cpp`. With vanilla llama.cpp the slot KV still restores, but the `common_prompt_checkpoint` list is lost and the model cold-prefills. |
+| `--hdd-cache`    | Enable disk-backed slot cache and force `CACHE_RAM=0`. Needs llama.cpp b11718 or newer for full benefit: slot files then carry the context checkpoints and the draft-model state, so hybrid/MTP models resume without a cold prefill on a prompt switch. Older builds still restore the slot KV but lose the checkpoints. |
 | `--vision [N]`   | Enable the vision projector (`*mmproj*.gguf`) found beside the model, without the interactive prompt. Optional `N` picks among several (default `1`). |
 | `--no-vision`    | Force text-only even when a projector is present. |
 | `--mmproj <file>`| Use this projector file explicitly; implies `--vision` and may point outside the model folder. |
@@ -158,7 +158,7 @@ Copyright (C) 2026 Lumina Nao.
 
 This program is licensed under the GNU Affero General Public License, version 3 **only** (AGPL-3.0-only), as published by the Free Software Foundation. See [LICENSE](LICENSE) for the full text.
 
-llama.cpp / llama-hdd remain MIT-licensed upstream projects; this repository's scripts and proxies are AGPL.
+llama.cpp remains an MIT-licensed upstream project; this repository's scripts and proxies are AGPL.
 
 ## GPG Signature
 

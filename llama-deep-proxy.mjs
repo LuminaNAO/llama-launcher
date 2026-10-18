@@ -23,7 +23,7 @@
 //   - Before each slot save, prunes the slot cache to keep (a) free disk
 //     space above --min-free-gb (default 100) and (b) total bytes across
 //     all sibling model slot dirs below --max-total-slots-gb (default 200).
-//     Oldest .bin (with its .bin.ckpt sidecar) is evicted first; the
+//     Oldest .bin (with its .meta.json) is evicted first; the
 //     session about to be saved is excluded from candidates.
 //   - With --slot-cache-dir, /v1/messages are serialized end-to-end because
 //     slot save/restore is single-slot and operates on llama-server slot 0.
@@ -121,7 +121,7 @@ function metaPathForSlotId(slotId) {
 
 function deleteSlotFiles(slotId) {
   const bin = slotPath(`${slotId}.bin`);
-  const ckpt = `${bin}.ckpt`;
+  const ckpt = `${bin}.ckpt`; // legacy llama-hdd checkpoint sidecar, if one is left over
   const meta = metaPathForSlotId(slotId);
   try { unlinkSync(bin); } catch {}
   try { unlinkSync(ckpt); } catch {}
@@ -173,7 +173,7 @@ function requestLog(line) {
 // ── Slot cache disk-quota enforcement ──────────────────────────────────────
 // Called immediately before every slot save. Scope is "one dir up" from the
 // model-specific slotCacheDir, so sibling model dirs share the budget.
-// Enforces two limits — evicts oldest .bin (with its .ckpt sidecar) one at a
+// Enforces two limits — evicts oldest .bin (with its .meta.json) one at a
 // time until BOTH pass:
 //   1. free disk space on the slot filesystem >= minFreeGB
 //   2. total bytes across all sibling slot dirs <= maxTotalSlotsGB
@@ -252,7 +252,7 @@ function pruneSlotCacheIfNeeded(currentSlotFilename, incomingSlotFilename = null
       slotLog(`pruneSlotCache: out of candidates (free=${free.toFixed(1)} GB, total=${totalGB.toFixed(1)} GB; want free>=${minFreeGB}, total<=${maxTotalSlotsGB})\n`, C_YELLOW);
       break;
     }
-    const ckpt = victim.path + ".ckpt";
+    const ckpt = victim.path + ".ckpt"; // legacy llama-hdd checkpoint sidecar
     const meta = victim.path.replace(/\.bin$/, ".meta.json");
     let bytesFreed = 0;
     try { bytesFreed += statSync(victim.path).size; } catch {}
@@ -263,7 +263,7 @@ function pruneSlotCacheIfNeeded(currentSlotFilename, incomingSlotFilename = null
     try { unlinkSync(meta); } catch {}
     evicted++;
     const reason = lowFree ? `free<${minFreeGB} GB` : `total>${maxTotalSlotsGB} GB`;
-    slotLog(`pruneSlotCache: evicted ${victim.path} (+ .ckpt) — ${(bytesFreed / (1024 ** 3)).toFixed(2)} GB freed (reason: ${reason})\n`, C_YELLOW);
+    slotLog(`pruneSlotCache: evicted ${victim.path} — ${(bytesFreed / (1024 ** 3)).toFixed(2)} GB freed (reason: ${reason})\n`, C_YELLOW);
   }
   if (evicted > 0) {
     const free = diskFreeGB(slotRoot);
@@ -809,10 +809,10 @@ async function ensureSlotLoaded(info) {
         // the one we're about to restore next. Otherwise the
         // LRU prune can wipe our restore target before we read it.
         pruneSlotCacheIfNeeded(`${currentSession}.bin`, protectIncomingFilename);
-        hddBanner("save", `${currentSession}.bin`, "(writes .bin + .bin.ckpt)");
+        hddBanner("save", `${currentSession}.bin`, "(writes .bin)");
         const { r, save } = await callSlotSaveWithRetry(`${currentSession}.bin`, "switch");
         slotLog(
-          `HDD CACHE save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten} checkpoint_sidecar=${currentSession}.bin.ckpt\n`,
+          `HDD CACHE save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten}\n`,
           save.ok ? C_CYAN : C_RED,
         );
         if (!save.ok) {
@@ -917,11 +917,11 @@ async function ensureSlotLoaded(info) {
         C_YELLOW,
       );
     }
-    hddBanner(restoreTarget.kind === "exact" ? "restore" : "restore parent", restoreTarget.filename, "(reads .bin + .bin.ckpt)");
+    hddBanner(restoreTarget.kind === "exact" ? "restore" : "restore parent", restoreTarget.filename, "(reads .bin)");
     const r = await callSlotAction("restore", restoreTarget.filename);
     const restore = slotRestoreSucceeded(r);
     slotLog(
-      `HDD CACHE restore status=${r.status} n_restored=${restore.nRestored} n_read=${restore.nRead} checkpoint_sidecar=${restoreTarget.filename}.ckpt ${r.body.slice(0, 200)}\n`,
+      `HDD CACHE restore status=${r.status} n_restored=${restore.nRestored} n_read=${restore.nRead} ${r.body.slice(0, 200)}\n`,
       restore.ok ? C_GREEN : colorForStatus("restore", r.status),
     );
     // Restore returning 4xx/5xx (e.g., file not found) is normal for new sessions.
@@ -974,10 +974,10 @@ async function saveCurrentSlot(reason, timeoutMs = 0, failOnError = false) {
     }
     ensureSlotCacheDir();
     pruneSlotCacheIfNeeded(`${currentSession}.bin`);
-    hddBanner(`save (${reason})`, `${currentSession}.bin`, "(writes .bin + .bin.ckpt)");
+    hddBanner(`save (${reason})`, `${currentSession}.bin`, "(writes .bin)");
     const { r, save } = await callSlotSaveWithRetry(`${currentSession}.bin`, reason, timeoutMs);
     slotLog(
-      `HDD CACHE save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten} checkpoint_sidecar=${currentSession}.bin.ckpt\n`,
+      `HDD CACHE save status=${r.status} n_saved=${save.nSaved} n_written=${save.nWritten}\n`,
       save.ok ? C_CYAN : C_RED,
     );
     if (currentRequestInfo) {
@@ -1030,7 +1030,7 @@ async function prepareNonPersistentRequest(info, access) {
   if (access === "read-only") {
     const exact = `${info.sessionId}.bin`;
     if (existsSync(slotPath(exact))) {
-      hddBanner("restore read-only", exact, "(reads .bin + .bin.ckpt; response will not be saved)");
+      hddBanner("restore read-only", exact, "(reads .bin; response will not be saved)");
       const r = await callSlotAction("restore", exact);
       const restore = slotRestoreSucceeded(r);
       slotLog(

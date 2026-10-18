@@ -10,11 +10,11 @@
 #   ./build-llamacpp.sh cpu            # -> builds/cpu
 #
 # Run interactively, the script asks which server variant to build
-# (llama-hdd.cpp, llama-rocmfpx-hdd, or vanilla llama.cpp) and offers to
-# clone / paru -S whatever is missing, and to install missing build deps.
+# (upstream llama.cpp or llama-rocmfpx-hdd) and offers to clone whatever
+# is missing, and to install missing build deps.
 # rocmfpx-hdd builds are staged as builds/<backend>-rocmfpx-hdd so they
-# never clobber stock backend builds. Non-interactive runs keep the silent
-# llama-hdd-first defaults.
+# never clobber stock backend builds. Non-interactive runs default to the
+# upstream llama.cpp checkout.
 #
 # To build from a non-default llama.cpp source tree,
 # set LLAMACPP_SRC:
@@ -50,7 +50,6 @@ case "$SCRIPT_DIR" in
         ;;
 esac
 DEFAULT_LLAMACPP_DIR="$(dirname "$ROOT_DIR")/llama.cpp"
-DEFAULT_LLAMAHDD_DIR="$(dirname "$ROOT_DIR")/llama-hdd.cpp"
 
 # The llama-rocmfpx-hdd fork (ROCmFP4/MTP fork + the hdd-cache sidecar) is
 # the only tree that can load ROCmFP4-quantized models. Its ggml/rocmfpx/
@@ -63,19 +62,6 @@ is_rocmfpx_hdd_src() {
     git -C "$1" remote get-url origin 2>/dev/null | grep -q "rocmfpx"
 }
 
-# The llama-hdd fork carries the flags the launcher tunes expect (-dio,
-# --slot-save-max-checkpoints, --checkpoint-min-step); a vanilla checkout
-# builds fine but produces a server that rejects them. Match by checkout
-# name/remote first, then by an hdd-only source marker for renamed trees.
-# llama-rocmfpx-hdd trees carry those flags too, so that check must win.
-is_llama_hdd_src() {
-    is_rocmfpx_hdd_src "$1" && return 1
-    case "$(basename "$(realpath "$1" 2>/dev/null || echo "$1")")" in
-        *llama-hdd*) return 0 ;;
-    esac
-    git -C "$1" remote get-url origin 2>/dev/null | grep -q "llama-hdd" && return 0
-    grep -qs -- "slot-save-max-checkpoints" "$1/common/arg.cpp"
-}
 
 ldconfig_has() {
     # Avoid grep -q in a pipe under pipefail: grep can exit early after a
@@ -215,44 +201,36 @@ BUILD_TAG=""
 #   1. LLAMACPP_SRC env var (explicit override — non-interactive)
 #   2. Interactive: ask which server variant is wanted, then find a matching
 #      checkout — offering to clone (or paru -S) whatever is missing
-#   3. Non-interactive: plain BUILD_TYPE with default source present → silent
-#      default (llama-hdd sibling wins over vanilla llama.cpp when both
-#      exist), otherwise the candidate-preference order below
+#   3. Non-interactive: plain BUILD_TYPE with the default llama.cpp checkout
+#      present → silent default, otherwise the candidate-preference order below
 cache_root="${XDG_CACHE_HOME:-$HOME/.cache}"
 
 variant_label() {
     case "$1" in
         vanilla)     echo "llama.cpp" ;;
-        llama-hdd)   echo "llama-hdd.cpp" ;;
         rocmfpx-hdd) echo "llama-rocmfpx-hdd" ;;
     esac
 }
 
 matches_variant() {
     case "$2" in
-        llama-hdd)   is_llama_hdd_src "$1" ;;
         rocmfpx-hdd) is_rocmfpx_hdd_src "$1" ;;
-        vanilla)     ! is_rocmfpx_hdd_src "$1" && ! is_llama_hdd_src "$1" ;;
+        vanilla)     ! is_rocmfpx_hdd_src "$1" ;;
         *)           return 0 ;;
     esac
 }
 
-# No checkout of the selected variant exists: walk the user through getting
-# one — paru -S for the packaged variant, otherwise a clone (preferring
-# makepkg's local mirror, falling back to a custom URL on failure).
+# No checkout of the selected variant exists: walk the user through cloning
+# one (preferring makepkg's local mirror, falling back to a custom URL on
+# failure).
 # On success sets RESOLVED_SRC to the new checkout path.
 resolve_variant_source() {
-    local variant="$1" canonical dest mirrors=() mirror src alt clone_ans hdd_ans
+    local variant="$1" canonical dest mirrors=() mirror src alt clone_ans
     RESOLVED_SRC=""
     case "$variant" in
         vanilla)
             canonical="https://github.com/ggml-org/llama.cpp.git"
             dest="$HOME/code/llama.cpp"
-            ;;
-        llama-hdd)
-            canonical="https://codeberg.org/LuminaNAO/llama-hdd.cpp.git"
-            dest="$HOME/code/llama-hdd.cpp"
-            mirrors=("$cache_root/paru/clone/llama-hdd/llama-hdd" "$cache_root/yay/llama-hdd/llama-hdd")
             ;;
         rocmfpx-hdd)
             canonical="${LLAMA_ROCMFPX_GIT_URL:-https://codeberg.org/LuminaNAO/llama-rocmfpx-hdd.git}"
@@ -261,19 +239,6 @@ resolve_variant_source() {
             ;;
     esac
     echo "ℹ️  No $(variant_label "$variant") checkout found."
-    if [ "$variant" = "llama-hdd" ] && command -v paru >/dev/null 2>&1; then
-        echo "  1) Clone the source to $dest and build here (default)"
-        echo "  2) paru -S llama-hdd — prebuilt package; llama-launcher then uses it as the 'system' build"
-        read -rp "Choice [1-2, default=1]: " hdd_ans
-        if [ "${hdd_ans:-1}" = "2" ]; then
-            if ! paru -S llama-hdd; then
-                echo "❌ paru -S llama-hdd failed"
-                return 1
-            fi
-            echo "✅ llama-hdd installed — no source build needed; pick the 'system' build in llama-launcher."
-            exit 0
-        fi
-    fi
     src="$canonical"
     for mirror in ${mirrors[@]+"${mirrors[@]}"}; do
         if git -C "$mirror" rev-parse --git-dir >/dev/null 2>&1; then
@@ -304,22 +269,18 @@ if [ -n "${LLAMACPP_SRC:-}" ]; then
 else
     if [ -t 0 ]; then
         echo "Which llama-server variant do you want to build?"
-        echo "  1) llama-hdd.cpp       — llama.cpp + persistent HDD prompt-cache (launcher default)"
+        echo "  1) llama.cpp           — upstream ggml-org/llama.cpp (launcher default)"
         echo "  2) llama-rocmfpx-hdd   — ROCmFP4/MTP fork + HDD cache (required for ROCmFP4 models)"
-        echo "  3) llama.cpp           — vanilla upstream (its server rejects the launcher's hdd-cache flags)"
-        read -rp "Select variant [1-3, default=1]: " variant_sel
+        read -rp "Select variant [1-2, default=1]: " variant_sel
         case "${variant_sel:-1}" in
-            1) VARIANT="llama-hdd" ;;
+            1) VARIANT="vanilla" ;;
             2) VARIANT="rocmfpx-hdd" ;;
-            3) VARIANT="vanilla" ;;
             *) echo "❌ Invalid selection: $variant_sel"; exit 1 ;;
         esac
         echo ""
     fi
 
-    if [ -z "$VARIANT" ] && [ -z "$BUILD_TAG" ] && [ -f "$DEFAULT_LLAMAHDD_DIR/CMakeLists.txt" ]; then
-        LLAMACPP_DIR="$DEFAULT_LLAMAHDD_DIR"
-    elif [ -z "$VARIANT" ] && [ -z "$BUILD_TAG" ] && [ -f "$DEFAULT_LLAMACPP_DIR/CMakeLists.txt" ]; then
+    if [ -z "$VARIANT" ] && [ -z "$BUILD_TAG" ] && [ -f "$DEFAULT_LLAMACPP_DIR/CMakeLists.txt" ]; then
         LLAMACPP_DIR="$DEFAULT_LLAMACPP_DIR"
     else
         # Discover candidate llama.cpp source trees near the helper or, for
@@ -329,7 +290,7 @@ else
         #   ~/code/llama.cpp-*          (suffix style, e.g. llama.cpp-v4flash)
         #   ~/code/llama*/llama.cpp     (nested style, e.g. llama-mtp/llama.cpp)
         #   ~/code/llama*               (flat style, e.g. llama-mtp/ with CMakeLists at root)
-        #   ~/.cache/{paru,yay} makepkg src dirs for llama-hdd / llama-rocmfpx-hdd
+        #   ~/.cache/{paru,yay} makepkg src dirs for llama-rocmfpx-hdd
         search_roots=()
         if [ "$PACKAGED_INSTALL" -eq 1 ]; then
             search_roots+=(
@@ -338,8 +299,6 @@ else
                 "$HOME/code"
                 "$HOME/src"
                 "$HOME"
-                "$cache_root/paru/clone/llama-hdd/src"
-                "$cache_root/yay/llama-hdd/src"
                 "$cache_root/paru/clone/llama-rocmfpx-hdd/src"
                 "$cache_root/yay/llama-rocmfpx-hdd/src"
             )
@@ -350,7 +309,7 @@ else
         candidates=()
         for root in "${search_roots[@]}"; do
             [ -d "$root" ] || continue
-            for c in "$root" "$root"/llama.cpp "$root"/llama.cpp-* "$root"/llama-hdd.cpp "$root"/llama*/llama.cpp "$root"/llama*; do
+            for c in "$root" "$root"/llama.cpp "$root"/llama.cpp-* "$root"/llama*/llama.cpp "$root"/llama*; do
                 [ -f "$c/CMakeLists.txt" ] || continue
                 # Deduplicate (a glob can hit the same path twice)
                 c_real="$(realpath "$c" 2>/dev/null || echo "$c")"
@@ -363,7 +322,7 @@ else
             done
         done
 
-        # A chosen variant only accepts matching trees — a stock llama-hdd
+        # A chosen variant only accepts matching trees — a stock llama.cpp
         # checkout must never silently satisfy a rocmfpx-hdd build (it would
         # compile fine and then fail at model load on the FP4 tensor types).
         if [ -n "$VARIANT" ]; then
@@ -375,7 +334,7 @@ else
         fi
 
         if [ ${#candidates[@]} -eq 0 ] && [ -t 0 ]; then
-            if resolve_variant_source "${VARIANT:-llama-hdd}"; then
+            if resolve_variant_source "${VARIANT:-vanilla}"; then
                 candidates+=("$RESOLVED_SRC")
             fi
         fi
@@ -393,20 +352,12 @@ else
             exit 1
         fi
 
-        # Smart default: prefer an llama-hdd tree over vanilla llama.cpp — a
-        # vanilla build yields a server that rejects the launcher's hdd flags
-        # (-dio, slot-save checkpoints). Fall back to the mainline sibling
-        # checkout, then the first candidate found. (With a chosen variant the
-        # list is already filtered, so the first match is the default.)
+        # Default: the mainline sibling checkout, then the first candidate found.
+        # (With a chosen variant the list is already filtered.)
         default_sel=0
-        mainline_sel=0
         for i in "${!candidates[@]}"; do
-            if [ "$default_sel" -eq 0 ] && is_llama_hdd_src "${candidates[$i]}"; then
-                default_sel=$((i+1))
-            fi
-            [ "$mainline_sel" -eq 0 ] && [ "$(realpath "${candidates[$i]}" 2>/dev/null || echo "${candidates[$i]}")" = "$(realpath "$DEFAULT_LLAMACPP_DIR" 2>/dev/null || echo "$DEFAULT_LLAMACPP_DIR")" ] && mainline_sel=$((i+1))
+            [ "$default_sel" -eq 0 ] && [ "$(realpath "${candidates[$i]}" 2>/dev/null || echo "${candidates[$i]}")" = "$(realpath "$DEFAULT_LLAMACPP_DIR" 2>/dev/null || echo "$DEFAULT_LLAMACPP_DIR")" ] && default_sel=$((i+1))
         done
-        [ "$default_sel" -eq 0 ] && default_sel=$mainline_sel
         [ "$default_sel" -eq 0 ] && default_sel=1
 
         if [ ${#candidates[@]} -eq 1 ]; then
@@ -417,8 +368,6 @@ else
                 label=""
                 if is_rocmfpx_hdd_src "${candidates[$i]}"; then
                     label="$label [llama-rocmfpx-hdd]"
-                elif is_llama_hdd_src "${candidates[$i]}"; then
-                    label="$label [llama-hdd]"
                 fi
                 [ $((i+1)) -eq "$default_sel" ] && label="$label (default)"
                 if [ -d "${candidates[$i]}/.git" ]; then

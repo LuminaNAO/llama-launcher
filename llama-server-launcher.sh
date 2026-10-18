@@ -17,7 +17,7 @@
 #   --seed <N>       Override the random seed (default: 42)
 #   --force          Skip all dependency and version checks (yq etc.)
 #                    Also bypasses the stale local-build guard: by default a
-#                    builds/<type>/ binary older than the installed llama-hdd
+#                    builds/<type>/ binary older than the installed llama.cpp
 #                    package is skipped in favor of the package binary (the
 #                    launch fails only if the package lacks the requested
 #                    backend). Bypass via LLAMA_LAUNCHER_ALLOW_STALE_BUILD=1.
@@ -576,15 +576,15 @@ else
         done
     fi
 
-    # Package-installed llama-hdd (e.g. paru -S llama-hdd) works without any
-    # local build: expose it as build type "system".
+    # A package-installed llama-server (e.g. an AUR llama.cpp package) works
+    # without any local build: expose it as build type "system".
     if [ -x /usr/bin/llama-server ]; then
         available_builds+=("system")
     fi
 
     if [ ${#available_builds[@]} -eq 0 ]; then
         echo "❌ No builds found in $LLAMA_LAUNCHER_DIR/builds/ and no system llama-server."
-        echo "   Either install the llama-hdd package, or build locally:"
+        echo "   Either install a llama.cpp package that ships llama-server, or build locally:"
         echo "   bash build-llamacpp.sh [cpu|rocm|vulkan|cuda]"
         exit 1
     elif [ ${#available_builds[@]} -eq 1 ]; then
@@ -615,12 +615,12 @@ else
 fi
 
 if [ "$BUILD_TYPE" = "system" ]; then
-    # Package-installed llama-hdd: system binary, system libs, no BUILD_DIR.
+    # Package-installed llama-server: system binary, system libs, no BUILD_DIR.
     BUILD_DIR=""
     LLAMACPP_SERVER_PATH="/usr/bin/llama-server"
     if [ ! -x "$LLAMACPP_SERVER_PATH" ]; then
         echo "❌ No system llama-server at $LLAMACPP_SERVER_PATH"
-        echo "   Install the llama-hdd package, or run: bash build-llamacpp.sh <backend>"
+        echo "   Install a llama.cpp package, or run: bash build-llamacpp.sh <backend>"
         exit 1
     fi
 else
@@ -634,8 +634,8 @@ else
     fi
 
     # ── Stale local-build guard ────────────────────────────────────────────
-    # builds/<type>/ binaries never refresh themselves: paru -S llama-hdd
-    # only rebuilds /usr/bin/llama-server, and a git pull in the source tree
+    # builds/<type>/ binaries never refresh themselves: upgrading the llama.cpp
+    # package only rebuilds /usr/bin/llama-server, and a git pull in the source tree
     # never reaches here either - without this guard a launch can silently
     # keep using a months-old binary. Package-newer-than-build is fatal (the
     # user just rebuilt expecting it to take effect); source drift only warns.
@@ -656,36 +656,39 @@ else
             _sl_build_epoch="$(stat -c %Y "$LLAMACPP_SERVER_PATH" 2>/dev/null || echo 0)"
         fi
 
-        # the package comparison only applies to builds from the llama-hdd
-        # fork; experimental builds from other trees are never shadowed by it
-        _sl_hdd_src=1
+        # the package comparison only applies to builds from the default
+        # llama.cpp checkout; experimental builds from other trees (e.g.
+        # llama.cpp-<tag>) are never shadowed by the package
+        _sl_main_src=1
         if [ -n "$_sl_src_dir" ]; then
             case "$(basename "$_sl_src_dir")" in
-                *llama-hdd*) ;;
-                *) _sl_hdd_src=0 ;;
+                llama.cpp) ;;
+                *) _sl_main_src=0 ;;
             esac
         fi
 
+        _sl_pkg_name=""
         _sl_pkg_ver=""
         _sl_pkg_epoch=0
-        if [ "$_sl_hdd_src" -eq 1 ] && command -v pacman >/dev/null 2>&1; then
-            _sl_pkg_ver="$(pacman -Q llama-hdd 2>/dev/null || true)"
+        if [ "$_sl_main_src" -eq 1 ] && [ -x /usr/bin/llama-server ] && command -v pacman >/dev/null 2>&1; then
+            _sl_pkg_name="$(pacman -Qqo /usr/bin/llama-server 2>/dev/null || true)"
+            [ -n "$_sl_pkg_name" ] && _sl_pkg_ver="$(pacman -Q "$_sl_pkg_name" 2>/dev/null || true)"
             if [ -n "$_sl_pkg_ver" ]; then
-                _sl_pkg_date="$(pacman -Qi llama-hdd 2>/dev/null | sed -n 's/^Install Date[^:]*: //p')"
+                _sl_pkg_date="$(pacman -Qi "$_sl_pkg_name" 2>/dev/null | sed -n 's/^Install Date[^:]*: //p')"
                 _sl_pkg_epoch="$(date -d "$_sl_pkg_date" +%s 2>/dev/null || echo 0)"
             fi
         fi
 
         if [ "$_sl_pkg_epoch" -gt 0 ] && [ "$_sl_build_epoch" -gt 0 ] && [ "$_sl_pkg_epoch" -gt "$_sl_build_epoch" ]; then
             echo "╔══════════════════════════════════════════════════════════════════╗"
-            echo "║  ⚠️  STALE LOCAL BUILD - shadowed by the installed llama-hdd       ║"
+            echo "║  ⚠️  STALE LOCAL BUILD - shadowed by the installed llama.cpp       ║"
             echo "╚══════════════════════════════════════════════════════════════════╝"
             echo "builds/$BUILD_TYPE/bin/llama-server is older than the installed package:"
             echo "  this build : $(date -d "@$_sl_build_epoch" '+%Y-%m-%d %H:%M' 2>/dev/null || echo unknown)"
             echo "  package    : $_sl_pkg_ver (installed $(date -d "@$_sl_pkg_epoch" '+%Y-%m-%d %H:%M' 2>/dev/null || echo unknown))"
             echo ""
 
-            # The package is the same fork, freshly built - it is a safe
+            # The package is the same project, freshly built - it is a safe
             # automatic fallback, but only if it has the requested backend.
             _sl_sys_ok=0
             if [ -x /usr/bin/llama-server ]; then
@@ -743,7 +746,7 @@ else
                 echo "Refusing to launch the stale build: no compatible package binary to fall back to."
                 if [ -x /usr/bin/llama-server ]; then
                     echo "  The installed package was built WITHOUT the ${BUILD_TYPE%%-*} backend;"
-                    echo "  reinstall it with LLAMA_HDD_BACKEND=${BUILD_TYPE%%-*}, or rebuild locally:"
+                    echo "  install a ${BUILD_TYPE%%-*} build of the package, or rebuild locally:"
                 fi
                 echo "  llama-build $BUILD_TYPE   # rebuild from source (repo checkout: bash build-llamacpp.sh $BUILD_TYPE)"
                 echo "  --force                   # bypass this guard (or LLAMA_LAUNCHER_ALLOW_STALE_BUILD=1)"
@@ -1625,7 +1628,7 @@ if [ "$HAS_MODEL_CONFIG" -eq 1 ]; then
     CACHE_TYPE_V="${CACHE_TYPE_V:-q8_0}"
     CHECKPOINT_MIN_STEP="${CHECKPOINT_MIN_STEP:-2048}"
     CHECKPOINT_MAX="${CHECKPOINT_MAX:-32}"
-    # 0 = write all checkpoints (vanilla llama.cpp compatible); >0 needs llama-hdd
+    # 0 = write all checkpoints (upstream behaviour); >0 needs --slot-save-max-checkpoints
     SLOT_SAVE_MAX_CHECKPOINTS="${SLOT_SAVE_MAX_CHECKPOINTS:-0}"
     NGL="${NGL:-99}"
     TEMP="${TEMP:-0.3}"
@@ -1936,7 +1939,7 @@ KV_UNIFIED_FLAG="--no-kv-unified"
 [ "$KV_UNIFIED" = "1" ] && KV_UNIFIED_FLAG="--kv-unified"
 
 # A tune can reference flags the resolved llama-server is too old to know
-# (e.g. --slot-save-max-checkpoints predates llama-hdd's geometric thinning).
+# (e.g. --slot-save-max-checkpoints, which upstream llama.cpp does not have).
 # Probe the binary's --help once and drop unsupported flags with a warning
 # instead of dying on "error: invalid argument".
 SERVER_HELP="$("$LLAMACPP_SERVER_PATH" --help 2>&1 || true)"
@@ -1944,18 +1947,17 @@ server_supports_flag() {
     [[ "$SERVER_HELP" == *"$1"* ]]
 }
 
-# Checkpoint sidecar thinning needs llama-hdd; 0 keeps vanilla compatibility.
+# Slot-save checkpoint thinning needs a server with --slot-save-max-checkpoints;
+# without it every checkpoint is saved, which is the upstream behaviour.
 SLOT_SAVE_MAX_CKPT_FLAG=""
 if [ "${SLOT_SAVE_MAX_CHECKPOINTS:-0}" -gt 0 ] 2>/dev/null; then
     if server_supports_flag "--slot-save-max-checkpoints"; then
         SLOT_SAVE_MAX_CKPT_FLAG="--slot-save-max-checkpoints $SLOT_SAVE_MAX_CHECKPOINTS"
     else
-        echo "⚠️  SLOT_SAVE_MAX_CHECKPOINTS=$SLOT_SAVE_MAX_CHECKPOINTS ignored: this llama-server"
-        echo "   has no --slot-save-max-checkpoints (older llama-hdd or vanilla llama.cpp)."
+        echo "ℹ️  SLOT_SAVE_MAX_CHECKPOINTS=$SLOT_SAVE_MAX_CHECKPOINTS ignored: this llama-server has no"
+        echo "   --slot-save-max-checkpoints, so slot saves keep every context checkpoint."
     fi
 fi
-# Same guard for the other cache/checkpoint flags (missing from vanilla
-# llama.cpp and pre-sidecar llama-hdd builds).
 # A tune can declare the backend it was tuned for (RECOMMENDED_BACKEND:
 # vulkan|hip|cuda|cpu). Warn when the resolved build lacks that backend's
 # ggml library so a tune expecting e.g. -dev Vulkan0 isn't silently run on
@@ -2086,11 +2088,11 @@ if [ "$NO_PROXY" -eq 0 ]; then
         EFFECTIVE_SLOT_SAVE_PATH="$SLOT_SAVE_PATH/$_model_basename"
         mkdir -p "$EFFECTIVE_SLOT_SAVE_PATH"
         echo "💾 Slot save namespace: $EFFECTIVE_SLOT_SAVE_PATH"
-        # llama-hdd: checkpoint sidecars (.bin.ckpt) carry draft-context state
-        # that only the drafter that wrote them can load (LSCKPT4 fingerprint).
-        # Remember the drafter per namespace and warn when it changes while
-        # sidecars exist - the server ignores those sidecars, so the first
-        # divergence per restored session re-prefills until it is saved again.
+        # Slot files carry draft-context state that only the drafter that
+        # wrote them can load. Remember the drafter per namespace and warn
+        # when it changes while slot files exist - the server drops the
+        # mismatched draft state on restore, so restored sessions start
+        # drafting cold until they are saved again.
         _drafter_id="none"
         if [[ "${EXTRA_ARGS:-}" =~ --spec-type[[:space:]]+([^[:space:]]+) ]]; then
             _drafter_id="${BASH_REMATCH[1]}"
@@ -2101,12 +2103,12 @@ if [ "$NO_PROXY" -eq 0 ]; then
         _drafter_marker="$EFFECTIVE_SLOT_SAVE_PATH/.drafter"
         if [ -f "$_drafter_marker" ]; then
             _prev_drafter="$(cat "$_drafter_marker" 2>/dev/null)"
-            if [ "$_prev_drafter" != "$_drafter_id" ] && compgen -G "$EFFECTIVE_SLOT_SAVE_PATH/*.bin.ckpt" >/dev/null 2>&1; then
-                _ckpt_count=$(ls "$EFFECTIVE_SLOT_SAVE_PATH"/*.bin.ckpt 2>/dev/null | wc -l)
+            if [ "$_prev_drafter" != "$_drafter_id" ] && compgen -G "$EFFECTIVE_SLOT_SAVE_PATH/*.bin" >/dev/null 2>&1; then
+                _bin_count=$(ls "$EFFECTIVE_SLOT_SAVE_PATH"/*.bin 2>/dev/null | wc -l)
                 echo "⚠️  Drafter changed for this slot namespace: $_prev_drafter -> $_drafter_id"
-                echo "   $_ckpt_count checkpoint sidecar(s) were written by the previous drafter and will be"
-                echo "   ignored by the server; affected sessions re-prefill on their first divergence."
-                echo "   Slot .bin files (the saved context itself) are unaffected."
+                echo "   $_bin_count slot file(s) hold draft state from the previous drafter; the server drops"
+                echo "   it on restore, so restored sessions draft cold until saved again."
+                echo "   The saved context itself is unaffected."
             fi
         fi
         printf '%s\n' "$_drafter_id" > "$_drafter_marker" 2>/dev/null || true
