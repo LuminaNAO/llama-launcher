@@ -29,6 +29,7 @@
 //       [--portal <name:port> …] [--config <path>] [--socket <path>]
 //       [--api-key <key>] [--poll-interval <sec>] [--promote-after <n>]
 //       [--connect-timeout <ms>] [--stall-timeout <sec>] [--max-body-mb <n>]
+//       [--no-telemetry]
 //   llama-waterfall.mjs tui    [--socket <path>]   — attach-only dashboard
 //   llama-waterfall.mjs stop   [--socket <path>]   — stop server + attached TUIs
 //   llama-waterfall.mjs status [--json] [--socket <path>]
@@ -63,6 +64,11 @@
 //     tokens and is impossible by design.
 //   - The connect timeout applies ONLY to TCP establishment — inference
 //     may legitimately take minutes before response bytes.
+//
+// Usage telemetry (docs/WATERFALL.md "Usage telemetry for tokentail"): one
+// tokentail event per client request, written fire-and-forget to a local
+// JSONL spool by the vendored utils/tokentail-emit.mjs. Never adds latency
+// or failure to serving. Off with --no-telemetry or WATERFALL_TELEMETRY=0.
 
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import { createServer as createNetServer, connect as netConnect } from "node:net";
@@ -71,6 +77,7 @@ import { spawn } from "node:child_process";
 import { dirname, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
 
 // ── Root dir (repo checkout vs packaged install) ──────────────────────────
 const SCRIPT_PATH = realpathSync(fileURLToPath(import.meta.url));
@@ -353,8 +360,156 @@ function markDown(t, i, reason) {
     }
 }
 
+// ── Usage telemetry (WATERFALL.md "Usage telemetry for tokentail") ────────
+// `telemetry` is a tokentail emitter ({ record(event) }) or null when off.
+// Everything here is best effort: a throwing emitter, an unparseable body
+// or a read-only spool never reaches the serving path.
+let telemetry = null;
+const TELEMETRY_STR_MAX = 256;      // tokentail rejects longer string columns
+const SSE_TAIL_BYTES = 64 * 1024;   // rolling window for the final usage chunk
+
+function setTelemetry(emitter) { telemetry = emitter || null; }
+
+// Item 5: default on; --no-telemetry or WATERFALL_TELEMETRY=0 turns it off.
+function telemetryEnabled(args = {}, env = process.env) {
+    if (args["no-telemetry"]) return false;
+    const v = String(env.WATERFALL_TELEMETRY ?? "").trim().toLowerCase();
+    return !["0", "false", "off", "no"].includes(v);
+}
+
+async function initTelemetry(args) {
+    if (!telemetryEnabled(args)) { logEvent("telemetry off"); return; }
+    try {
+        // Dynamic import: a missing vendored file disables telemetry, it
+        // never stops the proxy from serving.
+        const { createEmitter } = await import("./utils/tokentail-emit.mjs");
+        setTelemetry(createEmitter({ source: "waterfall" }));
+        logEvent("telemetry on (tokentail spool)");
+    } catch (err) {
+        logEvent(`telemetry unavailable (${err.code || err.message})`);
+    }
+}
+
+function headerStr(req, name) {
+    let v = req.headers[name];
+    if (Array.isArray(v)) v = v[0];
+    if (typeof v !== "string") return null;
+    v = v.trim();
+    return v ? v.slice(0, TELEMETRY_STR_MAX) : null;
+}
+
+// Item 3: the tier's configured label, else its position. Never derived from
+// host/address data — topology must not reach the spool — so a label that
+// itself spells the host, the port or an IP address falls back to tier-<n>.
+function telemetryProvider(ep, i) {
+    const fallback = `tier-${i + 1}`;
+    const label = String(ep.label || "").trim();
+    if (!label) return fallback;
+    const host = String(ep.host || "").toLowerCase();
+    if (host && label.toLowerCase().includes(host)) return fallback;
+    if (new RegExp(`(^|[^0-9])${Number(ep.port)}([^0-9]|$)`).test(label)) return fallback;
+    if (/(^|[^0-9])\d{1,3}(\.\d{1,3}){3}([^0-9]|$)/.test(label)) return fallback;          // IPv4
+    if (/(^|[^0-9a-z])[0-9a-f]{0,4}(:[0-9a-f]{0,4}){2,7}([^0-9a-z]|$)/i.test(label)) return fallback;  // IPv6
+    return label.slice(0, TELEMETRY_STR_MAX);
+}
+
+const isCount = (v) => Number.isInteger(v) && v >= 0;
+
+// Item 4: llama.cpp usage → tokentail usage. `input` excludes cache reads.
+// Returns null unless prompt/completion counts are present and sane.
+function mapUsage(obj) {
+    const u = obj?.usage;
+    if (!u || typeof u !== "object") return null;
+    const prompt = u.prompt_tokens, output = u.completion_tokens;
+    if (!isCount(prompt) || !isCount(output)) return null;
+    let cached = obj.timings?.cache_n;
+    if (!isCount(cached)) cached = u.prompt_tokens_details?.cached_tokens;
+    if (!isCount(cached) || cached > prompt) cached = 0;
+    return { input: prompt - cached, output, cacheRead: cached, cacheWrite: 0 };
+}
+
+function modelOf(obj) {
+    return typeof obj?.model === "string" && obj.model ? obj.model.slice(0, TELEMETRY_STR_MAX) : null;
+}
+
+// Non-streaming: the buffered body, parsed once. Never throws.
+function usageFromBody(buf) {
+    try {
+        const obj = JSON.parse(buf.toString("utf8"));
+        return { usage: mapUsage(obj), model: modelOf(obj) };
+    } catch {
+        return { usage: null, model: null };
+    }
+}
+
+// Streaming: keep only the last SSE_TAIL_BYTES of forwarded chunks (O(1)
+// per chunk), then scan that tail once at the end for the final usage /
+// timings llama-server sends before [DONE]. A partial first line in the
+// window simply fails to parse and is skipped.
+function createSseTail(limit = SSE_TAIL_BYTES) {
+    const parts = [];
+    let bytes = 0;
+    return {
+        push(chunk) {
+            parts.push(chunk);
+            bytes += chunk.length;
+            while (parts.length > 1 && bytes - parts[0].length >= limit) bytes -= parts.shift().length;
+        },
+        result() {
+            // Newest first: the last usage, the last timings, the last model.
+            let usage = null, timings = null, model = null;
+            try {
+                const lines = Buffer.concat(parts).toString("utf8").split("\n");
+                for (let k = lines.length - 1; k >= 0 && !(usage && timings && model); k--) {
+                    const line = lines[k].trim();
+                    if (!line.startsWith("data:")) continue;
+                    const data = line.slice(5).trim();
+                    if (!data || data === "[DONE]") continue;
+                    let obj;
+                    try { obj = JSON.parse(data); } catch { continue; }
+                    if (!obj || typeof obj !== "object") continue;
+                    if (!usage && obj.usage) { usage = obj.usage; timings ??= obj.timings ?? null; }
+                    if (!timings && obj.timings) timings = obj.timings;
+                    model ??= modelOf(obj);
+                }
+            } catch { /* best effort */ }
+            return { usage: usage ? mapUsage({ usage, timings }) : null, model };
+        },
+    };
+}
+
+// Items 2-3: one event per client request, called at every dispatch exit.
+// The WeakSet makes "exactly once" hold even if two exits ever overlap.
+const recordedRequests = new WeakSet();
+function recordRequest(t, clientReq, started, f) {
+    if (!telemetry || recordedRequests.has(clientReq)) return;
+    recordedRequests.add(clientReq);
+    try {
+        let requestId = clientReq.headers["x-request-id"];
+        if (Array.isArray(requestId)) requestId = requestId[0];
+        requestId = typeof requestId === "string" ? requestId.trim() : "";
+        if (!requestId || requestId.length > TELEMETRY_STR_MAX) requestId = randomUUID();
+        telemetry.record({
+            requestId,
+            endpoint: t.name,
+            port: t.listenPort,
+            provider: f.provider ?? null,
+            model: f.model ?? null,
+            agentId: headerStr(clientReq, "x-openclaw-agent-id"),
+            sessionId: headerStr(clientReq, "x-openclaw-session-key") ?? headerStr(clientReq, "x-openclaw-session-id"),
+            instance: headerStr(clientReq, "x-openclaw-instance"),
+            status: f.status ?? null,
+            durationMs: Math.max(0, Date.now() - started),
+            outcome: f.outcome,
+            usage: f.usage ?? null,
+        });
+    } catch { /* fail-silent: telemetry never disturbs serving */ }
+}
+
 // ── Proxy dispatch ────────────────────────────────────────────────────────
-function attemptUpstream(ep, clientReq, body) {
+// `handle.upReq` exposes the in-flight upstream request so dispatch can
+// cancel it if the client leaves before response headers arrive.
+function attemptUpstream(ep, clientReq, body, handle = {}) {
     return new Promise((resolve, reject) => {
         const headers = { ...clientReq.headers, host: epKey(ep) };
         delete headers["content-length"];
@@ -364,6 +519,7 @@ function attemptUpstream(ep, clientReq, body) {
             host: ep.host, port: ep.port,
             method: clientReq.method, path: clientReq.url, headers,
         });
+        handle.upReq = upReq;
 
         let settled = false;
         const settle = (fn, val) => { if (!settled) { settled = true; fn(val); } };
@@ -402,31 +558,62 @@ function attemptUpstream(ep, clientReq, body) {
     });
 }
 
+// Telemetry safety net: an unexpected throw is also a dispatch exit
+// (startProxy's catch answers it with a 500).
 async function dispatch(t, clientReq, clientRes, body) {
+    const started = Date.now();
+    try {
+        await dispatchRequest(t, clientReq, clientRes, body, started);
+    } catch (err) {
+        recordRequest(t, clientReq, started, { status: 500, outcome: "error" });
+        throw err;
+    }
+}
+
+async function dispatchRequest(t, clientReq, clientRes, body, started) {
     const order = candidateIndices(t);
     if (!order.length) {
         clientRes.writeHead(503, { "content-type": "application/json" });
         clientRes.end(JSON.stringify({ error: { message: `waterfall[${t.name}]: no endpoints available` } }));
+        recordRequest(t, clientReq, started, { status: 503, outcome: "error" });
         return;
     }
 
     let lastErr = "unreachable";
     for (const i of order) {
         const ep = t.endpoints[i];
-        if (clientRes.destroyed) return;
+        if (clientRes.destroyed) {
+            // Client left while we were cascading between tiers.
+            recordRequest(t, clientReq, started, { outcome: "aborted" });
+            return;
+        }
         ep.inflight++;
         broadcast();
         let up;
+        // Client leaving while the tier is still queueing/prefilling (no
+        // response headers yet): cancel the upstream, don't retry, and don't
+        // blame the tier for it.
+        const handle = {};
+        const onGoneEarly = () => handle.upReq?.destroy(new Error("client gone"));
+        clientRes.once("close", onGoneEarly);
         try {
-            up = await attemptUpstream(ep, clientReq, body);
+            up = await attemptUpstream(ep, clientReq, body, handle);
         } catch (err) {
+            clientRes.removeListener("close", onGoneEarly);
             ep.inflight--;
+            if (clientRes.destroyed) {
+                ep.requests++;
+                broadcast();
+                recordRequest(t, clientReq, started, { provider: telemetryProvider(ep, i), outcome: "aborted" });
+                return;
+            }
             ep.failures++;
             lastErr = err.code || err.message;
             markDown(t, i, lastErr);
             continue;
         }
 
+        clientRes.removeListener("close", onGoneEarly);
         const { upReq, upRes } = up;
         // 502/503 before we have committed anything to the client means the
         // tier is not serving (llama-server says 503 while loading a model,
@@ -448,11 +635,13 @@ async function dispatch(t, clientReq, clientRes, body) {
         // during prefill/queueing cascades), non-streaming responses are
         // buffered in full and replay if the upstream dies mid-body.
         const isStream = String(upRes.headers["content-type"] || "").includes("text/event-stream");
+        const provider = telemetryProvider(ep, i);
         const outcome = await new Promise((resolve) => {
             let committed = false;
             let done = false;
             const bufs = [];
             let bufBytes = 0;
+            const tail = isStream && telemetry ? createSseTail() : null;
 
             const commit = () => {
                 if (committed) return;
@@ -462,21 +651,35 @@ async function dispatch(t, clientReq, clientRes, body) {
                 for (const b of bufs) clientRes.write(b);
                 bufs.length = 0;
             };
-            const finish = (ok, why) => {
+            // outcome: "complete" (upstream end), "error" (failure after
+            // the commit point) or "aborted" (client gone first). Only
+            // "error" counts against the tier. `full` is the buffered
+            // non-streaming body, when we still have it.
+            const finish = (outcome, why, full = null) => {
                 if (done) return;
                 done = true;
                 ep.inflight--;
-                if (ok) ep.requests++;
+                if (outcome !== "error") ep.requests++;
                 else {
                     ep.failures++;
                     if (why) markDown(t, i, why);
                 }
                 broadcast();
                 resolve({ done: true });
+                if (telemetry) {
+                    let u = { usage: null, model: null };
+                    if (full) u = usageFromBody(full);
+                    else if (tail) u = tail.result();
+                    recordRequest(t, clientReq, started, {
+                        provider, model: u.model, usage: u.usage,
+                        status: upRes.statusCode, outcome,
+                    });
+                }
             };
             const retry = (why) => {
                 if (done) return;
                 done = true;
+                clientRes.removeListener("close", onClientGone);
                 ep.inflight--;
                 ep.failures++;
                 markDown(t, i, why);
@@ -485,6 +688,7 @@ async function dispatch(t, clientReq, clientRes, body) {
             };
 
             upRes.on("data", (chunk) => {
+                if (tail) tail.push(chunk);
                 if (committed) {
                     if (!clientRes.write(chunk)) { upRes.pause(); clientRes.once("drain", () => upRes.resume()); }
                     return;
@@ -500,14 +704,22 @@ async function dispatch(t, clientReq, clientRes, body) {
                 if (bufBytes > cfg.maxBodyBytes) commit();
             });
             upRes.on("end", () => {
+                // Fully buffered non-streaming body: keep it for one usage
+                // parse after the response has gone out.
+                let full = null;
+                if (!committed && telemetry) {
+                    full = Buffer.concat(bufs);
+                    bufs.length = 0;
+                    bufs.push(full);
+                }
                 commit();
                 clientRes.end();
-                finish(true);
+                finish("complete", null, full);
             });
             upRes.on("error", (err) => {
                 const why = err.code || err.message;
                 if (!committed) retry(`pre-commit: ${why}`);
-                else { finish(false, `mid-stream: ${why}`); clientRes.destroy(); }
+                else { finish("error", `mid-stream: ${why}`); clientRes.destroy(); }
             });
             // Premature upstream close doesn't always surface as "error" —
             // without this the client would hang on a half-finished
@@ -515,12 +727,19 @@ async function dispatch(t, clientReq, clientRes, body) {
             upRes.on("close", () => {
                 if (upRes.complete) return;
                 if (!committed) retry("pre-commit: connection closed");
-                else { finish(false, "mid-stream: connection closed"); clientRes.destroy(); }
+                else { finish("error", "mid-stream: connection closed"); clientRes.destroy(); }
             });
-            clientReq.on("close", () => {
-                // Client went away — not the tier's fault; no point retrying.
-                if (!upRes.complete && !done) { upReq.destroy(); finish(true); }
-            });
+            // Client went away — not the tier's fault; no point retrying.
+            // Watch the response, not clientReq: since Node 16 the request
+            // emits "close" as soon as its body is consumed, i.e. before
+            // dispatch even reaches this point.
+            const onClientGone = () => {
+                if (done || clientRes.writableFinished) return;
+                finish("aborted");
+                upReq.destroy();
+            };
+            if (clientRes.destroyed) onClientGone();
+            else clientRes.once("close", onClientGone);
         });
         if (outcome.retry) { lastErr = outcome.retry; continue; }
         return;
@@ -529,13 +748,13 @@ async function dispatch(t, clientReq, clientRes, body) {
     if (!clientRes.headersSent && !clientRes.destroyed) {
         clientRes.writeHead(503, { "content-type": "application/json" });
         clientRes.end(JSON.stringify({ error: { message: `waterfall[${t.name}]: all tiers failed (last: ${lastErr})` } }));
+        recordRequest(t, clientReq, started, { status: 503, outcome: "error" });
+    } else {
+        recordRequest(t, clientReq, started, { outcome: "aborted" });
     }
 }
 
-// fatal: a failed bind at serve() startup kills the process (the ports are
-// the whole point); portals added/re-ported at runtime just log the error
-// so a busy port cannot take down the running portals.
-function startProxy(t, fatal = true) {
+function createProxyServer(t) {
     const server = createHttpServer((req, res) => {
         const chunks = [];
         let size = 0;
@@ -567,6 +786,14 @@ function startProxy(t, fatal = true) {
         req.on("error", () => {});
     });
     server.keepAliveTimeout = 75_000;
+    return server;
+}
+
+// fatal: a failed bind at serve() startup kills the process (the ports are
+// the whole point); portals added/re-ported at runtime just log the error
+// so a busy port cannot take down the running portals.
+function startProxy(t, fatal = true) {
+    const server = createProxyServer(t);
     server.on("error", (err) => {
         if (fatal) {
             console.error(`waterfall: cannot listen on :${t.listenPort} for [${t.name}] — ${err.code || err.message}`);
@@ -717,8 +944,12 @@ function shutdownServer(why) {
     for (const conn of subscribers) { try { conn.write(msg); } catch { } }
     clearInterval(pollTimer);
     try { unlinkSync(cfg.socketPath); } catch { }
+    // Flush buffered telemetry (bounded; never holds shutdown hostage).
+    let flushed = Promise.resolve();
+    try { if (telemetry) flushed = Promise.resolve(telemetry.close?.()).catch(() => {}); } catch { }
+    const cap = new Promise(r => setTimeout(r, 1000));
     // Give the shutdown event / command reply a tick to flush.
-    setTimeout(() => process.exit(0), 100);
+    setTimeout(() => Promise.race([flushed, cap]).then(() => process.exit(0)), 100);
 }
 
 async function handleCommand(msg, conn) {
@@ -961,6 +1192,7 @@ async function serve(args) {
     }
 
     await startControlSocket();
+    await initTelemetry(args);
     for (const t of portals) {
         if (t.listenPort === null) { console.error(`portal [${t.name}] has no port — not listening`); continue; }
         startProxy(t);
@@ -1444,6 +1676,7 @@ async function autoTui(args) {
             if (args[f] === undefined) continue;
             for (const v of [].concat(args[f])) serveArgs.push(`--${f}`, String(v));  // --portal repeats
         }
+        if (args["no-telemetry"]) serveArgs.push("--no-telemetry");
         const child = spawn(process.execPath, serveArgs, { detached: true, stdio: ["ignore", logFd, logFd] });
         child.unref();
         owns = true;
@@ -1456,7 +1689,7 @@ async function autoTui(args) {
 }
 
 // ── CLI entry ─────────────────────────────────────────────────────────────
-const BOOL_FLAGS = new Set(["json", "hard"]);
+const BOOL_FLAGS = new Set(["json", "hard", "no-telemetry"]);
 function parseArgs(argv) {
     const args = { _: [] };
     for (let i = 0; i < argv.length; i++) {
@@ -1480,6 +1713,7 @@ function usage(code) {
     console.error("                             [--config <path>] [--socket <path>] [--api-key <key>]");
     console.error("                             [--poll-interval <sec>] [--promote-after <n>]");
     console.error("                             [--connect-timeout <ms>] [--stall-timeout <sec>] [--max-body-mb <n>]");
+    console.error("                             [--no-telemetry]  (or WATERFALL_TELEMETRY=0: no tokentail usage spool)");
     console.error(`                             (defaults: [agent] :${DEFAULT_PORTS.agent}, [subagent] :${DEFAULT_PORTS.subagent}; conf sections define further portals)`);
     console.error("       llama-waterfall tui  [--socket <path>]  attach-only dashboard (q detaches)");
     console.error("       llama-waterfall stop [--socket <path>]  stop the server and any attached TUIs (saves config)");
@@ -1504,16 +1738,30 @@ function usage(code) {
 }
 
 const CTL_SUBS = new Set(["status", "pin", "disable", "enable", "add", "remove", "move", "edit", "write", "reload", "test"]);
-const argv = process.argv.slice(2);
-if (argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") usage(0);
-else if (argv[0] === undefined || argv[0].startsWith("--")) autoTui(parseArgs(argv));
-else {
-    const [sub, ...rest] = argv;
-    const args = parseArgs(rest);
-    if (sub === "serve") serve(args);
-    else if (sub === "tui") tui(args, { owns: false });
-    else if (sub === "stop") stopCmd(args);
-    else if (sub === "portal") portalCmd(args);
-    else if (CTL_SUBS.has(sub)) ctlCmd(sub, args);
-    else usage(1);
+
+function main(argv) {
+    if (argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") usage(0);
+    else if (argv[0] === undefined || argv[0].startsWith("--")) autoTui(parseArgs(argv));
+    else {
+        const [sub, ...rest] = argv;
+        const args = parseArgs(rest);
+        if (sub === "serve") serve(args);
+        else if (sub === "tui") tui(args, { owns: false });
+        else if (sub === "stop") stopCmd(args);
+        else if (sub === "portal") portalCmd(args);
+        else if (CTL_SUBS.has(sub)) ctlCmd(sub, args);
+        else usage(1);
+    }
 }
+
+// Run the CLI only when executed (directly or through a symlink), so the
+// test suite can import the dispatch path without starting anything.
+const IS_MAIN = (() => {
+    try { return realpathSync(process.argv[1]) === SCRIPT_PATH; } catch { return false; }
+})();
+if (IS_MAIN) main(process.argv.slice(2));
+
+export {
+    dispatch, createProxyServer, newEndpoint, cfg, parseArgs, initTelemetry,
+    setTelemetry, telemetryEnabled, telemetryProvider, mapUsage, usageFromBody, createSseTail,
+};
