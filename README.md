@@ -110,6 +110,10 @@ Requests without headers fall back to body identity keys (`session_id`, `convers
 
 Slots are persisted **only on session switch and graceful shutdown** — never per response. An unclean death loses the turns since the last switch; the transcript lives with the client and the cache re-fills on the next prefill.
 
+### `llama-waterfall [serve|tui|status|portal|…]`
+
+Priority failover proxy between nodes, one named portal per listen port; see [`docs/WATERFALL.md`](docs/WATERFALL.md). Each model call (POST to a completion, chat or embedding path, on any portal) is logged as a tokentail usage event in `$XDG_DATA_HOME/tokentail/spool/waterfall.jsonl`; health probes and `GET /v1/models` are not. Turn this off with `--no-telemetry` or `WATERFALL_TELEMETRY=0`. To view it, run tokentail's stand-alone waterfall dashboard on the same machine: `tokentail serve --waterfall`.
+
 ### `download-model.sh <hf-url-or-repo>`
 
 Interactive GGUF downloader from HuggingFace with quant selection. Reads `HF_TOKEN` or `~/.cache/huggingface/token`. Use `--filename <gguf-name>` to preselect a specific GGUF while still showing the download summary and confirmation.
