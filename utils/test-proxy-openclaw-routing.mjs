@@ -226,6 +226,33 @@ try {
   const bypassInfo = cacheInfoFromBody(JSON.stringify(subagentSniffTurn()), {});
   assert.equal(bypassInfo.slotAccess, "bypass", "body-sniffed subagent should bypass");
   assert.equal(bypassInfo.agentKind, "subagent");
+  // Server-side policy: heartbeat and cron turns are persisted even when an
+  // older client marks them no-hdd; memory flushes stay read-only; cron runs
+  // of one job share a slot file.
+  const policyHeaders = (sessionId, trigger, extra = {}) => ({
+    "x-openclaw-session-id": sessionId,
+    "x-openclaw-agent-kind": "main",
+    "x-openclaw-cache-policy": "no-hdd",
+    "x-openclaw-trigger": trigger,
+    ...extra,
+  });
+  const hbInfo = cacheInfoFromBody(JSON.stringify(turn("hb")), policyHeaders("agent:main:main:s1", "heartbeat"));
+  assert.equal(hbInfo.slotAccess, "persistent", "heartbeat on a main session must be cached");
+  const cronA = cacheInfoFromBody(JSON.stringify(turn("c")), policyHeaders("agent:main:cron:job-1:run-a", "cron"));
+  const cronB = cacheInfoFromBody(JSON.stringify(turn("c")), policyHeaders("agent:main:cron:job-1:run:run-b", "cron"));
+  const cronOther = cacheInfoFromBody(JSON.stringify(turn("c")), policyHeaders("agent:main:cron:job-2:run-a", "cron"));
+  assert.equal(cronA.slotAccess, "persistent", "cron runs must be cached");
+  assert.equal(cronA.sessionId, "agent-main-cron-job-1");
+  assert.equal(cronB.sessionId, cronA.sessionId, "runs of one cron job share a slot file");
+  assert.notEqual(cronOther.sessionId, cronA.sessionId, "different cron jobs keep separate slot files");
+  const memInfo = cacheInfoFromBody(JSON.stringify(turn("m")), policyHeaders("agent:main:main:s1", "memory"));
+  assert.equal(memInfo.slotAccess, "read-only", "memory flushes stay read-only");
+  const subHb = cacheInfoFromBody(JSON.stringify(turn("s")), {
+    ...policyHeaders("agent:main:subagent:x", "heartbeat"),
+    "x-openclaw-agent-kind": "subagent",
+  });
+  assert.equal(subHb.slotAccess, "bypass", "subagents never touch the cache, whatever the trigger");
+
   const persistentInfo = cacheInfoFromBody(JSON.stringify(turn("hello")), mainHeaders);
   assert.equal(persistentInfo.slotAccess, "persistent");
   assert.equal(persistentInfo.sessionId, MAIN_SLOT);

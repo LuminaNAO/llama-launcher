@@ -604,6 +604,25 @@ export function cacheComparisonPrefix(obj, fallbackJsonStr) {
   return canonical ? canonical.slice(0, BRANCH_PREFIX_BYTES) : fallbackJsonStr.slice(0, BRANCH_PREFIX_BYTES);
 }
 
+// Server-side cache policy, applied whatever the client sends: FreeClaw
+// builds in the field disagree on it (older ones mark every non-user
+// trigger no-hdd). Only subagents skip the cache. Heartbeat and cron turns
+// are persisted; a heartbeat turn left on a session file costs the next
+// user turn a rollback to the checkpoint at the heartbeat's user message,
+// not a re-prefill. Memory flushes stay read-only: their prompt shares
+// only the first ~1k tokens with the session, so saving one would replace
+// the session's warm state with a cold one.
+export const SERVER_CACHED_TRIGGERS = new Set(["heartbeat", "cron"]);
+
+// Isolated cron runs carry a per-run suffix ("agent:main:cron:<job>:<run>"
+// or "...:cron:<job>:run:<run>"); every run of a job shares a near-identical
+// prompt, so they share one slot file keyed on the job.
+export function cronJobSessionKey(value) {
+  if (typeof value !== "string") return null;
+  const m = value.trim().match(/^(agent:[^:]+:cron:[^:]+)(?::|$)/);
+  return m ? m[1] : null;
+}
+
 export function cacheInfoFromBody(jsonStr, headers = {}) {
   try {
     const obj = JSON.parse(jsonStr);
@@ -623,8 +642,11 @@ export function cacheInfoFromBody(jsonStr, headers = {}) {
     // Header-identified OpenClaw sessions get one slot file named after the
     // session id, restored by exact match only: the id is already unique per
     // conversation, so prefix-similarity parent matching can only misroute.
+    const cronJobKey = stableIdentity?.source === "openclaw-session-id"
+      ? cronJobSessionKey(stableIdentity.value) ?? cronJobSessionKey(stableIdentity.sessionKey)
+      : null;
     const openClawSlotId = stableIdentity?.source === "openclaw-session-id"
-      ? safeSlotIdFromOpenClawSessionId(stableIdentity.value)
+      ? safeSlotIdFromOpenClawSessionId(cronJobKey ?? stableIdentity.value)
       : null;
     const baseId = openClawSlotId ?? (stableIdentity
       ? stableHashId(stableIdentity.source, stableIdentity.value)
@@ -637,9 +659,12 @@ export function cacheInfoFromBody(jsonStr, headers = {}) {
     const bodyLooksSubagent = isOpenClawSubagentBody(obj);
     const internalRuntimeRequest = isOpenClawInternalRuntimeRequest(obj);
     const agentKind = bodyLooksSubagent ? "subagent" : stableIdentity?.agentKind ?? null;
-    const cachePolicy = stableIdentity?.cachePolicy === "no-hdd" ||
-      agentKind === "subagent" ||
-      internalRuntimeRequest
+    const trigger = (stableIdentity?.trigger ?? "").trim().toLowerCase();
+    const serverCachedTrigger = stableIdentity?.source === "openclaw-session-id" &&
+      SERVER_CACHED_TRIGGERS.has(trigger);
+    const cachePolicy = agentKind === "subagent" ||
+      internalRuntimeRequest ||
+      (stableIdentity?.cachePolicy === "no-hdd" && !serverCachedTrigger)
       ? "no-hdd"
       : "hdd";
     // How the request may touch the slot cache:
