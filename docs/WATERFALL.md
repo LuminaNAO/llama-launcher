@@ -282,8 +282,8 @@ never adds latency or failure to serving.
    the commit point, client-gone-first, the all-tiers-failed 503 and the no-endpoint 503. Never at a pre-commit
    tier retry (that request is not finished). The outcome is explicit: upstream end → `complete`, failure after
    commit → `error`, both 503s → `error`, client gone first → `aborted`.
-3. **Fields** (tokentail schema v2): `requestId` (`x-request-id` header or a fresh UUID), `endpoint` = table name
-   (`agent` | `subagent`), `port` = listen port, `provider` = the tier's configured label, else `tier-<n>` (never
+3. **Fields** (tokentail schema v2): `requestId` (`x-request-id` header or a fresh UUID), `endpoint` = portal name
+   (`agent`, `subagent`, or any configured portal), `port` = listen port, `provider` = the tier's configured label, else `tier-<n>` (never
    host or address: topology must not reach the spool), `model` from the response, `agentId` from
    `X-OpenClaw-Agent-Id`, `sessionId` from `X-OpenClaw-Session-Key` (falling back to `X-OpenClaw-Session-Id`),
    `instance` from `X-OpenClaw-Instance`, `status`, `durationMs`, `outcome`, `usage`.
@@ -304,3 +304,5 @@ never adds latency or failure to serving.
 7. **Dashboard.** The record is read by tokentail's stand-alone waterfall dashboard (tokentail ARCH §4.3a,
    `tokentail serve --waterfall` on the same box). README gains one line pointing to it. Nothing cloudburst or
    enterprise is involved.
+8. **Inference only.** Only model calls are recorded (POST to the completion/chat/embedding paths). Waterfall's own
+   health probes and GET requests such as `/v1/models` are never recorded.
