@@ -266,3 +266,38 @@ shows unsaved state; `u` reverts the runtime portals to what's on disk.
 - **Mid-generation continuation** — resuming a died-mid-stream request on
   another tier would need model-level prompt surgery (append generated
   tokens, continue); out of scope.
+
+## Usage telemetry for tokentail (operator, Manu 2026-10-18)
+
+Goal: every request through waterfall shows up in tokentail with tokens, model, agent and session, so local
+inference has the same per-session/per-agent view as cloudburst. Waterfall stays a stateless router; telemetry
+never adds latency or failure to serving.
+
+1. **Emitter.** Waterfall records one usage event per client request through tokentail's producer SDK
+   (`lib/emit.mjs`: `createEmitter({source: "waterfall"})`, `.record()` is fire-and-forget, non-blocking,
+   fail-silent, JSONL spool under `$XDG_DATA_HOME/tokentail/spool/`). The SDK is vendored as a single file
+   `utils/tokentail-emit.mjs` (copied verbatim, with its source commit noted in a header comment), so
+   llama-launcher has no new dependency. If tokentail is not installed nothing breaks: the spool is just a file.
+2. **Where.** Exactly once per client request, at every exit of `dispatch`: the normal finish, a failure after
+   the commit point, client-gone-first, the all-tiers-failed 503 and the no-endpoint 503. Never at a pre-commit
+   tier retry (that request is not finished). The outcome is explicit: upstream end → `complete`, failure after
+   commit → `error`, both 503s → `error`, client gone first → `aborted`.
+3. **Fields** (tokentail schema v2): `requestId` (`x-request-id` header or a fresh UUID), `endpoint` = table name
+   (`agent` | `subagent`), `port` = listen port, `provider` = the tier's configured label, else `tier-<n>` (never
+   host or address: topology must not reach the spool), `model` from the response, `agentId` from
+   `X-OpenClaw-Agent-Id`, `sessionId` from `X-OpenClaw-Session-Key` (falling back to `X-OpenClaw-Session-Id`),
+   `instance` from `X-OpenClaw-Instance`, `status`, `durationMs`, `outcome`, `usage`.
+4. **Usage.** llama.cpp responses:
+   - non-streaming: the body is already buffered for failover; parse it once and read `usage.prompt_tokens` →
+     `input`, `usage.completion_tokens` → `output`, `cacheRead`/`cacheWrite` = 0 (or llama.cpp's
+     `timings.cache_n` → `cacheRead` with `input = prompt_tokens - cache_n` when present). Parse failure →
+     `usage: null`, never throw.
+   - streaming: scan the forwarded chunks with a small rolling tail window for the final `usage` object (and
+     `timings`) that llama-server sends before `[DONE]`; same mapping. If the client did not ask for usage and
+     none arrives, `usage: null` (the request still counts).
+5. **Opt-out.** `--no-telemetry` flag and `WATERFALL_TELEMETRY=0` turn the emitter off. Default on.
+6. **Tests** (node:test, no network, fake upstream): one record per request on each of the five exits and none on
+   a retried tier; outcome per exit; usage from non-streaming body, from a streamed final chunk, and null when
+   absent; headers mapped to agentId/sessionId/instance; provider uses label or `tier-<n>` and never contains a
+   host or port; emitter throwing or a read-only spool dir never affects the response; `--no-telemetry` writes
+   nothing.
