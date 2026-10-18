@@ -301,3 +301,6 @@ never adds latency or failure to serving.
    absent; headers mapped to agentId/sessionId/instance; provider uses label or `tier-<n>` and never contains a
    host or port; emitter throwing or a read-only spool dir never affects the response; `--no-telemetry` writes
    nothing.
+7. **Dashboard.** The record is read by tokentail's stand-alone waterfall dashboard (tokentail ARCH §4.3a,
+   `tokentail serve --waterfall` on the same box). README gains one line pointing to it. Nothing cloudburst or
+   enterprise is involved.
