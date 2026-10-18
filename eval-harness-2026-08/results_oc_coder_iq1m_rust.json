@@ -1,0 +1,50 @@
+[
+ {
+  "id": "R1",
+  "cat": "rust",
+  "label": "coder_iq1m",
+  "content": "Verified compiles with rustc (edition 2021): `dedup()` handles consecutive runs on original values, then in-place trimming uses byte offsets for ASCII whitespace only (safe slicing since ASCII whitespace is single-byte and never splits a UTF-8 char). Test run: `[\"  a  \", \"  a  \", \"a\", \" b\\t\", \"\\r\\nx \", \" \", \"\\t\", \"a\", \"a\"]` \u2192 `[\"a\", \"a\", \"b\", \"x\", \"\", \"\", \"a\"]`, and empty vec is a no-op.\n\n```rust\npub fn squash(v: &mut Vec<String>) {\n    v.dedup();\n    for s in v.iter_mut() {\n        let bytes = s.as_bytes();\n        let ws = |b: u8| b == b' ' || (b >= 9 && b <= 13);\n        let n = bytes.len();\n        let mut lo = 0;\n        while lo < n && ws(bytes[lo]) { lo += 1; }\n        let mut hi = n;\n        while hi > lo && ws(bytes[hi - 1]) { hi -= 1; }\n        *s = s[lo..hi].to_string();\n    }\n}\n```",
+  "error": null,
+  "wall": 703.9973385334015,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-Flash-Next-GSQ-RCO-Coder/Qwen3.8-Flash-Next-GSQ-RCO-IQ1_M-00001-of-00002.gguf"
+ },
+ {
+  "id": "R2",
+  "cat": "rust",
+  "label": "coder_iq1m",
+  "content": "",
+  "error": "empty content; rc=0; stderr: ; raw: \u001b[33m[agent/embedded]\u001b[39m \u001b[36m[tool-result-context-guard] within budget: estimate=677 trigger=393216 text=677 thinking=0 tool=0 details=0 appliedPersisted=0 truncated=0 messages=1\u001b[39m\n{\n  \"payloads",
+  "wall": 364.6709315776825,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-Flash-Next-GSQ-RCO-Coder/Qwen3.8-Flash-Next-GSQ-RCO-IQ1_M-00001-of-00002.gguf"
+ },
+ {
+  "id": "R3",
+  "cat": "rust",
+  "label": "coder_iq1m",
+  "content": "",
+  "error": "empty content; rc=0; stderr: ; raw: \u001b[33m[agent/embedded]\u001b[39m \u001b[36m[tool-result-context-guard] within budget: estimate=680 trigger=393216 text=680 thinking=0 tool=0 details=0 appliedPersisted=0 truncated=0 messages=1\u001b[39m\n{\n  \"payloads",
+  "wall": 364.3453848361969,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-Flash-Next-GSQ-RCO-Coder/Qwen3.8-Flash-Next-GSQ-RCO-IQ1_M-00001-of-00002.gguf"
+ },
+ {
+  "id": "R4",
+  "cat": "rust",
+  "label": "coder_iq1m",
+  "content": "",
+  "error": "empty content; rc=0; stderr: ; raw: \u001b[33m[agent/embedded]\u001b[39m \u001b[36m[tool-result-context-guard] within budget: estimate=894 trigger=393216 text=894 thinking=0 tool=0 details=0 appliedPersisted=0 truncated=0 messages=1\u001b[39m\n{\n  \"payloads",
+  "wall": 367.51747465133667,
+  "rc": 0,
+  "requested_model": "/usr/local/share/llama.cpp/models/Qwen3.8-Flash-Next-GSQ-RCO-Coder/Qwen3.8-Flash-Next-GSQ-RCO-IQ1_M-00001-of-00002.gguf"
+ },
+ {
+  "id": "R5",
+  "cat": "rust",
+  "label": "coder_iq1m",
+  "content": "",
+  "error": "hard timeout",
+  "wall": 1860.1209902763367
+ }
+]

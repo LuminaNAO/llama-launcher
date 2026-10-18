@@ -1,0 +1,64 @@
+kind: llama-launcher-tune
+version: 1
+name: "32gb-cuda-5090-coder-iq1m-262k-v1"
+model: "Qwen3.8-Flash-Next"
+metadata:
+  shareable: true
+  notes: |-
+    Tune: 32gb-cuda-5090-coder-iq1m-262k-v1  (EXPERIMENTAL, gauntlet candidate)
+    ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-Coder-GGUF, revision 5348543e:
+      Qwen3.8-Flash-Next-GSQ-RCO-IQ1_M-00001-of-00002.gguf (29.6 GB, transformer,
+        256 of 512 experts per layer, 10 active, 3.5 bpw retained weights)
+      Qwen3.8-Flash-Next-GSQ-RCO-IQ1_M-00002-of-00002.gguf (28.8 GB, per-layer
+        n-gram table, IQ4_NL, lazily read - served from disk/page cache)
+      mmproj-Qwen3.8-Flash-Next-BF16.gguf (0.9 GB)
+    Architecture qwen4exp: hybrid SSM + sparse/compressed attention, 48 layers,
+    full attention every 4th layer, hyper-connections. No MTP head, so this
+    tune runs WITHOUT a speculative drafter.
+
+    Requires llama-hdd with the no-drafter hybrid seq_rm fix (branch
+    fix/hybrid-nodraft-seq-rm, 40b264c09); without it prompt rewinds leak KV.
+
+    Target: RTX 5090, 32 GiB VRAM. Shard 1 does not fit whole next to KV and
+    compute buffers, so the experts of the first N layers stay in host RAM
+    (--n-cpu-moe, see EXTRA_ARGS).
+
+    MEASURED 2026-09-30 (llama-hdd 40b264c09, vision loaded, test ports):
+      --n-cpu-moe sweep: 16 -> 28.1 GiB, 38 t/s; 10 -> 30.7 GiB, 50 t/s;
+      8 -> 31.6 GiB (31.7 with an image), 54-57 t/s; 6 -> OOM at load. 8 kept.
+      speed_probe.py: shallow decode 46.0 prose / 47.8 code / 47.2 reason,
+      prefill 1021 t/s @32k, 1124 t/s @100k, decode 38.7 t/s @100k
+      (DFlash2 27B: 146 / 115 / 129, 3103, 2023, 99.5).
+      Rust gauntlet (OpenClaw eval profile, 16k output cap, isolated): 1/5
+      (27B GSQ-RCO: 4/5). R2-R4 think past the cap with no answer at xhigh and
+      at medium; the reasoning shows broken Rust knowledge (claims std has no
+      HashMap, invents traits, Zig-style struct syntax). Two small Python tasks
+      with hidden tests pass cleanly, so the build/quant are sound.
+    VERDICT: fits and runs on the 5090, ~1/3 the 27B's speed, far weaker at
+    Rust. Not a production candidate.
+settings:
+  RECOMMENDED_BACKEND: "cuda"
+  API_KEY: "ollama-local"
+  CACHE_RAM: "0"
+  CACHE_TYPE_K: "q8_0"
+  CACHE_TYPE_V: "q8_0"
+  CHECKPOINT_MAX: "16"
+  CHECKPOINT_MIN_STEP: "16384"
+  SLOT_SAVE_MAX_CHECKPOINTS: "16"
+  CONTEXT: "262144"
+  DIO: "0"
+  HDD_CACHE: "1"
+  EXTRA_ARGS: "--n-cpu-moe 8 -b 2048 -ub 512 --min-p 0 --image-min-tokens 1024 --reasoning-format deepseek --chat-template-kwargs {\"reasoning_effort\":\"xhigh\"}"
+  FLASH_ATTN: "1"
+  HOST: "0.0.0.0"
+  KV_UNIFIED: "1"
+  MAX_TOTAL_SLOTS_GB: "300"
+  MIN_FREE_GB: "80"
+  NGL: "999"
+  NO_MMAP: "0"
+  PARALLEL: "1"
+  PORT: "40801"
+  TEMP: "1.0"
+  TIMEOUT: "3600"
+  TOP_K: "20"
+  TOP_P: "0.95"

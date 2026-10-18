@@ -1,0 +1,53 @@
+{
+ "label": "coder_iq1m_ncmoe8_20260930",
+ "shallow_prose": {
+  "pp_tps": 146.4,
+  "pp_n": 69,
+  "tg_tps": 46.0,
+  "tg_n": 900,
+  "accept": null,
+  "mean_len": null,
+  "finish": "length",
+  "wall": 20.0
+ },
+ "shallow_code": {
+  "pp_tps": 117.1,
+  "pp_n": 29,
+  "tg_tps": 47.8,
+  "tg_n": 1200,
+  "accept": null,
+  "mean_len": null,
+  "finish": "length",
+  "wall": 25.4
+ },
+ "shallow_reason": {
+  "pp_tps": 163.8,
+  "pp_n": 51,
+  "tg_tps": 47.2,
+  "tg_n": 1200,
+  "accept": null,
+  "mean_len": null,
+  "finish": "length",
+  "wall": 25.7
+ },
+ "prefill_32k": {
+  "pp_tps": 1021.3,
+  "pp_n": 31110,
+  "tg_tps": 45.7,
+  "tg_n": 32,
+  "accept": null,
+  "mean_len": null,
+  "finish": "length",
+  "wall": 31.2
+ },
+ "deep_100k": {
+  "pp_tps": 1124.3,
+  "pp_n": 100734,
+  "tg_tps": 38.7,
+  "tg_n": 400,
+  "accept": null,
+  "mean_len": null,
+  "finish": "length",
+  "wall": 100.0
+ }
+}
