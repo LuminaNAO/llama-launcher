@@ -478,11 +478,32 @@ function createSseTail(limit = SSE_TAIL_BYTES) {
     };
 }
 
+// Item 8: only model calls are recorded — POST to a completion, chat,
+// embedding or rerank path (OpenAI-compatible, Anthropic-compatible and
+// llama.cpp native). Health probes, GET /v1/models, /props, /slots,
+// tokenize and the like pass through unrecorded.
+const INFERENCE_PATHS = new Set([
+    "/v1/chat/completions", "/chat/completions",
+    "/v1/completions", "/completions", "/completion",
+    "/v1/embeddings", "/embeddings", "/embedding",
+    "/v1/rerank", "/rerank", "/v1/reranking", "/reranking",
+    "/v1/responses", "/v1/messages", "/infill",
+]);
+function isInferenceRequest(req) {
+    if (String(req?.method || "").toUpperCase() !== "POST") return false;
+    let path = String(req.url || "");
+    const q = path.search(/[?#]/);
+    if (q !== -1) path = path.slice(0, q);
+    // Tolerate an absolute-form request target and a trailing slash.
+    path = path.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, "").replace(/\/+$/, "").toLowerCase();
+    return INFERENCE_PATHS.has(path);
+}
+
 // Items 2-3: one event per client request, called at every dispatch exit.
 // The WeakSet makes "exactly once" hold even if two exits ever overlap.
 const recordedRequests = new WeakSet();
 function recordRequest(t, clientReq, started, f) {
-    if (!telemetry || recordedRequests.has(clientReq)) return;
+    if (!telemetry || recordedRequests.has(clientReq) || !isInferenceRequest(clientReq)) return;
     recordedRequests.add(clientReq);
     try {
         let requestId = clientReq.headers["x-request-id"];
@@ -571,6 +592,8 @@ async function dispatch(t, clientReq, clientRes, body) {
 }
 
 async function dispatchRequest(t, clientReq, clientRes, body, started) {
+    // Usage scanning only for recorded (inference) requests: item 8.
+    const track = telemetry !== null && isInferenceRequest(clientReq);
     const order = candidateIndices(t);
     if (!order.length) {
         clientRes.writeHead(503, { "content-type": "application/json" });
@@ -641,7 +664,7 @@ async function dispatchRequest(t, clientReq, clientRes, body, started) {
             let done = false;
             const bufs = [];
             let bufBytes = 0;
-            const tail = isStream && telemetry ? createSseTail() : null;
+            const tail = isStream && track ? createSseTail() : null;
 
             const commit = () => {
                 if (committed) return;
@@ -666,7 +689,7 @@ async function dispatchRequest(t, clientReq, clientRes, body, started) {
                 }
                 broadcast();
                 resolve({ done: true });
-                if (telemetry) {
+                if (track) {
                     let u = { usage: null, model: null };
                     if (full) u = usageFromBody(full);
                     else if (tail) u = tail.result();
@@ -707,7 +730,7 @@ async function dispatchRequest(t, clientReq, clientRes, body, started) {
                 // Fully buffered non-streaming body: keep it for one usage
                 // parse after the response has gone out.
                 let full = null;
-                if (!committed && telemetry) {
+                if (!committed && track) {
                     full = Buffer.concat(bufs);
                     bufs.length = 0;
                     bufs.push(full);
@@ -1764,4 +1787,5 @@ if (IS_MAIN) main(process.argv.slice(2));
 export {
     dispatch, createProxyServer, newEndpoint, cfg, parseArgs, initTelemetry,
     setTelemetry, telemetryEnabled, telemetryProvider, mapUsage, usageFromBody, createSseTail,
+    isInferenceRequest,
 };
