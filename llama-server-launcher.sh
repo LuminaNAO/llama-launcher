@@ -2254,6 +2254,34 @@ if [[ "${EXTRA_ARGS:-}" =~ --chat-template-file[[:space:]]+([^[:space:]]+) ]]; t
     unset _tmpl _resolved _d
 fi
 
+# ── Resolve the draft model (-md/--model-draft) against MODELS_DIR ───────────
+# Tunes name the drafter by the path it had on the machine they were tuned
+# on. When that file is missing here, look for the same <folder>/<file> (then
+# just <file>) under this machine's models dir, like the main model.
+if [[ "${EXTRA_ARGS:-}" =~ (^|[[:space:]])(-md|--model-draft)[[:space:]]+([^[:space:]]+) ]]; then
+    _md_flag="${BASH_REMATCH[2]}"
+    _md="${BASH_REMATCH[3]}"
+    if [[ ! -f "$_md" && -n "${MODELS_DIR:-}" ]]; then
+        _md_base="$(basename "$_md")"
+        _md_parent="$(basename "$(dirname "$_md")")"
+        _resolved=""
+        for _c in "$MODELS_DIR/$_md_parent/$_md_base" "$MODELS_DIR/$_md_base"; do
+            [[ -f "$_c" ]] && { _resolved="$_c"; break; }
+        done
+        [[ -z "$_resolved" ]] && _resolved="$(find "$MODELS_DIR" -maxdepth 3 -name "$_md_base" -type f -print -quit 2>/dev/null)"
+        if [[ -n "$_resolved" ]]; then
+            EXTRA_ARGS="${EXTRA_ARGS/$_md_flag $_md/$_md_flag $_resolved}"
+            echo "🎯 Draft model: $_resolved"
+        else
+            echo "❌ Draft model not found: $_md"
+            echo "   (also looked for $_md_base under $MODELS_DIR)"
+            echo "   Download it into $MODELS_DIR, or edit -md in the tune's EXTRA_ARGS."
+            exit 1
+        fi
+    fi
+    unset _md_flag _md _md_base _md_parent _resolved _c
+fi
+
 LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
   -m "$model_path"
   -ngl "$NGL"
