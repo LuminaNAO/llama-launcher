@@ -2004,6 +2004,38 @@ if [ -n "${RECOMMENDED_BACKEND:-}" ] && [ "${RECOMMENDED_BACKEND,,}" != "cpu" ];
     fi
 fi
 
+# Distro packages split ggml into per-backend modules (Arch: ggml-cuda,
+# ggml-vulkan, ggml-hip), and llama-server loads every one that is installed.
+# With ggml-cuda and ggml-vulkan both present one NVIDIA card shows up twice
+# (CUDA0 and Vulkan0) and -ngl splits the model across both, so the same VRAM
+# is spent twice and a tune that fits a single-backend build runs out of
+# memory. When the tune names a backend and picks no devices itself, offload
+# only to that backend's devices (the draft model follows --device).
+DEVICE_FLAG=""
+if [ -n "${RECOMMENDED_BACKEND:-}" ] && [ "${RECOMMENDED_BACKEND,,}" != "cpu" ] && \
+   [ "${_rb_found:-0}" -eq 1 ] && \
+   [[ ! " $EXTRA_ARGS " =~ [[:space:]](-dev|--device)[[:space:]=] ]] && \
+   server_supports_flag "--device"; then
+    case "$rb" in
+        cuda)   _dev_prefix="CUDA" ;;
+        hip)    _dev_prefix="ROCm" ;;
+        vulkan) _dev_prefix="Vulkan" ;;
+        *)      _dev_prefix="" ;;
+    esac
+    if [ -n "$_dev_prefix" ]; then
+        _all_devs="$("$LLAMACPP_SERVER_PATH" --list-devices 2>/dev/null \
+            | sed -n -E 's/^[[:space:]]+([A-Za-z]+[0-9]+):.*/\1/p')"
+        _want_devs="$(printf '%s\n' "$_all_devs" | grep -E "^${_dev_prefix}[0-9]+$" | paste -sd, -)"
+        _other_devs="$(printf '%s\n' "$_all_devs" | grep -vE "^${_dev_prefix}[0-9]+$" | grep . | paste -sd, -)"
+        if [ -n "$_want_devs" ] && [ -n "$_other_devs" ]; then
+            DEVICE_FLAG="--device $_want_devs"
+            echo "ℹ️  Devices: using $_want_devs for this $RECOMMENDED_BACKEND tune; ignoring $_other_devs"
+            echo "   (other ggml backends are installed; set --device in EXTRA_ARGS to override)."
+        fi
+    fi
+    unset _dev_prefix _all_devs _want_devs _other_devs
+fi
+
 CACHE_RAM_FLAG=""
 if server_supports_flag "--cache-ram"; then
     CACHE_RAM_FLAG="--cache-ram $CACHE_RAM"
@@ -2225,6 +2257,7 @@ fi
 LAUNCH_CMD=("$LLAMACPP_SERVER_PATH"
   -m "$model_path"
   -ngl "$NGL"
+  ${DEVICE_FLAG:+$DEVICE_FLAG}
   -c "$CONTEXT"
   ${FA_FLAG:+$FA_FLAG}
   --temp "$TEMP"
