@@ -267,7 +267,7 @@ shows unsaved state; `u` reverts the runtime portals to what's on disk.
   another tier would need model-level prompt surgery (append generated
   tokens, continue); out of scope.
 
-## Usage telemetry for tokentail (operator, Manu 2026-10-18)
+## Usage telemetry for tokentail (operator, 2026-10-18)
 
 Goal: every request through waterfall shows up in tokentail with tokens, model, agent and session, so local
 inference has the same per-session/per-agent view as cloudburst. Waterfall stays a stateless router; telemetry
