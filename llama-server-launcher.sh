@@ -68,6 +68,25 @@ canonical_build_type() {
     esac
 }
 
+# True when the package-installed /usr/bin/llama-server can use ggml backend
+# $1 (cuda|hip|vulkan). Distro packages either link the backend directly or
+# ship it as a loadable module (Arch ggml-cuda: /usr/lib/ggml/libggml-cuda.so),
+# which ldd cannot see, so probe the module dirs as well.
+system_has_ggml_backend() {
+    local rb="$1" runtime d
+    case "$rb" in
+        cuda)   runtime='libcudart' ;;
+        hip)    runtime='libamdhip64' ;;
+        vulkan) runtime='libvulkan' ;;
+        *)      runtime="libggml-$rb" ;;
+    esac
+    ldd /usr/bin/llama-server 2>/dev/null | grep -qE "$runtime|libggml-$rb" && return 0
+    for d in /usr/lib/ggml /usr/lib /usr/lib64 /usr/local/lib /usr/bin; do
+        compgen -G "$d/libggml-$rb.so*" >/dev/null && return 0
+    done
+    return 1
+}
+
 # ── Subcommand: stop ────────────────────────────────────────────────────────
 # Stop order matters when slot-save-path is in use: the proxy needs to POST
 # its final save to a still-alive server. Stop proxy first, wait for it to
@@ -694,9 +713,9 @@ else
             if [ -x /usr/bin/llama-server ]; then
                 _sl_sys_ok=1
                 case "$BUILD_TYPE" in
-                    cuda*)   ldd /usr/bin/llama-server 2>/dev/null | grep -qE 'libcudart|libggml-cuda'   || _sl_sys_ok=0 ;;
-                    rocm*)   ldd /usr/bin/llama-server 2>/dev/null | grep -qE 'libamdhip64|libggml-hip'  || _sl_sys_ok=0 ;;
-                    vulkan*) ldd /usr/bin/llama-server 2>/dev/null | grep -qE 'libvulkan|libggml-vulkan' || _sl_sys_ok=0 ;;
+                    cuda*)   system_has_ggml_backend cuda   || _sl_sys_ok=0 ;;
+                    rocm*)   system_has_ggml_backend hip    || _sl_sys_ok=0 ;;
+                    vulkan*) system_has_ggml_backend vulkan || _sl_sys_ok=0 ;;
                 esac
             fi
 
@@ -1970,8 +1989,15 @@ if [ -n "${RECOMMENDED_BACKEND:-}" ] && [ "${RECOMMENDED_BACKEND,,}" != "cpu" ];
     # Probe bin/ and lib/ separately: ls exits nonzero if ANY argument is an
     # unmatched glob, so one combined call false-flags builds that keep their
     # libs in only one of the two dirs.
-    if ! ls "$BUILD_DIR"/bin/libggml-"$rb".so* >/dev/null 2>&1 && \
-       ! ls "$BUILD_DIR"/lib/libggml-"$rb".so* >/dev/null 2>&1; then
+    if [ "$BUILD_TYPE" = "system" ]; then
+        system_has_ggml_backend "$rb" && _rb_found=1 || _rb_found=0
+    elif ls "$BUILD_DIR"/bin/libggml-"$rb".so* >/dev/null 2>&1 || \
+         ls "$BUILD_DIR"/lib/libggml-"$rb".so* >/dev/null 2>&1; then
+        _rb_found=1
+    else
+        _rb_found=0
+    fi
+    if [ "$_rb_found" -eq 0 ]; then
         echo "⚠️  This tune recommends the '$RECOMMENDED_BACKEND' backend, but build '$BUILD_TYPE'"
         echo "   has no libggml-$rb — it will run on whatever backends '$BUILD_TYPE' provides."
         echo "   Performance and tune EXTRA_ARGS device selections may not apply."
